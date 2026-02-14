@@ -1,0 +1,62 @@
+[detection_zone]
+start_x1 = 10
+start_x2 = 180
+y1 = 180
+y2 = 450
+gateway_width = 10
+
+[camera]
+webcam_index = 0
+mjpeg = true
+fps_override = 0
+width = 0
+height = 0
+flip_image = false
+flip_view = false
+darkness = 0
+ps4 = false
+saturation = 0.0
+exposure = 0.0
+auto_wb = 0.0
+white_balance_blue = 0.0
+white_balance_red = 0.0
+brightness = 0.0
+contrast = 0.0
+hue = 0.0
+gain = 0.0
+sharpness = 0.0
+auto_exposure = 0.0
+gamma = 0.0
+zoom = 0.0
+focus = 0.0
+autofocus = 0.0
+
+[ball]
+color_preset = "yellow"
+fixed_radius = 0
+min_radius = 5
+start_stability_frames = 15
+start_position_tolerance = 3
+
+[shot]
+min_speed_mph = 0.5
+max_speed_mph = 25.0
+min_time_seconds = 0.5
+max_hla_degrees = 40.0
+hla_consistency_threshold = 30.0
+min_exit_distance_px = 50
+
+[connection]
+mode = "gspro_direct"
+gspro_host = "127.0.0.1"
+gspro_port = 921
+http_url = "http://127.0.0.1:8888/putting"
+device_id = "WebcamPutting"
+heartbeat_interval = 5.0
+
+[replay]
+enabled = false
+show_replay = true
+camera_index = 0
+ps4 = false
+duration_seconds = 3.0

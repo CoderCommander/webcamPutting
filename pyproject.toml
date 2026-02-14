@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "webcam-putting"
+version = "2.0.0"
+description = "Webcam-based golf putting simulator for GSPro"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "customtkinter>=5.2",
+    "Pillow>=10.0",
+    "tomli>=2.0; python_version < '3.11'",
+    "tomli-w>=1.0",
+    "platformdirs>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+build = [
+    "pyinstaller>=6.0",
+]
+
+[project.scripts]
+webcam-putting = "webcam_putting.__main__:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2",
+    "cv2.*",
+    "customtkinter",
+    "customtkinter.*",
+    "PIL",
+    "PIL.*",
+    "tomli",
+    "tomli_w",
+]
+ignore_missing_imports = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/webcam_putting"]
