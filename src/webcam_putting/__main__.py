@@ -12,7 +12,8 @@ from webcam_putting.config import CONFIG_FILE, load_config, migrate_from_ini, sa
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Webcam-based golf putting simulator for GSPro"
+        description="Webcam-based golf putting simulator for GSPro. "
+        "Run with: python -m webcam_putting",
     )
     parser.add_argument(
         "-v", "--video",

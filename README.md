@@ -12,20 +12,26 @@ pip install -e .
 
 ```bash
 # Run with defaults
-webcam-putting
+python -m webcam_putting
 
 # Specify ball color and webcam
-webcam-putting -c orange2 -w 1
+python -m webcam_putting -c orange2 -w 1
 
 # Test with a video file
-webcam-putting -v path/to/video.mp4
+python -m webcam_putting -v path/to/video.mp4
 
 # Debug mode (shows color detection mask)
-webcam-putting -d
+python -m webcam_putting -d
+
+# Headless mode (OpenCV windows only, no GUI)
+python -m webcam_putting --no-gui
 
 # Migrate from old config.ini
-webcam-putting --migrate-ini path/to/config.ini
+python -m webcam_putting --migrate-ini path/to/config.ini
 ```
+
+> **Note:** On some systems, `webcam-putting` may also work as a shortcut command.
+> If it doesn't (common on Windows), use `python -m webcam_putting`.
 
 ## Configuration
 

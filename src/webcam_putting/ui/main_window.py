@@ -9,7 +9,7 @@ from collections.abc import Callable
 import customtkinter as ctk
 
 from webcam_putting.color_presets import PRESET_DESCRIPTIONS
-from webcam_putting.config import AppConfig
+from webcam_putting.config import AppConfig, save_config
 from webcam_putting.ui.settings_panel import SettingsPanel
 from webcam_putting.ui.video_panel import VideoPanel
 
@@ -65,6 +65,7 @@ class MainWindow(ctk.CTk):
         self._on_color_change = on_color_change
         self._on_settings_changed = on_settings_changed
         self._is_running = False
+        self._edit_zone_active = False
         self._settings_window: SettingsPanel | None = None
         self._shot_history: list[ShotHistoryEntry] = []
 
@@ -203,7 +204,14 @@ class MainWindow(ctk.CTk):
         ctk.CTkButton(
             parent, text="Settings", command=self._open_settings,
             width=90, fg_color="gray35", hover_color="gray30",
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 8))
+
+        # Edit Zone toggle button
+        self._edit_zone_btn = ctk.CTkButton(
+            parent, text="Edit Zone", command=self._toggle_edit_zone,
+            width=100, fg_color="gray35", hover_color="gray30",
+        )
+        self._edit_zone_btn.pack(side="left")
 
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
@@ -261,7 +269,39 @@ class MainWindow(ctk.CTk):
         """Stop video panel polling."""
         self._video_panel.stop()
 
+    @property
+    def edit_zone_mode(self) -> bool:
+        """Whether zone editing is active."""
+        return self._edit_zone_active
+
     # ---- Internal callbacks ----
+
+    def _toggle_edit_zone(self) -> None:
+        """Toggle detection zone edit mode."""
+        if self._edit_zone_active:
+            # Exit edit mode
+            self._edit_zone_active = False
+            self._edit_zone_btn.configure(
+                text="Edit Zone", fg_color="gray35", hover_color="gray30",
+            )
+            self._video_panel.set_edit_mode(False)
+            # Save updated zone to disk
+            try:
+                save_config(self._config)
+                logger.info("Detection zone saved")
+            except Exception:
+                logger.error("Failed to save zone config", exc_info=True)
+            if self._on_settings_changed:
+                self._on_settings_changed()
+        else:
+            # Enter edit mode
+            self._edit_zone_active = True
+            self._edit_zone_btn.configure(
+                text="Done Editing", fg_color="#cc7700", hover_color="#aa6600",
+            )
+            self._video_panel.set_edit_mode(
+                True, self._config.detection_zone,
+            )
 
     def _toggle_running(self) -> None:
         """Toggle start/stop."""
@@ -310,6 +350,8 @@ class MainWindow(ctk.CTk):
 
     def _on_window_close(self) -> None:
         """Handle window close."""
+        if self._edit_zone_active:
+            self._toggle_edit_zone()  # Save zone before closing
         self._video_panel.stop()
         if self._on_stop:
             self._on_stop()

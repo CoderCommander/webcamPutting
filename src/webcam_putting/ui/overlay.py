@@ -17,6 +17,9 @@ COLOR_WHITE = (255, 255, 255)
 COLOR_CYAN = (255, 255, 0)
 COLOR_GRAY = (140, 140, 140)
 COLOR_DARK_GREEN = (0, 180, 0)
+COLOR_BLACK = (0, 0, 0)
+
+_HANDLE_SIZE = 5  # Half-size of handle square in pixels
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.45
@@ -27,10 +30,22 @@ def draw_detection_zones(
     frame: np.ndarray,
     zone: DetectionZone,
     state: ShotState,
+    edit_mode: bool = False,
 ) -> None:
     """Draw start zone and detection gateway rectangles."""
     gateway_x1 = zone.start_x2 + zone.gateway_width
     gateway_x2 = gateway_x1 + zone.gateway_width
+
+    # Semi-transparent yellow fill when editing
+    if edit_mode:
+        overlay = frame.copy()
+        cv2.rectangle(
+            overlay,
+            (zone.start_x1, zone.y1),
+            (zone.start_x2, zone.y2),
+            COLOR_YELLOW, -1,
+        )
+        cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
 
     # Start zone (yellow)
     cv2.rectangle(
@@ -48,6 +63,30 @@ def draw_detection_zones(
         (gateway_x2, zone.y2),
         gw_color, 2,
     )
+
+    # Draw drag handles when editing
+    if edit_mode:
+        _draw_zone_handles(frame, zone)
+
+
+def _draw_zone_handles(frame: np.ndarray, zone: DetectionZone) -> None:
+    """Draw drag handles at corners and edge midpoints of the start zone."""
+    x1, x2 = zone.start_x1, zone.start_x2
+    y1, y2 = zone.y1, zone.y2
+    mid_x = (x1 + x2) // 2
+    mid_y = (y1 + y2) // 2
+    s = _HANDLE_SIZE
+
+    handles = [
+        (x1, y1), (x2, y1), (x1, y2), (x2, y2),
+        (mid_x, y1), (mid_x, y2), (x1, mid_y), (x2, mid_y),
+    ]
+    for hx, hy in handles:
+        cv2.rectangle(frame, (hx - s, hy - s), (hx + s, hy + s), COLOR_BLACK, -1)
+        cv2.rectangle(
+            frame, (hx - s + 1, hy - s + 1), (hx + s - 1, hy + s - 1),
+            COLOR_WHITE, -1,
+        )
 
 
 def draw_ball_marker(
@@ -85,13 +124,14 @@ def draw_overlay(
     last_start: tuple[int, int],
     last_end: tuple[int, int],
     shot_count: int,
+    edit_mode: bool = False,
 ) -> None:
     """Draw the complete HUD overlay onto a frame.
 
     This is the single entry point — call this from the processing loop
     after detection/tracking but before handing the frame to the UI.
     """
-    draw_detection_zones(frame, zone, state)
+    draw_detection_zones(frame, zone, state, edit_mode=edit_mode)
     draw_ball_marker(frame, detection)
     draw_last_shot_trajectory(frame, last_start, last_end)
 

@@ -1,4 +1,4 @@
-"""Settings panel — tabbed dialog for all configuration options."""
+"""Settings panel — two-tab dialog: Setup (essentials) and Advanced."""
 
 from __future__ import annotations
 
@@ -16,16 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 class SettingsPanel(ctk.CTkToplevel):
-    """Tabbed settings dialog.
+    """Settings dialog with two tabs: Setup and Advanced.
 
-    Tabs:
-    - Detection: zone sliders (x1, x2, y1, y2, gateway width)
-    - Camera: webcam index, MJPEG, FPS, darkness, flip
-    - Ball Color: preset dropdown
-    - Connection: GSPro direct vs HTTP, host, port
+    Setup tab: ball color, webcam index, flip image, connection mode/host.
+    Advanced tab: MJPEG, flip view, FPS, darkness, fixed radius, gateway width,
+                  port, device ID, HTTP URL.
 
-    Changes are applied to the config object immediately (for live preview)
-    but only saved to disk when the dialog is closed.
+    Detection zone is NOT here — it's edited via mouse drag on the video panel.
     """
 
     def __init__(
@@ -37,25 +34,21 @@ class SettingsPanel(ctk.CTkToplevel):
     ):
         super().__init__(master, **kwargs)
         self.title("Settings")
-        self.geometry("480x520")
+        self.geometry("480x480")
         self.resizable(False, False)
 
         self._config = config
         self._on_close = on_close
 
         # Tabview
-        self._tabview = ctk.CTkTabview(self, width=460, height=440)
+        self._tabview = ctk.CTkTabview(self, width=460, height=400)
         self._tabview.pack(padx=10, pady=(10, 5), fill="both", expand=True)
 
-        self._tabview.add("Detection")
-        self._tabview.add("Camera")
-        self._tabview.add("Ball Color")
-        self._tabview.add("Connection")
+        self._tabview.add("Setup")
+        self._tabview.add("Advanced")
 
-        self._build_detection_tab()
-        self._build_camera_tab()
-        self._build_ball_color_tab()
-        self._build_connection_tab()
+        self._build_setup_tab()
+        self._build_advanced_tab()
 
         # Save & Close button
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -74,47 +67,95 @@ class SettingsPanel(ctk.CTkToplevel):
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self._save_and_close)
 
-    # ---- Detection Tab ----
+    # ---- Setup Tab ----
 
-    def _build_detection_tab(self) -> None:
-        tab = self._tabview.tab("Detection")
-        z = self._config.detection_zone
-
-        ctk.CTkLabel(
-            tab, text="Detection Zone", font=("", 14, "bold"),
-        ).pack(anchor="w", pady=(5, 10))
-
-        self._zone_x1 = self._add_slider(tab, "Start X1", 0, 400, z.start_x1)
-        self._zone_x2 = self._add_slider(tab, "Start X2", 0, 600, z.start_x2)
-        self._zone_y1 = self._add_slider(tab, "Y1 (Top)", 0, 500, z.y1)
-        self._zone_y2 = self._add_slider(tab, "Y2 (Bottom)", 0, 700, z.y2)
-        self._gateway_w = self._add_slider(tab, "Gateway Width", 5, 50, z.gateway_width)
-
-    # ---- Camera Tab ----
-
-    def _build_camera_tab(self) -> None:
-        tab = self._tabview.tab("Camera")
+    def _build_setup_tab(self) -> None:
+        tab = self._tabview.tab("Setup")
+        b = self._config.ball
         c = self._config.camera
+        conn = self._config.connection
 
+        # Ball Color
         ctk.CTkLabel(
-            tab, text="Camera Settings", font=("", 14, "bold"),
-        ).pack(anchor="w", pady=(5, 10))
+            tab, text="Ball Color", font=("", 14, "bold"),
+        ).pack(anchor="w", pady=(5, 5))
 
-        # Webcam index
+        preset_names = list(PRESETS.keys())
+        preset_labels = [PRESET_DESCRIPTIONS.get(n, n) for n in preset_names]
+        self._label_to_preset = dict(
+            zip(preset_labels, preset_names, strict=True),
+        )
+        self._preset_to_label = dict(
+            zip(preset_names, preset_labels, strict=True),
+        )
+        current_label = self._preset_to_label.get(
+            b.color_preset, "Yellow (bright)",
+        )
+        self._color_var = ctk.StringVar(value=current_label)
+        ctk.CTkOptionMenu(
+            tab, variable=self._color_var, values=preset_labels, width=250,
+        ).pack(anchor="w", pady=(0, 10))
+
+        # Camera
+        ctk.CTkLabel(
+            tab, text="Camera", font=("", 14, "bold"),
+        ).pack(anchor="w", pady=(10, 5))
+
         idx_frame = ctk.CTkFrame(tab, fg_color="transparent")
         idx_frame.pack(fill="x", pady=3)
-        ctk.CTkLabel(idx_frame, text="Webcam Index:", width=120, anchor="w").pack(side="left")
+        ctk.CTkLabel(
+            idx_frame, text="Webcam Index:", width=120, anchor="w",
+        ).pack(side="left")
         self._cam_index = ctk.CTkEntry(idx_frame, width=60)
         self._cam_index.insert(0, str(c.webcam_index))
         self._cam_index.pack(side="left", padx=5)
 
-        # Toggles
-        self._mjpeg_var = ctk.BooleanVar(value=c.mjpeg)
-        ctk.CTkCheckBox(tab, text="MJPEG Codec", variable=self._mjpeg_var).pack(anchor="w", pady=3)
-
         self._flip_var = ctk.BooleanVar(value=c.flip_image)
         ctk.CTkCheckBox(
             tab, text="Flip Image (Left-handed)", variable=self._flip_var,
+        ).pack(anchor="w", pady=3)
+
+        # Connection
+        ctk.CTkLabel(
+            tab, text="Connection", font=("", 14, "bold"),
+        ).pack(anchor="w", pady=(10, 5))
+
+        self._mode_var = ctk.StringVar(value=conn.mode)
+        ctk.CTkRadioButton(
+            tab, text="Direct GSPro (port 921)",
+            variable=self._mode_var, value="gspro_direct",
+        ).pack(anchor="w", pady=2)
+        ctk.CTkRadioButton(
+            tab, text="HTTP Middleware",
+            variable=self._mode_var, value="http_middleware",
+        ).pack(anchor="w", pady=2)
+
+        host_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        host_frame.pack(fill="x", pady=5)
+        ctk.CTkLabel(
+            host_frame, text="Host:", width=80, anchor="w",
+        ).pack(side="left")
+        self._host_entry = ctk.CTkEntry(host_frame, width=180)
+        self._host_entry.insert(0, conn.gspro_host)
+        self._host_entry.pack(side="left", padx=5)
+
+    # ---- Advanced Tab ----
+
+    def _build_advanced_tab(self) -> None:
+        tab = self._tabview.tab("Advanced")
+        c = self._config.camera
+        b = self._config.ball
+        z = self._config.detection_zone
+        conn = self._config.connection
+
+        ctk.CTkLabel(
+            tab, text="Advanced Settings", font=("", 14, "bold"),
+        ).pack(anchor="w", pady=(5, 10))
+
+        # Camera advanced
+        self._mjpeg_var = ctk.BooleanVar(value=c.mjpeg)
+        ctk.CTkCheckBox(
+            tab, text="MJPEG Codec", variable=self._mjpeg_var,
         ).pack(anchor="w", pady=3)
 
         self._flip_view_var = ctk.BooleanVar(value=c.flip_view)
@@ -122,103 +163,47 @@ class SettingsPanel(ctk.CTkToplevel):
             tab, text="Flip View", variable=self._flip_view_var,
         ).pack(anchor="w", pady=3)
 
-        # FPS override
-        self._fps_override = self._add_slider(tab, "FPS Override (0=auto)", 0, 120, c.fps_override)
-
-        # Darkness
-        self._darkness = self._add_slider(tab, "Darkness", 0, 200, c.darkness)
-
-    # ---- Ball Color Tab ----
-
-    def _build_ball_color_tab(self) -> None:
-        tab = self._tabview.tab("Ball Color")
-        b = self._config.ball
-
-        ctk.CTkLabel(
-            tab, text="Ball Color Preset", font=("", 14, "bold"),
-        ).pack(anchor="w", pady=(5, 10))
-
-        # Dropdown with all presets
-        preset_names = list(PRESETS.keys())
-        preset_labels = [PRESET_DESCRIPTIONS.get(n, n) for n in preset_names]
-
-        # Map label -> name for lookup
-        self._label_to_preset = dict(zip(preset_labels, preset_names, strict=True))
-        self._preset_to_label = dict(zip(preset_names, preset_labels, strict=True))
-
-        current_label = self._preset_to_label.get(b.color_preset, "Yellow (bright)")
-
-        self._color_var = ctk.StringVar(value=current_label)
-        self._color_dropdown = ctk.CTkOptionMenu(
-            tab, variable=self._color_var, values=preset_labels,
-            width=250,
+        self._fps_override = self._add_slider(
+            tab, "FPS Override (0=auto)", 0, 120, c.fps_override,
         )
-        self._color_dropdown.pack(anchor="w", pady=5)
+        self._darkness = self._add_slider(
+            tab, "Darkness", 0, 200, c.darkness,
+        )
 
-        # Fixed radius
-        ctk.CTkLabel(tab, text="", font=("", 2)).pack()  # spacer
-        self._fixed_radius = self._add_slider(tab, "Fixed Radius (0=auto)", 0, 50, b.fixed_radius)
+        # Ball advanced
+        self._fixed_radius = self._add_slider(
+            tab, "Fixed Radius (0=auto)", 0, 50, b.fixed_radius,
+        )
 
-        # Custom HSV note
-        if b.custom_hsv:
-            ctk.CTkLabel(
-                tab,
-                text="Custom HSV values are set in config.\nPreset selection will override them.",
-                font=("", 11), text_color="gray60",
-            ).pack(anchor="w", pady=(10, 0))
+        # Detection advanced
+        self._gateway_w = self._add_slider(
+            tab, "Gateway Width", 5, 50, z.gateway_width,
+        )
 
-    # ---- Connection Tab ----
-
-    def _build_connection_tab(self) -> None:
-        tab = self._tabview.tab("Connection")
-        conn = self._config.connection
-
-        ctk.CTkLabel(
-            tab, text="GSPro Connection", font=("", 14, "bold"),
-        ).pack(anchor="w", pady=(5, 10))
-
-        # Mode selection
-        self._mode_var = ctk.StringVar(value=conn.mode)
-        mode_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        mode_frame.pack(fill="x", pady=5)
-
-        ctk.CTkRadioButton(
-            mode_frame, text="Direct GSPro (port 921)",
-            variable=self._mode_var, value="gspro_direct",
-        ).pack(anchor="w", pady=2)
-        ctk.CTkRadioButton(
-            mode_frame, text="HTTP Middleware (port 8888)",
-            variable=self._mode_var, value="http_middleware",
-        ).pack(anchor="w", pady=2)
-
-        # Host
-        host_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        host_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(host_frame, text="Host:", width=80, anchor="w").pack(side="left")
-        self._host_entry = ctk.CTkEntry(host_frame, width=180)
-        self._host_entry.insert(0, conn.gspro_host)
-        self._host_entry.pack(side="left", padx=5)
-
-        # Port
+        # Connection advanced
         port_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        port_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(port_frame, text="Port:", width=80, anchor="w").pack(side="left")
+        port_frame.pack(fill="x", pady=3)
+        ctk.CTkLabel(
+            port_frame, text="Port:", width=80, anchor="w",
+        ).pack(side="left")
         self._port_entry = ctk.CTkEntry(port_frame, width=80)
         self._port_entry.insert(0, str(conn.gspro_port))
         self._port_entry.pack(side="left", padx=5)
 
-        # Device ID
         did_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        did_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(did_frame, text="Device ID:", width=80, anchor="w").pack(side="left")
+        did_frame.pack(fill="x", pady=3)
+        ctk.CTkLabel(
+            did_frame, text="Device ID:", width=80, anchor="w",
+        ).pack(side="left")
         self._device_id_entry = ctk.CTkEntry(did_frame, width=180)
         self._device_id_entry.insert(0, conn.device_id)
         self._device_id_entry.pack(side="left", padx=5)
 
-        # HTTP URL (for middleware mode)
         url_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        url_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(url_frame, text="HTTP URL:", width=80, anchor="w").pack(side="left")
+        url_frame.pack(fill="x", pady=3)
+        ctk.CTkLabel(
+            url_frame, text="HTTP URL:", width=80, anchor="w",
+        ).pack(side="left")
         self._http_url_entry = ctk.CTkEntry(url_frame, width=280)
         self._http_url_entry.insert(0, conn.http_url)
         self._http_url_entry.pack(side="left", padx=5)
@@ -254,13 +239,10 @@ class SettingsPanel(ctk.CTkToplevel):
 
     def _apply_to_config(self) -> None:
         """Read all widget values into the config object."""
-        z = self._config.detection_zone
-        z.start_x1 = int(self._zone_x1.get())
-        z.start_x2 = int(self._zone_x2.get())
-        z.y1 = int(self._zone_y1.get())
-        z.y2 = int(self._zone_y2.get())
-        z.gateway_width = int(self._gateway_w.get())
+        # Detection zone (only gateway width — zone position is via mouse drag)
+        self._config.detection_zone.gateway_width = int(self._gateway_w.get())
 
+        # Camera
         c = self._config.camera
         with contextlib.suppress(ValueError):
             c.webcam_index = int(self._cam_index.get())
@@ -270,13 +252,16 @@ class SettingsPanel(ctk.CTkToplevel):
         c.fps_override = int(self._fps_override.get())
         c.darkness = int(self._darkness.get())
 
+        # Ball
         b = self._config.ball
         selected_label = self._color_var.get()
-        b.color_preset = self._label_to_preset.get(selected_label, b.color_preset)
+        b.color_preset = self._label_to_preset.get(
+            selected_label, b.color_preset,
+        )
         b.fixed_radius = int(self._fixed_radius.get())
-        # Changing preset clears custom HSV
-        b.custom_hsv = None
+        b.custom_hsv = None  # Changing preset clears custom HSV
 
+        # Connection
         conn = self._config.connection
         conn.mode = self._mode_var.get()
         conn.gspro_host = self._host_entry.get().strip()

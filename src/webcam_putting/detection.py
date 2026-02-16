@@ -35,7 +35,7 @@ class BallDetector:
     def __init__(
         self,
         hsv_range: HSVRange,
-        blur_kernel: tuple[int, int] = (11, 11),
+        blur_kernel: tuple[int, int] = (5, 5),
         min_radius: int = 5,
     ):
         self.hsv_range = hsv_range

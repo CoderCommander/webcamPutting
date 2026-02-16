@@ -76,6 +76,10 @@ class PuttingApp:
         self._fps_queue: deque[float] = deque(maxlen=30)
         self._actual_fps: float = 0.0
 
+        # Adaptive frame skipping
+        self._skip_counter: int = 0
+        self._target_process_time: float = 1.0 / 30.0  # target 30fps processing
+
         # Threading
         self._running = False
         self._frame_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=3)  # type: ignore[type-arg]
@@ -194,12 +198,17 @@ class PuttingApp:
                 if elapsed > 0:
                     self._actual_fps = (len(self._fps_queue) - 1) / elapsed
 
-            # Read frame
+            # Read frame (always read to drain camera buffer)
             frame = self._camera.read()
             if frame is None:
                 logger.warning("No frame received, stopping")
                 self._running = False
                 break
+
+            # Adaptive frame skipping: skip processing but keep capturing
+            if self._skip_counter > 0:
+                self._skip_counter -= 1
+                continue
 
             # Resize for processing
             display_frame = resize_with_aspect_ratio(frame, width=640)
@@ -227,6 +236,7 @@ class PuttingApp:
                 self._handle_shot(shot_result)
 
             # Draw overlays onto display frame
+            edit_mode = self._window.edit_zone_mode if self._window else False
             draw_overlay(
                 frame=display_frame,
                 zone=self.config.detection_zone,
@@ -240,6 +250,7 @@ class PuttingApp:
                 last_start=self._tracker.last_shot_start,
                 last_end=self._tracker.last_shot_end,
                 shot_count=self._tracker.shot_count,
+                edit_mode=edit_mode,
             )
 
             # Put frame into queue (drop old frames if queue is full)
@@ -250,6 +261,12 @@ class PuttingApp:
                     self._frame_queue.get_nowait()
                 with contextlib.suppress(queue.Full):
                     self._frame_queue.put_nowait(display_frame)
+
+            # Adaptive skip: if processing is slow, skip next frame(s)
+            process_duration = time.perf_counter() - frame_time
+            if process_duration > self._target_process_time:
+                frames_behind = int(process_duration / self._target_process_time)
+                self._skip_counter = min(frames_behind, 2)
 
             # Periodic UI updates (~4 times per second for labels)
             if self._window and (frame_time - last_ui_update) > 0.25:
@@ -363,9 +380,16 @@ class PuttingApp:
                 if elapsed > 0:
                     self._actual_fps = (len(self._fps_queue) - 1) / elapsed
 
+            # Read frame (always read to drain camera buffer)
             frame = self._camera.read()
             if frame is None:
                 break
+
+            # Adaptive frame skipping
+            if self._skip_counter > 0:
+                self._skip_counter -= 1
+                cv2.waitKey(1)
+                continue
 
             display_frame = resize_with_aspect_ratio(frame, width=640)
 
@@ -403,6 +427,12 @@ class PuttingApp:
             )
 
             cv2.imshow(window_name, display_frame)
+
+            # Adaptive skip calculation
+            process_duration = time.perf_counter() - frame_time
+            if process_duration > self._target_process_time:
+                frames_behind = int(process_duration / self._target_process_time)
+                self._skip_counter = min(frames_behind, 2)
 
             if self._debug:
                 mask = self._detector.get_mask(

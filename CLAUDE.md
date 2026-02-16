@@ -19,20 +19,17 @@ pip install -e ".[dev]"
 # Run tests
 pytest tests/ -v
 
-# Run the application
-webcam-putting                         # uses default config
-webcam-putting -c orange2 -w 1         # orange ball, webcam 1
-webcam-putting -v path/to/video.mp4    # test with video file
-webcam-putting -d                      # debug mode (shows mask)
-webcam-putting --no-gui                # headless mode (OpenCV windows only)
-webcam-putting --migrate-ini cam-putting-py/config.ini  # migrate old config
+# Run the application (python -m is most reliable on Windows)
+python -m webcam_putting                         # uses default config
+python -m webcam_putting -c orange2 -w 1         # orange ball, webcam 1
+python -m webcam_putting -v path/to/video.mp4    # test with video file
+python -m webcam_putting -d                      # debug mode (shows mask)
+python -m webcam_putting --no-gui                # headless mode (OpenCV windows only)
+python -m webcam_putting --migrate-ini cam-putting-py/config.ini  # migrate old config
 
 # Lint and type-check
 ruff check src/ tests/
 mypy src/webcam_putting/
-
-# Run directly
-python -m webcam_putting
 
 # Build standalone executable (Windows)
 pip install -e ".[build]"
