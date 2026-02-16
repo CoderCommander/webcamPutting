@@ -34,7 +34,7 @@ class SettingsPanel(ctk.CTkToplevel):
     ):
         super().__init__(master, **kwargs)
         self.title("Settings")
-        self.geometry("480x480")
+        self.geometry("480x540")
         self.resizable(False, False)
 
         self._config = config
@@ -114,6 +114,18 @@ class SettingsPanel(ctk.CTkToplevel):
         ctk.CTkCheckBox(
             tab, text="Flip Image (Left-handed)", variable=self._flip_var,
         ).pack(anchor="w", pady=3)
+
+        self._autofocus_var = ctk.BooleanVar(value=bool(c.autofocus))
+        ctk.CTkCheckBox(
+            tab, text="Autofocus", variable=self._autofocus_var,
+            command=self._on_autofocus_toggle,
+        ).pack(anchor="w", pady=3)
+
+        self._focus_slider = self._add_slider(
+            tab, "Manual Focus", 0, 255, int(c.focus),
+        )
+        if self._autofocus_var.get():
+            self._focus_slider.configure(state="disabled")
 
         # Connection
         ctk.CTkLabel(
@@ -208,6 +220,15 @@ class SettingsPanel(ctk.CTkToplevel):
         self._http_url_entry.insert(0, conn.http_url)
         self._http_url_entry.pack(side="left", padx=5)
 
+    # ---- Callbacks ----
+
+    def _on_autofocus_toggle(self) -> None:
+        """Enable/disable focus slider based on autofocus state."""
+        if self._autofocus_var.get():
+            self._focus_slider.configure(state="disabled")
+        else:
+            self._focus_slider.configure(state="normal")
+
     # ---- Helpers ----
 
     def _add_slider(
@@ -251,6 +272,11 @@ class SettingsPanel(ctk.CTkToplevel):
         c.flip_view = self._flip_view_var.get()
         c.fps_override = int(self._fps_override.get())
         c.darkness = int(self._darkness.get())
+        c.autofocus = 1.0 if self._autofocus_var.get() else 0.0
+        if self._autofocus_var.get():
+            c.focus = 0.0
+        else:
+            c.focus = float(int(self._focus_slider.get()))
 
         # Ball
         b = self._config.ball
