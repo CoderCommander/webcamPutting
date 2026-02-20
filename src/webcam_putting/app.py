@@ -236,6 +236,11 @@ class PuttingApp:
             if shot_result is not None:
                 self._handle_shot(shot_result)
 
+            # Build trail data for overlay
+            active_trail: list[tuple[int, int]] = []
+            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+                active_trail = [(x, y) for x, y, _t in self._tracker.positions]
+
             # Draw overlays onto display frame
             edit_mode = self._window.edit_zone_mode if self._window else False
             draw_overlay(
@@ -252,6 +257,8 @@ class PuttingApp:
                 last_end=self._tracker.last_shot_end,
                 shot_count=self._tracker.shot_count,
                 edit_mode=edit_mode,
+                active_trail=active_trail,
+                last_shot_trail=self._tracker.last_shot_positions,
             )
 
             # Put frame into queue (drop old frames if queue is full)
@@ -275,12 +282,16 @@ class PuttingApp:
                 fps = self._actual_fps
                 state = self._tracker.state.value
                 connected = self._gspro.is_connected
+                shot_count = self._tracker.shot_count
                 # Schedule UI updates on the main thread
                 with contextlib.suppress(RuntimeError):
                     self._window.after(0, self._window.update_fps, fps)
                     self._window.after(0, self._window.update_state, state)
                     self._window.after(
                         0, self._window.update_connection_status, connected
+                    )
+                    self._window.after(
+                        0, self._window.update_shot_count, shot_count
                     )
 
     def _handle_shot(self, shot_result: object) -> None:
@@ -324,6 +335,9 @@ class PuttingApp:
         self._tracker.last_shot_hla = shot_data.hla_degrees
         self._tracker.last_shot_start = shot_result.start_position
         self._tracker.last_shot_end = shot_result.end_position
+        self._tracker.last_shot_positions = [
+            (x, y) for x, y, _t in shot_result.positions
+        ]
 
         # Send to GSPro
         response = self._gspro.send_shot(shot_data.speed_mph, shot_data.hla_degrees)
@@ -412,6 +426,11 @@ class PuttingApp:
             if shot_result is not None:
                 self._handle_shot(shot_result)
 
+            # Build trail data for overlay
+            active_trail: list[tuple[int, int]] = []
+            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+                active_trail = [(x, y) for x, y, _t in self._tracker.positions]
+
             draw_overlay(
                 frame=display_frame,
                 zone=zone,
@@ -425,6 +444,8 @@ class PuttingApp:
                 last_start=self._tracker.last_shot_start,
                 last_end=self._tracker.last_shot_end,
                 shot_count=self._tracker.shot_count,
+                active_trail=active_trail,
+                last_shot_trail=self._tracker.last_shot_positions,
             )
 
             cv2.imshow(window_name, display_frame)

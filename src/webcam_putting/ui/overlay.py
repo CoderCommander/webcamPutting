@@ -100,15 +100,38 @@ def draw_ball_marker(
     cv2.circle(frame, (detection.x, detection.y), 2, COLOR_GREEN, -1)
 
 
-def draw_last_shot_trajectory(
+def draw_ball_trail(
     frame: np.ndarray,
-    start: tuple[int, int],
-    end: tuple[int, int],
+    positions: list[tuple[int, int]],
+    color: tuple[int, int, int] = COLOR_CYAN,
+    max_dots: int = 30,
+    dot_radius: int = 3,
 ) -> None:
-    """Draw trajectory line from last shot."""
-    if start == (0, 0) and end == (0, 0):
+    """Draw golf-simulator-style dotted trail along ball path.
+
+    Renders evenly-spaced marker dots with a brightness fade
+    from dim (oldest) to bright (newest), each with a thin white outline.
+    """
+    if len(positions) < 2:
         return
-    cv2.line(frame, start, end, COLOR_CYAN, 2)
+
+    # Subsample to max_dots evenly-spaced points
+    if len(positions) > max_dots:
+        step = len(positions) / max_dots
+        indices = [int(i * step) for i in range(max_dots)]
+        if indices[-1] != len(positions) - 1:
+            indices.append(len(positions) - 1)
+        sampled = [positions[i] for i in indices]
+    else:
+        sampled = positions
+
+    n = len(sampled)
+    for i, (x, y) in enumerate(sampled):
+        # Brightness ramp: oldest ~30%, newest 100%
+        alpha = 0.3 + 0.7 * (i / max(1, n - 1))
+        c = (int(color[0] * alpha), int(color[1] * alpha), int(color[2] * alpha))
+        cv2.circle(frame, (x, y), dot_radius, c, -1)
+        cv2.circle(frame, (x, y), dot_radius, COLOR_WHITE, 1)
 
 
 def draw_overlay(
@@ -125,6 +148,8 @@ def draw_overlay(
     last_end: tuple[int, int],
     shot_count: int,
     edit_mode: bool = False,
+    active_trail: list[tuple[int, int]] | None = None,
+    last_shot_trail: list[tuple[int, int]] | None = None,
 ) -> None:
     """Draw the complete HUD overlay onto a frame.
 
@@ -133,7 +158,12 @@ def draw_overlay(
     """
     draw_detection_zones(frame, zone, state, edit_mode=edit_mode)
     draw_ball_marker(frame, detection)
-    draw_last_shot_trajectory(frame, last_start, last_end)
+
+    # Ball trails (golf simulator stripe style)
+    if last_shot_trail:
+        draw_ball_trail(frame, last_shot_trail, color=COLOR_CYAN)
+    if active_trail:
+        draw_ball_trail(frame, active_trail, color=COLOR_GREEN, dot_radius=4)
 
     # --- Status text (top-left) ---
     y = 18

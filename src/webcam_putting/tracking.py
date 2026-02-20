@@ -75,6 +75,7 @@ class BallTracker:
         self.last_shot_hla: float = 0.0
         self.last_shot_start: tuple[int, int] = (0, 0)
         self.last_shot_end: tuple[int, int] = (0, 0)
+        self.last_shot_positions: list[tuple[int, int]] = []
 
     @property
     def state(self) -> ShotState:
@@ -87,6 +88,11 @@ class BallTracker:
     @property
     def start_circle(self) -> tuple[int, int, int]:
         return self._start_circle
+
+    @property
+    def positions(self) -> list[tuple[int, int, float]]:
+        """Current tracked positions (for real-time trail display)."""
+        return list(self._positions)
 
     @property
     def px_mm_ratio(self) -> float:

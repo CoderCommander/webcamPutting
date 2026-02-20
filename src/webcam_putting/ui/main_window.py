@@ -179,6 +179,11 @@ class MainWindow(ctk.CTk):
         )
         self._state_label.pack(side="right", padx=6, pady=3)
 
+        self._shot_count_label = ctk.CTkLabel(
+            fps_frame, text="Shots: 0", font=("", 12), text_color="gray60",
+        )
+        self._shot_count_label.pack(side="left", padx=6, pady=3)
+
     def _build_settings_tab(self) -> None:
         """Build the Settings tab with real-time controls."""
         tab = self._right_tabs.tab("Settings")
@@ -554,6 +559,10 @@ class MainWindow(ctk.CTk):
     def update_state(self, state_text: str) -> None:
         """Update state display."""
         self._state_label.configure(text=state_text)
+
+    def update_shot_count(self, count: int) -> None:
+        """Update the shot count display."""
+        self._shot_count_label.configure(text=f"Shots: {count}")
 
     def start_video(self) -> None:
         """Begin video panel polling."""
