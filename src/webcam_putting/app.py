@@ -178,8 +178,9 @@ class PuttingApp:
             self._hsv_range = get_preset(self.config.ball.color_preset)
         self._detector.update_hsv(self._hsv_range)
 
-        # Update camera darkness/flip (applied on next read)
+        # Update camera settings and re-apply properties (focus, exposure, etc.)
         self._camera._settings = self.config.camera
+        self._camera.apply_properties()
 
         logger.info("Settings reloaded")
 

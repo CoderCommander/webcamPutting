@@ -74,19 +74,22 @@ class Camera:
                 logger.error("Failed to open camera %d with DirectShow", s.webcam_index)
                 return False
 
-            # Set MJPEG codec
+            # DirectShow requires: resolution → codec → FPS (in this order)
+            # Default to 720p @ 60fps for MJPEG when not explicitly configured
+            res_w = s.width if s.width > 0 else 1280
+            res_h = s.height if s.height > 0 else 720
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+
             fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
             self._cap.set(cv2.CAP_PROP_FOURCC, fourcc)
 
-            # FPS override
-            if s.fps_override > 0:
-                self._cap.set(cv2.CAP_PROP_FPS, s.fps_override)
-                logger.info("FPS override set to %d", s.fps_override)
+            target_fps = s.fps_override if s.fps_override > 0 else 60
+            self._cap.set(cv2.CAP_PROP_FPS, target_fps)
+            logger.info("MJPEG camera: %dx%d @ %d fps requested", res_w, res_h, target_fps)
 
-            # Resolution override
-            if s.width > 0 and s.height > 0:
-                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, s.width)
-                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, s.height)
+            # Minimize frame buffer latency
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         else:
             self._cap = cv2.VideoCapture(s.webcam_index)
             if self._cap is None or not self._cap.isOpened():
@@ -178,6 +181,10 @@ class Camera:
             self._cap.release()
             self._cap = None
             logger.info("Camera released")
+
+    def apply_properties(self) -> None:
+        """Re-apply all camera properties from current settings."""
+        self._apply_camera_properties()
 
     def _apply_camera_properties(self) -> None:
         """Apply all configured camera properties."""
