@@ -144,12 +144,22 @@ class BallTracker:
             return None
 
         x, y = detection.x, detection.y
+        logger.info(
+            "Detection: (%d,%d) r=%d state=%s zone_x=[%d,%d]",
+            x, y, detection.radius, self._state.value,
+            self.zone.start_x1, self.zone.start_x2,
+        )
 
         # --- IDLE / BALL_DETECTED: Looking for stable ball in start zone ---
         if self._state in (ShotState.IDLE, ShotState.BALL_DETECTED):
             if self.zone.start_x1 <= x <= self.zone.start_x2:
                 self._state = ShotState.BALL_DETECTED
                 self._start_candidates.append((x, y))
+                logger.info(
+                    "  In zone, candidates=%d/%d",
+                    len(self._start_candidates),
+                    self.ball_settings.start_stability_frames,
+                )
 
                 # Keep buffer at max size
                 max_candidates = self.ball_settings.start_stability_frames * 2
