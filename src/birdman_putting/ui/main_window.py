@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import platform
 import queue
+import subprocess
 from collections.abc import Callable
 from typing import Any
 
 import customtkinter as ctk
 
 from birdman_putting.color_presets import PRESET_DESCRIPTIONS
-from birdman_putting.config import AppConfig, save_config
+from birdman_putting.config import CONFIG_FILE, AppConfig, save_config
 from birdman_putting.ui.video_panel import VideoPanel
 
 logger = logging.getLogger(__name__)
@@ -396,6 +398,13 @@ class MainWindow(ctk.CTk):
         )
         self._auto_zone_btn.pack(side="left", padx=(8, 0))
 
+        # Edit Config button
+        self._edit_config_btn = ctk.CTkButton(
+            parent, text="Edit Config", command=self._on_edit_config,
+            width=100, fg_color="gray35", hover_color="gray30",
+        )
+        self._edit_config_btn.pack(side="left", padx=(8, 0))
+
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
         self._mode_label = ctk.CTkLabel(
@@ -698,6 +707,25 @@ class MainWindow(ctk.CTk):
             self._auto_zone_btn.configure(
                 text="Auto Zone", fg_color="gray35", hover_color="gray30",
             )
+
+    def _on_edit_config(self) -> None:
+        """Open config.toml in the system's default text editor."""
+        try:
+            save_config(self._config)
+        except Exception:
+            logger.error("Failed to save config before opening editor", exc_info=True)
+        path = str(CONFIG_FILE)
+        try:
+            system = platform.system()
+            if system == "Windows":
+                import os
+                os.startfile(path)  # type: ignore[attr-defined]  # noqa: S606
+            elif system == "Darwin":
+                subprocess.Popen(["open", path])  # noqa: S603
+            else:
+                subprocess.Popen(["xdg-open", path])  # noqa: S603
+        except Exception:
+            logger.error("Failed to open config file in editor", exc_info=True)
 
     def _on_direction_changed(self, label: str) -> None:
         """Handle roll direction dropdown change."""
