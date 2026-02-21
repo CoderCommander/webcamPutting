@@ -119,7 +119,10 @@ class BallDetector:
 
             # Filter by minimum radius
             if r_int < self.min_radius:
-                logger.info("  reject min-radius: (%d,%d) r=%d < %d", int(cx), int(cy), r_int, self.min_radius)
+                logger.info(
+                    "  reject min-radius: (%d,%d) r=%d < %d",
+                    int(cx), int(cy), r_int, self.min_radius,
+                )
                 continue
 
             # Filter by circularity: area / (π * r²). A ball ≈ 0.7-0.85; a hand ≈ 0.3-0.5

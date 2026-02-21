@@ -22,7 +22,11 @@ from birdman_putting.calibration import AutoCalibrator, CalibrationState
 from birdman_putting.camera import Camera
 from birdman_putting.color_presets import HSVRange, get_preset
 from birdman_putting.config import AppConfig, save_config
-from birdman_putting.detection import BallDetector, resize_with_aspect_ratio
+from birdman_putting.detection import (
+    BallDetector,
+    generate_hsv_from_patch,
+    resize_with_aspect_ratio,
+)
 from birdman_putting.gspro_client import GSProClient
 from birdman_putting.physics import calculate_shot
 from birdman_putting.tracking import BallTracker, ShotState
@@ -81,6 +85,10 @@ class PuttingApp:
         # Adaptive frame skipping
         self._skip_counter: int = 0
         self._target_process_time: float = 1.0 / 30.0  # target 30fps processing
+
+        # Headless color pick mode
+        self._pick_mode = False
+        self._pick_frame: np.ndarray | None = None
 
         # Threading
         self._running = False
@@ -466,10 +474,28 @@ class PuttingApp:
         finally:
             self._cleanup()
 
+    def _on_headless_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
+        """Mouse callback for headless color pick mode."""
+        if event != cv2.EVENT_LBUTTONDOWN or not self._pick_mode:
+            return
+        if self._pick_frame is None:
+            return
+
+        hsv_range = generate_hsv_from_patch(self._pick_frame, x, y)
+        logger.info("Picked HSV at (%d,%d): %s", x, y, hsv_range)
+        self._hsv_range = hsv_range
+        self._detector.update_hsv(hsv_range)
+        self.config.ball.custom_hsv = hsv_range.to_dict()
+        save_config(self.config)
+        logger.info("Custom HSV saved to config")
+        self._pick_mode = False
+
     def _headless_loop(self) -> None:
         """Synchronous main loop with cv2.imshow."""
         zone = self.config.detection_zone
         window_name = "Birdman Putting: Press q to exit"
+        cv2.namedWindow(window_name)
+        cv2.setMouseCallback(window_name, self._on_headless_mouse)
 
         while self._running:
             frame_time = time.perf_counter()
@@ -492,6 +518,7 @@ class PuttingApp:
                 continue
 
             display_frame = resize_with_aspect_ratio(frame, width=640)
+            self._pick_frame = display_frame.copy()
 
             # --- Calibration mode (headless) ---
             if self._calibrating and self._calibrator:
@@ -565,6 +592,12 @@ class PuttingApp:
                 last_shot_trail=self._tracker.last_shot_positions,
             )
 
+            if self._pick_mode:
+                cv2.putText(
+                    display_frame, "CLICK ON BALL TO PICK COLOR",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
+                )
+
             cv2.imshow(window_name, display_frame)
 
             # Adaptive skip calculation
@@ -588,6 +621,9 @@ class PuttingApp:
                     cv2.destroyWindow("Debug Mask")
             elif key == ord("a"):
                 self._on_auto_zone()
+            elif key == ord("c"):
+                self._pick_mode = not self._pick_mode
+                logger.info("Color pick mode: %s", "ON" if self._pick_mode else "OFF")
 
     # ---- Shared ----
 
