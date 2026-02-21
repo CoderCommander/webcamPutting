@@ -481,7 +481,14 @@ class PuttingApp:
         if self._pick_frame is None:
             return
 
-        hsv_range = generate_hsv_from_patch(self._pick_frame, x, y)
+        # Apply same blur + first HSV conversion as the detector, so that
+        # generate_hsv_from_patch's internal BGR→HSV acts as the second
+        # conversion, matching the detector's double-HSV color space.
+        blurred = cv2.GaussianBlur(
+            self._pick_frame, self._detector.blur_kernel, 0,
+        )
+        hsv_once = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        hsv_range = generate_hsv_from_patch(hsv_once, x, y)
         logger.info("Picked HSV at (%d,%d): %s", x, y, hsv_range)
         self._hsv_range = hsv_range
         self._detector.update_hsv(hsv_range)
