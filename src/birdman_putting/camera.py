@@ -181,6 +181,9 @@ class Camera:
     def _try_open_default(self) -> bool:
         """Try opening the camera with the default backend (no DirectShow/MJPEG).
 
+        Applies configured resolution and FPS so the fallback path still
+        achieves the desired capture settings (e.g. 1280x720 @ 60fps).
+
         Returns:
             True if the capture device opened (frames not yet validated).
         """
@@ -189,7 +192,20 @@ class Camera:
         if self._cap is None or not self._cap.isOpened():
             logger.error("Failed to open camera %d with default backend", s.webcam_index)
             return False
-        logger.info("Opened camera %d with default backend", s.webcam_index)
+
+        # Apply resolution and FPS (same defaults as MJPEG path)
+        res_w = s.width if s.width > 0 else 1280
+        res_h = s.height if s.height > 0 else 720
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+
+        target_fps = s.fps_override if s.fps_override > 0 else 60
+        self._cap.set(cv2.CAP_PROP_FPS, target_fps)
+
+        logger.info(
+            "Default backend camera: %dx%d @ %d fps requested",
+            res_w, res_h, target_fps,
+        )
         return True
 
     @staticmethod
