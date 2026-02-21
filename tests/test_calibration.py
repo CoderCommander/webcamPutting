@@ -1,12 +1,12 @@
 """Tests for auto-calibration module."""
 
-from webcam_putting.calibration import (
+from birdman_putting.calibration import (
     STABILITY_FRAMES,
     TIMEOUT_FRAMES,
     AutoCalibrator,
     CalibrationState,
 )
-from webcam_putting.detection import BallDetection
+from birdman_putting.detection import BallDetection
 
 
 def _det(x: int, y: int, r: int = 15) -> BallDetection:

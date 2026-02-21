@@ -20,7 +20,7 @@ from platformdirs import user_config_dir
 
 logger = logging.getLogger(__name__)
 
-APP_NAME = "webcam-putting"
+APP_NAME = "birdman-putting"
 CONFIG_DIR = Path(user_config_dir(APP_NAME))
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 
@@ -101,7 +101,7 @@ class ConnectionSettings:
     gspro_host: str = "127.0.0.1"
     gspro_port: int = 921
     http_url: str = "http://127.0.0.1:8888/putting"
-    device_id: str = "WebcamPutting"
+    device_id: str = "BirdmanPutting"
     heartbeat_interval: float = 5.0  # seconds
 
 
@@ -155,7 +155,7 @@ def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
             field_type = f.type if isinstance(f.type, type) else None
             if field_type is None and isinstance(f.type, str):
                 # Resolve string annotations
-                import webcam_putting.config as mod
+                import birdman_putting.config as mod
                 field_type = getattr(mod, f.type, None)
             if (
                 field_type

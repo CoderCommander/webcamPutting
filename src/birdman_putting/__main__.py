@@ -1,4 +1,4 @@
-"""CLI entry point for webcam-putting."""
+"""CLI entry point for birdman-putting."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ import logging
 import sys
 from pathlib import Path
 
-from webcam_putting.config import CONFIG_FILE, load_config, migrate_from_ini, save_config
+from birdman_putting.config import CONFIG_FILE, load_config, migrate_from_ini, save_config
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Webcam-based golf putting simulator for GSPro. "
-        "Run with: python -m webcam_putting",
+        "Run with: python -m birdman_putting",
     )
     parser.add_argument(
         "-v", "--video",
@@ -101,7 +101,7 @@ def main() -> None:
         config.ball.custom_hsv = None  # CLI color overrides custom HSV
 
     # Run app
-    from webcam_putting.app import PuttingApp
+    from birdman_putting.app import PuttingApp
 
     app = PuttingApp(
         config=config,

@@ -4,9 +4,9 @@ import time
 
 import pytest
 
-from webcam_putting.config import BallSettings, DetectionZone, ShotSettings
-from webcam_putting.detection import BallDetection
-from webcam_putting.tracking import BallTracker, ShotState
+from birdman_putting.config import BallSettings, DetectionZone, ShotSettings
+from birdman_putting.detection import BallDetection
+from birdman_putting.tracking import BallTracker, ShotState
 
 
 def _det(x: int, y: int, t: float, r: int = 15) -> BallDetection:

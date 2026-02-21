@@ -13,7 +13,7 @@ import urllib.request
 from dataclasses import dataclass
 from enum import Enum
 
-from webcam_putting.config import ConnectionSettings
+from birdman_putting.config import ConnectionSettings
 
 logger = logging.getLogger(__name__)
 

@@ -18,18 +18,18 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
-from webcam_putting.calibration import AutoCalibrator, CalibrationState
-from webcam_putting.camera import Camera
-from webcam_putting.color_presets import HSVRange, get_preset
-from webcam_putting.config import AppConfig, save_config
-from webcam_putting.detection import BallDetector, resize_with_aspect_ratio
-from webcam_putting.gspro_client import GSProClient
-from webcam_putting.physics import calculate_shot
-from webcam_putting.tracking import BallTracker, ShotState
-from webcam_putting.ui.overlay import draw_calibration_overlay, draw_overlay
+from birdman_putting.calibration import AutoCalibrator, CalibrationState
+from birdman_putting.camera import Camera
+from birdman_putting.color_presets import HSVRange, get_preset
+from birdman_putting.config import AppConfig, save_config
+from birdman_putting.detection import BallDetector, resize_with_aspect_ratio
+from birdman_putting.gspro_client import GSProClient
+from birdman_putting.physics import calculate_shot
+from birdman_putting.tracking import BallTracker, ShotState
+from birdman_putting.ui.overlay import draw_calibration_overlay, draw_overlay
 
 if TYPE_CHECKING:
-    from webcam_putting.ui.main_window import MainWindow
+    from birdman_putting.ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ class PuttingApp:
 
     def _run_gui(self) -> None:
         """Start with CustomTkinter GUI on main thread, processing on background thread."""
-        from webcam_putting.ui.main_window import MainWindow
+        from birdman_putting.ui.main_window import MainWindow
 
         self._window = MainWindow(
             config=self.config,
@@ -378,7 +378,7 @@ class PuttingApp:
 
     def _handle_shot(self, shot_result: object) -> None:
         """Process a completed shot — calculate physics, send to GSPro, update UI."""
-        from webcam_putting.tracking import ShotResult
+        from birdman_putting.tracking import ShotResult
         if not isinstance(shot_result, ShotResult):
             return
 
@@ -468,7 +468,7 @@ class PuttingApp:
     def _headless_loop(self) -> None:
         """Synchronous main loop with cv2.imshow."""
         zone = self.config.detection_zone
-        window_name = "Webcam Putting: Press q to exit"
+        window_name = "Birdman Putting: Press q to exit"
 
         while self._running:
             frame_time = time.perf_counter()

@@ -5,9 +5,9 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from webcam_putting.config import DetectionZone
-from webcam_putting.detection import BallDetection
-from webcam_putting.tracking import ShotState
+from birdman_putting.config import DetectionZone
+from birdman_putting.detection import BallDetection
+from birdman_putting.tracking import ShotState
 
 # Colors (BGR)
 COLOR_YELLOW = (0, 210, 255)

@@ -8,7 +8,7 @@ Webcam-based golf putting simulator for GSPro. Uses a standard webcam + OpenCV t
 
 This repo contains two versions:
 - `cam-putting-py/` — Original upstream single-file application (reference only)
-- `src/webcam_putting/` — Modernized modular rewrite (active development)
+- `src/birdman_putting/` — Modernized modular rewrite (active development)
 
 ## Commands
 
@@ -20,25 +20,25 @@ pip install -e ".[dev]"
 pytest tests/ -v
 
 # Run the application (python -m is most reliable on Windows)
-python -m webcam_putting                         # uses default config
-python -m webcam_putting -c orange2 -w 1         # orange ball, webcam 1
-python -m webcam_putting -v path/to/video.mp4    # test with video file
-python -m webcam_putting -d                      # debug mode (shows mask)
-python -m webcam_putting --no-gui                # headless mode (OpenCV windows only)
-python -m webcam_putting --migrate-ini cam-putting-py/config.ini  # migrate old config
+python -m birdman_putting                         # uses default config
+python -m birdman_putting -c orange2 -w 1         # orange ball, webcam 1
+python -m birdman_putting -v path/to/video.mp4    # test with video file
+python -m birdman_putting -d                      # debug mode (shows mask)
+python -m birdman_putting --no-gui                # headless mode (OpenCV windows only)
+python -m birdman_putting --migrate-ini cam-putting-py/config.ini  # migrate old config
 
 # Lint and type-check
 ruff check src/ tests/
-mypy src/webcam_putting/
+mypy src/birdman_putting/
 
 # Build standalone executable (Windows)
 pip install -e ".[build]"
-pyinstaller webcam_putting.spec
+pyinstaller birdman_putting.spec
 ```
 
 ## Architecture
 
-### Module Structure (`src/webcam_putting/`)
+### Module Structure (`src/birdman_putting/`)
 
 - `config.py` — Dataclass config model (`AppConfig` with sections: `DetectionZone`, `CameraSettings`, `BallSettings`, `ShotSettings`, `ConnectionSettings`, `ReplaySettings`). TOML load/save via `platformdirs` for cross-platform config directory. Includes `migrate_from_ini()` for old config.ini migration.
 - `color_presets.py` — `HSVRange` dataclass and `PRESETS` dictionary with 12 named presets (red, white, yellow, green, orange variants for different lighting)
@@ -69,7 +69,7 @@ pyinstaller webcam_putting.spec
 6. Send to GSPro via socket or HTTP
 
 ### Configuration
-TOML format stored at platform config dir (`%APPDATA%/webcam-putting/config.toml` on Windows, `~/Library/Application Support/` on macOS). All ~30 previously hardcoded thresholds are now configurable in `ShotSettings` and `BallSettings` dataclasses.
+TOML format stored at platform config dir (`%APPDATA%/birdman-putting/config.toml` on Windows, `~/Library/Application Support/` on macOS). All ~30 previously hardcoded thresholds are now configurable in `ShotSettings` and `BallSettings` dataclasses.
 
 ### Testing
 Tests use synthetic frames (`np.zeros` + `cv2.circle`) — no camera needed. Run `pytest tests/ -v`. Test files mirror source modules: `test_config.py`, `test_detection.py`, `test_tracking.py`, `test_physics.py`, `test_gspro_client.py`.

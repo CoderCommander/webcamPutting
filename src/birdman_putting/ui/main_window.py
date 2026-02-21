@@ -10,9 +10,9 @@ from typing import Any
 
 import customtkinter as ctk
 
-from webcam_putting.color_presets import PRESET_DESCRIPTIONS
-from webcam_putting.config import AppConfig, save_config
-from webcam_putting.ui.video_panel import VideoPanel
+from birdman_putting.color_presets import PRESET_DESCRIPTIONS
+from birdman_putting.config import AppConfig, save_config
+from birdman_putting.ui.video_panel import VideoPanel
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class MainWindow(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.title("Webcam Putting")
+        self.title("Birdman Putting")
         self.geometry("940x480")
         self.resizable(False, False)
 

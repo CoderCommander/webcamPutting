@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from webcam_putting.config import (
+from birdman_putting.config import (
     AppConfig,
     load_config,
     migrate_from_ini,

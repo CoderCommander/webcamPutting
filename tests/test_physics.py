@@ -2,7 +2,7 @@
 
 
 
-from webcam_putting.physics import (
+from birdman_putting.physics import (
     GOLF_BALL_RADIUS_MM,
     calculate_angle,
     calculate_shot,

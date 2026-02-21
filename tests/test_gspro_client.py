@@ -2,8 +2,8 @@
 
 import json
 
-from webcam_putting.config import ConnectionSettings
-from webcam_putting.gspro_client import GSProClient
+from birdman_putting.config import ConnectionSettings
+from birdman_putting.gspro_client import GSProClient
 
 
 class TestShotMessageFormat:
@@ -15,7 +15,7 @@ class TestShotMessageFormat:
 
         msg = client._build_shot_message(8.5, -2.3)
 
-        assert msg["DeviceID"] == "WebcamPutting"
+        assert msg["DeviceID"] == "BirdmanPutting"
         assert msg["Units"] == "Yards"
         assert msg["ShotNumber"] == 5
         assert msg["APIversion"] == "1"

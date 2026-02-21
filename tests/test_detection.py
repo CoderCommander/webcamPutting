@@ -5,8 +5,8 @@ import time
 import cv2
 import numpy as np
 
-from webcam_putting.color_presets import get_preset
-from webcam_putting.detection import BallDetector, resize_with_aspect_ratio
+from birdman_putting.color_presets import get_preset
+from birdman_putting.detection import BallDetector, resize_with_aspect_ratio
 
 
 class TestBallDetector:

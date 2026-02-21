@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from webcam_putting.color_presets import HSVRange
+from birdman_putting.color_presets import HSVRange
 
 logger = logging.getLogger(__name__)
 

@@ -6,8 +6,8 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-from webcam_putting.config import DetectionZone
-from webcam_putting.detection import BallDetection
+from birdman_putting.config import DetectionZone
+from birdman_putting.detection import BallDetection
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for webcam-putting.
+"""PyInstaller spec for birdman-putting.
 
 Build with:
     pip install pyinstaller
-    pyinstaller webcam_putting.spec
+    pyinstaller birdman_putting.spec
 
-Output: dist/webcam-putting/ (one-dir) or dist/webcam-putting.exe (one-file)
+Output: dist/birdman-putting/ (one-dir) or dist/birdman-putting.exe (one-file)
 """
 
 import os
@@ -15,7 +15,7 @@ from pathlib import Path
 import customtkinter
 
 # Paths
-SRC_DIR = os.path.join("src", "webcam_putting")
+SRC_DIR = os.path.join("src", "birdman_putting")
 ASSETS_DIR = "assets"
 CTK_DIR = os.path.dirname(customtkinter.__file__)
 
@@ -34,20 +34,20 @@ a = Analysis(
     hiddenimports=[
         "customtkinter",
         "PIL._tkinter_finder",
-        "webcam_putting",
-        "webcam_putting.app",
-        "webcam_putting.camera",
-        "webcam_putting.color_presets",
-        "webcam_putting.config",
-        "webcam_putting.detection",
-        "webcam_putting.gspro_client",
-        "webcam_putting.physics",
-        "webcam_putting.tracking",
-        "webcam_putting.ui",
-        "webcam_putting.ui.main_window",
-        "webcam_putting.ui.overlay",
-        "webcam_putting.ui.settings_panel",
-        "webcam_putting.ui.video_panel",
+        "birdman_putting",
+        "birdman_putting.app",
+        "birdman_putting.camera",
+        "birdman_putting.color_presets",
+        "birdman_putting.config",
+        "birdman_putting.detection",
+        "birdman_putting.gspro_client",
+        "birdman_putting.physics",
+        "birdman_putting.tracking",
+        "birdman_putting.ui",
+        "birdman_putting.ui.main_window",
+        "birdman_putting.ui.overlay",
+        "birdman_putting.ui.settings_panel",
+        "birdman_putting.ui.video_panel",
     ],
     hookspath=[],
     hooksconfig={},
@@ -73,7 +73,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="webcam-putting",
+    name="birdman-putting",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -89,5 +89,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="webcam-putting",
+    name="birdman-putting",
 )

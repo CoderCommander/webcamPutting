@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-from webcam_putting.config import DetectionZone
+from birdman_putting.config import DetectionZone
 
 _HANDLE_HALF = 6  # Half-size of handle hit area in display pixels
 

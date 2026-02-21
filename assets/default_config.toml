@@ -51,7 +51,7 @@ mode = "gspro_direct"
 gspro_host = "127.0.0.1"
 gspro_port = 921
 http_url = "http://127.0.0.1:8888/putting"
-device_id = "WebcamPutting"
+device_id = "BirdmanPutting"
 heartbeat_interval = 5.0
 
 [replay]

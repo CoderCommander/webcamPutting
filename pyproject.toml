@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "webcam-putting"
+name = "birdman-putting"
 version = "2.0.0"
 description = "Webcam-based golf putting simulator for GSPro"
 readme = "README.md"
@@ -31,7 +31,7 @@ build = [
 ]
 
 [project.scripts]
-webcam-putting = "webcam_putting.__main__:main"
+birdman-putting = "birdman_putting.__main__:main"
 
 [tool.ruff]
 line-length = 100
@@ -64,4 +64,4 @@ module = [
 ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/webcam_putting"]
+packages = ["src/birdman_putting"]

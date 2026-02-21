@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import pytest
 
-from webcam_putting.config import AppConfig, BallSettings, DetectionZone, ShotSettings
+from birdman_putting.config import AppConfig, BallSettings, DetectionZone, ShotSettings
 
 
 @pytest.fixture

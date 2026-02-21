@@ -8,9 +8,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 
-from webcam_putting.config import BallSettings, DetectionZone, ShotSettings
-from webcam_putting.detection import BallDetection
-from webcam_putting.physics import pixel_to_mm_ratio
+from birdman_putting.config import BallSettings, DetectionZone, ShotSettings
+from birdman_putting.detection import BallDetection
+from birdman_putting.physics import pixel_to_mm_ratio
 
 logger = logging.getLogger(__name__)
 
