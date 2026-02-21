@@ -136,6 +136,50 @@ class TestBallDetector:
 
         assert detection is None
 
+    def test_circularity_rejects_irregular_shape(self):
+        """An elongated/irregular orange blob (like a hand) should be rejected."""
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        # Draw a tall narrow orange rectangle — low circularity
+        cv2.rectangle(frame, (90, 200), (110, 340), (0, 140, 255), -1)
+
+        detector = BallDetector(
+            hsv_range=get_preset("orange2"),
+            min_radius=5,
+            min_circularity=0.5,
+        )
+
+        detection = detector.detect(
+            frame=frame,
+            zone_x1=0, zone_x2_limit=640,
+            zone_y1=0, zone_y2=360,
+            timestamp=time.perf_counter(),
+        )
+
+        assert detection is None
+
+    def test_circularity_accepts_circle(self):
+        """A round orange ball should pass the circularity filter."""
+        frame = self._make_frame_with_ball(
+            ball_bgr=(0, 140, 255),
+            center=(100, 300),
+            radius=15,
+        )
+
+        detector = BallDetector(
+            hsv_range=get_preset("orange2"),
+            min_radius=5,
+            min_circularity=0.5,
+        )
+
+        detection = detector.detect(
+            frame=frame,
+            zone_x1=0, zone_x2_limit=640,
+            zone_y1=0, zone_y2=360,
+            timestamp=time.perf_counter(),
+        )
+
+        assert detection is not None
+
     def test_get_mask(self):
         frame = self._make_frame_with_ball(
             ball_bgr=(0, 140, 255),

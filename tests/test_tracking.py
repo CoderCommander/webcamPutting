@@ -109,6 +109,120 @@ class TestShotCounting:
         assert tracker.shot_count == 1
 
 
+class TestGradualMovement:
+    """Tests for gradual ball movement — the bug that killed every shot."""
+
+    def test_gradual_ltr_shot_completes(self, tracker: BallTracker) -> None:
+        """Ball rolling gradually (5px steps) through gateway must complete."""
+        t = time.perf_counter()
+
+        # Stabilize at x=50
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+
+        # Roll gradually from x=50 toward gateway (start_x2=180, gateway_x1=190)
+        # This crosses >10px from start_pos, which used to reset to BALL_DETECTED
+        x = 50
+        frame = 10
+        while x < 190:
+            x += 5
+            tracker.update(_det(x, 300, t + frame * 0.016))
+            frame += 1
+            # Must never reset to BALL_DETECTED or IDLE
+            assert tracker.state in (ShotState.STARTED, ShotState.ENTERED), (
+                f"State reset to {tracker.state} at x={x}"
+            )
+
+        # Should have entered gateway
+        assert tracker.state == ShotState.ENTERED
+
+        # Exit past gateway (gateway_x2=200, need 50px travel past entry)
+        result = tracker.update(_det(300, 298, t + frame * 0.016))
+        assert result is not None
+        assert result.end_position[0] == 300
+
+    def test_gradual_rtl_shot_completes(self) -> None:
+        """RTL ball rolling gradually must complete."""
+        zone = DetectionZone(
+            start_x1=400, start_x2=570, y1=180, y2=450,
+            direction="right_to_left",
+        )
+        tracker = BallTracker(
+            zone=zone,
+            ball_settings=BallSettings(start_stability_frames=3, start_position_tolerance=5),
+            shot_settings=ShotSettings(),
+        )
+        t = time.perf_counter()
+
+        # Stabilize at x=500
+        for i in range(10):
+            tracker.update(_det(500, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+
+        # Roll gradually left: gateway_x2 = 400 - 10 = 390
+        x = 500
+        frame = 10
+        while x > 390:
+            x -= 5
+            tracker.update(_det(x, 300, t + frame * 0.016))
+            frame += 1
+            assert tracker.state in (ShotState.STARTED, ShotState.ENTERED), (
+                f"State reset to {tracker.state} at x={x}"
+            )
+
+        assert tracker.state == ShotState.ENTERED
+
+        # Exit well past gateway (gateway_x1 = 390 - 10 = 380)
+        result = tracker.update(_det(200, 298, t + frame * 0.016))
+        assert result is not None
+
+    def test_repositioning_updates_start(self, tracker: BallTracker) -> None:
+        """Ball repositioning within start zone updates start pos without reset."""
+        t = time.perf_counter()
+
+        # Stabilize at x=50
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+        assert tracker.start_circle[:2] == (50, 300)
+
+        # Reposition to x=100 (still in start zone, start_x2=180)
+        base = t + 0.5
+        for i in range(10):
+            tracker.update(_det(100, 300, base + i * 0.016))
+
+        # Should still be STARTED, not reset
+        assert tracker.state == ShotState.STARTED
+        # Start position should have updated
+        assert tracker.start_circle[:2] == (100, 300)
+
+    def test_transit_positions_tracked(self, tracker: BallTracker) -> None:
+        """Positions in transit zone (between start and gateway) are recorded."""
+        t = time.perf_counter()
+
+        # Stabilize at x=50
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+
+        # Move into transit zone (past start_x2=180 but before gateway_x1=190)
+        tracker.update(_det(185, 300, t + 0.5))
+        assert tracker.state == ShotState.STARTED
+
+        positions = tracker.positions
+        # Should have start pos + transit pos
+        assert any(p[0] == 185 for p in positions)
+
+        # Enter and exit gateway to complete shot
+        tracker.update(_det(195, 300, t + 0.6))
+        assert tracker.state == ShotState.ENTERED
+        result = tracker.update(_det(300, 298, t + 0.7))
+        assert result is not None
+        # Transit position should be in the result
+        assert any(p[0] == 185 for p in result.positions)
+
+
 class TestRightToLeft:
     """Tests for right-to-left ball roll direction."""
 

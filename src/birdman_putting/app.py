@@ -65,6 +65,7 @@ class PuttingApp:
         self._detector = BallDetector(
             hsv_range=self._hsv_range,
             min_radius=config.ball.min_radius,
+            min_circularity=config.ball.min_circularity,
         )
         self._tracker = BallTracker(
             zone=config.detection_zone,

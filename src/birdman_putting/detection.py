@@ -39,10 +39,12 @@ class BallDetector:
         hsv_range: HSVRange,
         blur_kernel: tuple[int, int] = (11, 11),
         min_radius: int = 5,
+        min_circularity: float = 0.5,
     ):
         self.hsv_range = hsv_range
         self.blur_kernel = blur_kernel
         self.min_radius = min_radius
+        self.min_circularity = min_circularity
 
     def update_hsv(self, hsv_range: HSVRange) -> None:
         """Update the HSV range for detection."""
@@ -114,6 +116,13 @@ class BallDetector:
             # Filter by minimum radius
             if r_int < self.min_radius:
                 continue
+
+            # Filter by circularity: area / (π * r²). A ball ≈ 0.7-0.85; a hand ≈ 0.3-0.5
+            if r > 0 and self.min_circularity > 0:
+                area = cv2.contourArea(contour)
+                circularity = area / (np.pi * r * r)
+                if circularity < self.min_circularity:
+                    continue
 
             # Filter by expected radius if provided
             if expected_radius is not None and not (

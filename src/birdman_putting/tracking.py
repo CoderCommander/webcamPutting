@@ -190,12 +190,30 @@ class BallTracker:
                 self._entry_pos = (x, y)
                 self._positions.append((x, y, detection.timestamp))
                 logger.info("Ball entered gateway at (%d, %d)", x, y)
-            elif abs(x - self._start_pos[0]) > 10 or abs(y - self._start_pos[1]) > 10:
-                # Ball moved but hasn't reached gateway — could be repositioning
-                # Reset to look for new stable start
-                self._start_candidates.clear()
-                self._state = ShotState.BALL_DETECTED
+            elif self.zone.start_x1 <= x <= self.zone.start_x2:
+                # Ball still in start zone — check for repositioning (new stable pos)
                 self._start_candidates.append((x, y))
+                max_candidates = self.ball_settings.start_stability_frames * 2
+                if len(self._start_candidates) > max_candidates:
+                    self._start_candidates.pop(0)
+                if len(self._start_candidates) >= self.ball_settings.start_stability_frames:
+                    tolerance = self.ball_settings.start_position_tolerance
+                    matching = sum(
+                        1 for cx, cy in self._start_candidates
+                        if abs(cx - x) <= tolerance and abs(cy - y) <= tolerance
+                    )
+                    if matching >= self.ball_settings.start_stability_frames:
+                        logger.info("Re-start at (%d, %d) r=%d", x, y, detection.radius)
+                        self._start_circle = (x, y, detection.radius)
+                        self._start_pos = (x, y)
+                        self._positions.clear()
+                        self._positions.append((x, y, detection.timestamp))
+                        self._start_candidates.clear()
+                        radius = self.ball_settings.fixed_radius or detection.radius
+                        self._px_mm_ratio = pixel_to_mm_ratio(radius)
+            else:
+                # Ball in transit between start zone and gateway — track, stay STARTED
+                self._positions.append((x, y, detection.timestamp))
 
             return None
 

@@ -76,6 +76,8 @@ class MainWindow(ctk.CTk):
 
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        self.bind("<Left>", self._on_rotation_left)
+        self.bind("<Right>", self._on_rotation_right)
 
     # ---- UI Construction ----
 
@@ -565,6 +567,20 @@ class MainWindow(ctk.CTk):
         self._rotation_entry.delete(0, "end")
         self._rotation_entry.insert(0, str(v))
         self._on_setting_changed()
+
+    def _on_rotation_left(self, event: Any) -> None:
+        """Decrease rotation by 0.5 degrees (Left arrow key)."""
+        if isinstance(self.focus_get(), ctk.CTkEntry):
+            return
+        current = float(self._rotation_entry.get() or "0")
+        self._apply_rotation(str(current - 0.5))
+
+    def _on_rotation_right(self, event: Any) -> None:
+        """Increase rotation by 0.5 degrees (Right arrow key)."""
+        if isinstance(self.focus_get(), ctk.CTkEntry):
+            return
+        current = float(self._rotation_entry.get() or "0")
+        self._apply_rotation(str(current + 0.5))
 
     def _apply_port(self, value: str) -> None:
         """Parse and apply port from entry."""
