@@ -48,6 +48,7 @@ class CameraSettings:
     height: int = 0
     flip_image: bool = False
     flip_view: bool = False
+    rotation: int = 0  # Degrees (-45 to +45), clockwise-positive
     darkness: int = 0
     ps4: bool = False
 

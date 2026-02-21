@@ -338,6 +338,12 @@ class Camera:
         if self._settings.flip_image and not self._video_file:
             frame = cv2.flip(frame, 1)
 
+        # Apply rotation correction
+        if self._settings.rotation != 0:
+            h, w = frame.shape[:2]
+            M = cv2.getRotationMatrix2D((w / 2, h / 2), self._settings.rotation, 1.0)
+            frame = cv2.warpAffine(frame, M, (w, h))
+
         return frame
 
     def release(self) -> None:

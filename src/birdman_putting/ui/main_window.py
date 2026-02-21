@@ -227,6 +227,11 @@ class MainWindow(ctk.CTk):
             lambda v: setattr(self._config.camera, "flip_image", v),
         )
 
+        self._rotation_slider = self._add_live_slider(
+            scroll, "Rotation (\u00b0)", -45, 45, c.rotation,
+            lambda v: setattr(self._config.camera, "rotation", v),
+        )
+
         self._autofocus_var = self._add_live_checkbox(
             scroll, "Autofocus", bool(c.autofocus),
             self._on_autofocus_toggle,
