@@ -1,0 +1,25 @@
+13:08:10 birdman_putting.detection INFO:   contour (276,39) r=8 circ=0.134 (min=0.50)
+13:08:10 birdman_putting.detection INFO:   contour (250,69) r=5 circ=0.232 (min=0.50)
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (277,31) r=3 < 5
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (592,71) r=0 < 5
+13:08:10 birdman_putting.detection INFO: Contours found: 3
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (163,75) r=2 < 5
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (596,71) r=1 < 5
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (254,64) r=1 < 5
+13:08:10 birdman_putting.detection INFO: Contours found: 4
+13:08:10 birdman_putting.detection INFO:   contour (282,56) r=8 circ=0.527 (min=0.50)
+13:08:10 birdman_putting.tracking INFO: Detection: (282,56) r=8 state=idle zone_x=[160,330]
+13:08:10 birdman_putting.tracking INFO:   In zone, candidates=1/15
+13:08:10 birdman_putting.detection INFO: Contours found: 4
+13:08:10 birdman_putting.detection INFO:   contour (269,84) r=6 circ=0.608 (min=0.50)
+13:08:10 birdman_putting.tracking INFO: Detection: (269,84) r=6 state=ball_detected zone_x=[160,330]
+13:08:10 birdman_putting.tracking INFO:   In zone, candidates=2/15
+13:08:10 birdman_putting.detection INFO: Contours found: 2
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (279,76) r=1 < 5
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (286,61) r=0 < 5
+13:08:10 birdman_putting.detection INFO: Contours found: 2
+13:08:10 birdman_putting.detection INFO:   contour (283,98) r=6 circ=0.575 (min=0.50)
+13:08:10 birdman_putting.tracking INFO: Detection: (283,98) r=6 state=ball_detected zone_x=[160,330]
+13:08:10 birdman_putting.tracking INFO:   In zone, candidates=3/15
+13:08:10 birdman_putting.detection INFO: Contours found: 4
+13:08:10 birdman_putting.detection INFO:   reject min-radius: (290,95) r=2 < 5
