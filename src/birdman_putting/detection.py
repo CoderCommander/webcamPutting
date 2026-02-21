@@ -27,15 +27,17 @@ class BallDetection:
 class BallDetector:
     """Detects a golf ball in video frames using HSV color filtering.
 
-    Fixes the double HSV conversion bug from the original code:
-    the original converted BGR->HSV, then passed the HSV image to
-    ColorModuleExtended which converted it again. This class converts once.
+    Uses the same double BGR→HSV conversion as the original code:
+    the original converted BGR→HSV, then passed the HSV image to
+    ColorModuleExtended which converted it *again* (treating HSV bytes
+    as BGR). All 12 built-in presets were tuned against this
+    double-converted color space, so we must replicate it here.
     """
 
     def __init__(
         self,
         hsv_range: HSVRange,
-        blur_kernel: tuple[int, int] = (5, 5),
+        blur_kernel: tuple[int, int] = (11, 11),
         min_radius: int = 5,
     ):
         self.hsv_range = hsv_range
@@ -72,9 +74,12 @@ class BallDetector:
         Returns:
             BallDetection if ball found, None otherwise.
         """
-        # Blur and convert to HSV (single conversion - fixing original bug)
+        # Blur and double-convert to match the original calibrated color space.
+        # The presets were tuned against HSV bytes re-interpreted as BGR then
+        # converted a second time, so we replicate that transform here.
         blurred = cv2.GaussianBlur(frame, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
 
         # Create color mask
         lower = np.array([
@@ -160,6 +165,7 @@ class BallDetector:
         """Get the color detection mask for debug visualization."""
         blurred = cv2.GaussianBlur(frame, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
         lower = np.array([
             self.hsv_range.hmin, self.hsv_range.smin, self.hsv_range.vmin
         ])
