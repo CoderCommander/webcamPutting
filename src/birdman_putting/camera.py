@@ -32,8 +32,11 @@ _CAMERA_PROPS = {
     "autofocus": cv2.CAP_PROP_AUTOFOCUS,
 }
 
-_FRAME_VALIDATE_ATTEMPTS = 3
-_FRAME_VALIDATE_DELAY = 0.1  # seconds between validation read attempts
+_WARMUP_FRAMES = 5            # frames to discard before brightness checking
+_WARMUP_DELAY = 0.1           # seconds between warmup reads
+_FRAME_VALIDATE_ATTEMPTS = 3  # frames to check after warmup
+_FRAME_VALIDATE_DELAY = 0.1   # seconds between validation reads
+_BLACK_FRAME_THRESHOLD = 3.0  # mean brightness below this = black frame
 
 
 class Camera:
@@ -95,7 +98,8 @@ class Camera:
                     return True
                 else:
                     logger.warning(
-                        "MJPEG opened but no frames arrived, falling back to default backend"
+                        "MJPEG opened but frames are black or absent, "
+                        "falling back to default backend"
                     )
                     self._release_cap()
 
@@ -123,7 +127,8 @@ class Camera:
         """Try opening the camera with MJPEG codec via DirectShow.
 
         Returns:
-            True if the capture device opened (frames not yet validated).
+            True if the capture device opened and accepted MJPEG codec
+            (frames not yet validated).
         """
         s = self._settings
         self._cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
@@ -140,9 +145,34 @@ class Camera:
         fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
         self._cap.set(cv2.CAP_PROP_FOURCC, fourcc)
 
+        # Verify MJPEG codec actually took effect
+        actual_fourcc = int(self._cap.get(cv2.CAP_PROP_FOURCC))
+        if actual_fourcc != fourcc:
+            actual_str = "".join(
+                chr((actual_fourcc >> (8 * i)) & 0xFF) for i in range(4)
+            )
+            logger.warning(
+                "MJPEG codec not accepted by camera (requested MJPG, got %s), "
+                "skipping MJPEG mode",
+                actual_str,
+            )
+            self._release_cap()
+            return False
+
         target_fps = s.fps_override if s.fps_override > 0 else 60
         self._cap.set(cv2.CAP_PROP_FPS, target_fps)
-        logger.info("MJPEG camera: %dx%d @ %d fps requested", res_w, res_h, target_fps)
+
+        # Log actual FPS for diagnostic purposes
+        actual_fps = self._cap.get(cv2.CAP_PROP_FPS)
+        logger.info(
+            "MJPEG camera: %dx%d @ %d fps requested (actual reported: %.0f fps)",
+            res_w, res_h, target_fps, actual_fps,
+        )
+        if actual_fps > 0 and actual_fps < target_fps * 0.5:
+            logger.warning(
+                "Camera reports %.0f fps (requested %d) — MJPEG mode may not be working",
+                actual_fps, target_fps,
+            )
 
         # Minimize frame buffer latency
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -162,22 +192,47 @@ class Camera:
         logger.info("Opened camera %d with default backend", s.webcam_index)
         return True
 
+    @staticmethod
+    def _is_black_frame(frame: np.ndarray) -> bool:
+        """Check if a frame is effectively black (all/nearly-all zero pixels)."""
+        return float(np.mean(frame)) < _BLACK_FRAME_THRESHOLD
+
     def _validate_frames(self) -> bool:
-        """Read up to a few test frames to confirm the camera is producing data.
+        """Read test frames to confirm the camera is producing usable data.
+
+        Phase 1: Discard warmup frames (auto-exposure settling).
+        Phase 2: Validate that at least one frame is non-black.
 
         Returns:
-            True if at least one frame was successfully read.
+            True if at least one non-black frame was successfully read.
         """
         if self._cap is None:
             return False
 
+        # Phase 1: Warmup — read and discard frames for auto-exposure
+        for i in range(1, _WARMUP_FRAMES + 1):
+            ret, frame = self._cap.read()
+            if not ret or frame is None:
+                logger.debug("Warmup frame %d: no frame", i)
+            time.sleep(_WARMUP_DELAY)
+
+        # Phase 2: Validate — require at least one non-black frame
         for attempt in range(1, _FRAME_VALIDATE_ATTEMPTS + 1):
             ret, frame = self._cap.read()
             if ret and frame is not None:
-                logger.debug("Frame validation passed on attempt %d", attempt)
-                return True
+                if not self._is_black_frame(frame):
+                    logger.debug(
+                        "Frame validation passed on attempt %d (mean=%.1f)",
+                        attempt, float(np.mean(frame)),
+                    )
+                    return True
+                logger.debug(
+                    "Frame validation attempt %d: black frame (mean=%.1f)",
+                    attempt, float(np.mean(frame)),
+                )
+            else:
+                logger.debug("Frame validation attempt %d: no frame", attempt)
             time.sleep(_FRAME_VALIDATE_DELAY)
-            logger.debug("Frame validation attempt %d: no frame", attempt)
 
         return False
 
