@@ -126,6 +126,29 @@ class BallDetector:
 
         return None
 
+    def detect_full_frame(
+        self,
+        frame: np.ndarray,
+        timestamp: float,
+        expected_radius: int | None = None,
+        radius_tolerance: int = 50,
+    ) -> BallDetection | None:
+        """Detect ball anywhere in the full frame (no zone cropping).
+
+        Convenience wrapper for calibration use.
+        """
+        h, w = frame.shape[:2]
+        return self.detect(
+            frame=frame,
+            zone_x1=0,
+            zone_x2_limit=w,
+            zone_y1=0,
+            zone_y2=h,
+            timestamp=timestamp,
+            expected_radius=expected_radius,
+            radius_tolerance=radius_tolerance,
+        )
+
     def get_mask(
         self,
         frame: np.ndarray,

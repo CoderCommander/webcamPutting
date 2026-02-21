@@ -48,6 +48,7 @@ class MainWindow(ctk.CTk):
         on_stop: Callable[[], None] | None = None,
         on_color_change: Callable[[str], None] | None = None,
         on_settings_changed: Callable[[], None] | None = None,
+        on_auto_zone: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -64,8 +65,10 @@ class MainWindow(ctk.CTk):
         self._on_stop = on_stop
         self._on_color_change = on_color_change
         self._on_settings_changed = on_settings_changed
+        self._on_auto_zone = on_auto_zone
         self._is_running = False
         self._edit_zone_active = False
+        self._auto_zone_active = False
         self._shot_history: list[ShotHistoryEntry] = []
         self._save_after_id: str | None = None
 
@@ -113,9 +116,24 @@ class MainWindow(ctk.CTk):
         """Build the Status tab content."""
         tab = self._right_tabs.tab("Status")
 
+        # Camera
+        cam_frame = ctk.CTkFrame(tab, corner_radius=6)
+        cam_frame.pack(fill="x", padx=4, pady=(4, 3))
+
+        ctk.CTkLabel(
+            cam_frame, text="CAMERA", font=("", 10, "bold"),
+            text_color="gray60",
+        ).pack(anchor="w", padx=6, pady=(4, 1))
+
+        self._cam_indicator = ctk.CTkLabel(
+            cam_frame, text="  Idle",
+            font=("", 12), text_color="gray50",
+        )
+        self._cam_indicator.pack(anchor="w", padx=6, pady=(0, 4))
+
         # Connection
         conn_frame = ctk.CTkFrame(tab, corner_radius=6)
-        conn_frame.pack(fill="x", padx=4, pady=(4, 3))
+        conn_frame.pack(fill="x", padx=4, pady=(0, 3))
 
         ctk.CTkLabel(
             conn_frame, text="CONNECTION", font=("", 10, "bold"),
@@ -231,6 +249,26 @@ class MainWindow(ctk.CTk):
 
         # --- DETECTION ---
         self._section_label(scroll, "DETECTION")
+
+        # Roll direction dropdown
+        dir_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        dir_frame.pack(fill="x", pady=1)
+        ctk.CTkLabel(
+            dir_frame, text="Roll Direction", width=110, anchor="w", font=("", 11),
+        ).pack(side="left")
+
+        dir_display = {
+            "left_to_right": "Left to Right",
+            "right_to_left": "Right to Left",
+        }
+        self._dir_to_value = {v: k for k, v in dir_display.items()}
+        current_dir = dir_display.get(z.direction, "Left to Right")
+        self._direction_var = ctk.StringVar(value=current_dir)
+        ctk.CTkOptionMenu(
+            dir_frame, variable=self._direction_var,
+            values=list(dir_display.values()),
+            command=self._on_direction_changed, width=130,
+        ).pack(side="left", padx=2)
 
         self._gateway_w = self._add_live_slider(
             scroll, "Gateway Width", 5, 50, z.gateway_width,
@@ -350,6 +388,13 @@ class MainWindow(ctk.CTk):
             width=100, fg_color="gray35", hover_color="gray30",
         )
         self._edit_zone_btn.pack(side="left")
+
+        # Auto Zone button
+        self._auto_zone_btn = ctk.CTkButton(
+            parent, text="Auto Zone", command=self._on_auto_zone_clicked,
+            width=100, fg_color="gray35", hover_color="gray30",
+        )
+        self._auto_zone_btn.pack(side="left", padx=(8, 0))
 
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
@@ -521,6 +566,18 @@ class MainWindow(ctk.CTk):
 
     # ---- Public Update Methods (called from processing thread via after()) ----
 
+    def update_camera_status(self, status: str, state: str = "idle") -> None:
+        """Update the camera status indicator.
+
+        Args:
+            status: Human-readable status text.
+            state: One of "ok", "error", or "idle".
+        """
+        colors = {"ok": "#44cc44", "error": "#ff4444", "idle": "gray50"}
+        self._cam_indicator.configure(
+            text=f"  {status}", text_color=colors.get(state, "gray50"),
+        )
+
     def update_connection_status(self, connected: bool) -> None:
         """Update the connection indicator."""
         if connected:
@@ -624,6 +681,29 @@ class MainWindow(ctk.CTk):
             if self._on_color_change:
                 self._on_color_change(preset_name)
             self._schedule_save()
+
+    def _on_auto_zone_clicked(self) -> None:
+        """Handle Auto Zone button click."""
+        if self._on_auto_zone:
+            self._on_auto_zone()
+
+    def set_auto_zone_state(self, active: bool) -> None:
+        """Update Auto Zone button appearance."""
+        self._auto_zone_active = active
+        if active:
+            self._auto_zone_btn.configure(
+                text="Cancel Cal.", fg_color="#cc7700", hover_color="#aa6600",
+            )
+        else:
+            self._auto_zone_btn.configure(
+                text="Auto Zone", fg_color="gray35", hover_color="gray30",
+            )
+
+    def _on_direction_changed(self, label: str) -> None:
+        """Handle roll direction dropdown change."""
+        value = self._dir_to_value.get(label, "left_to_right")
+        self._config.detection_zone.direction = value
+        self._on_setting_changed()
 
     def _on_window_close(self) -> None:
         """Handle window close — flush pending save, clean up."""

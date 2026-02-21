@@ -93,6 +93,7 @@ def calculate_shot(
     px_mm_ratio: float,
     positions: list[tuple[int, int, float]] | None = None,
     flip: bool = False,
+    reverse_x: bool = False,
 ) -> ShotData | None:
     """Calculate ball speed and HLA from tracked positions.
 
@@ -107,10 +108,17 @@ def calculate_shot(
         px_mm_ratio: Pixels per mm conversion ratio.
         positions: Optional list of (x, y, timestamp) for trajectory fitting.
         flip: Whether image is flipped (left-handed setup).
+        reverse_x: Mirror x-coordinates (for right-to-left ball roll).
 
     Returns:
         ShotData with speed and HLA, or None if calculation fails.
     """
+    # Mirror x-coordinates for RtL so all existing math works as LtR
+    if reverse_x:
+        start_pos = (-start_pos[0], start_pos[1])
+        end_pos = (-end_pos[0], end_pos[1])
+        if positions:
+            positions = [(-x, y, t) for x, y, t in positions]
     if px_mm_ratio <= 0:
         return None
 

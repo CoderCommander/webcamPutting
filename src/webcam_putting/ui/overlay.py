@@ -33,8 +33,12 @@ def draw_detection_zones(
     edit_mode: bool = False,
 ) -> None:
     """Draw start zone and detection gateway rectangles."""
-    gateway_x1 = zone.start_x2 + zone.gateway_width
-    gateway_x2 = gateway_x1 + zone.gateway_width
+    if zone.direction == "right_to_left":
+        gateway_x2 = zone.start_x1 - zone.gateway_width
+        gateway_x1 = gateway_x2 - zone.gateway_width
+    else:
+        gateway_x1 = zone.start_x2 + zone.gateway_width
+        gateway_x2 = gateway_x1 + zone.gateway_width
 
     # Semi-transparent yellow fill when editing
     if edit_mode:
@@ -199,3 +203,28 @@ def draw_overlay(
             (8, h - 12),
             FONT, 0.55, COLOR_WHITE, FONT_THICKNESS,
         )
+
+
+def draw_calibration_overlay(
+    frame: np.ndarray,
+    state_text: str,
+    ball_pos: tuple[int, int] | None = None,
+) -> None:
+    """Draw calibration mode overlay: green border + status + crosshair."""
+    h, w = frame.shape[:2]
+
+    # Green border
+    cv2.rectangle(frame, (0, 0), (w - 1, h - 1), COLOR_GREEN, 3)
+
+    # Status text (top-center)
+    text_size = cv2.getTextSize(state_text, FONT, 0.65, 2)[0]
+    text_x = (w - text_size[0]) // 2
+    cv2.putText(frame, state_text, (text_x, 28), FONT, 0.65, COLOR_GREEN, 2)
+
+    # Crosshair on detected ball
+    if ball_pos is not None:
+        bx, by = ball_pos
+        arm = 20
+        cv2.line(frame, (bx - arm, by), (bx + arm, by), COLOR_GREEN, 1)
+        cv2.line(frame, (bx, by - arm), (bx, by + arm), COLOR_GREEN, 1)
+        cv2.circle(frame, (bx, by), 6, COLOR_GREEN, 2)

@@ -109,6 +109,11 @@ class BallTracker:
         self._px_mm_ratio = 0.0
         self._positions.clear()
 
+    @property
+    def _is_rtl(self) -> bool:
+        """Whether the ball rolls right-to-left."""
+        return self.zone.direction == "right_to_left"
+
     def update(self, detection: BallDetection | None) -> ShotResult | None:
         """Process one frame's detection. Returns ShotResult when shot completes.
 
@@ -118,9 +123,15 @@ class BallTracker:
         Returns:
             ShotResult when a complete shot is detected, None otherwise.
         """
-        # Compute gateway coordinates
-        gateway_x1 = self.zone.start_x2 + self.zone.gateway_width
-        gateway_x2 = gateway_x1 + self.zone.gateway_width
+        # Compute gateway coordinates based on direction
+        if self._is_rtl:
+            # Gateway is to the LEFT of the start zone
+            gateway_x2 = self.zone.start_x1 - self.zone.gateway_width
+            gateway_x1 = gateway_x2 - self.zone.gateway_width
+        else:
+            # Gateway is to the RIGHT of the start zone (original behavior)
+            gateway_x1 = self.zone.start_x2 + self.zone.gateway_width
+            gateway_x2 = gateway_x1 + self.zone.gateway_width
 
         # Timeout: if we're in ENTERED state and too much time passed, reset
         if self._state == ShotState.ENTERED and self._entry_time > 0:
@@ -171,8 +182,9 @@ class BallTracker:
 
         # --- STARTED: Ball is stable, waiting for it to cross into gateway ---
         if self._state == ShotState.STARTED:
-            # Check if ball moved away from start position (not just noise)
-            if x >= gateway_x1:
+            # Check if ball moved into gateway
+            entered = x <= gateway_x2 if self._is_rtl else x >= gateway_x1
+            if entered:
                 self._state = ShotState.ENTERED
                 self._entry_time = detection.timestamp
                 self._entry_pos = (x, y)
@@ -192,26 +204,43 @@ class BallTracker:
             self._positions.append((x, y, detection.timestamp))
 
             # Check if ball has exited past the gateway with enough travel
-            if x > gateway_x2 and len(self._positions) >= 2:
-                prev_x = self._positions[-2][0]
-                if x > prev_x + self.shot_settings.min_exit_distance_px:
-                    # Shot complete
-                    self._state = ShotState.LEFT
-                    end_pos = (x, y)
-
-                    result = ShotResult(
-                        start_position=self._entry_pos,
-                        end_position=end_pos,
-                        start_radius=self._start_circle[2],
-                        entry_time=self._entry_time,
-                        exit_time=detection.timestamp,
-                        px_mm_ratio=self._px_mm_ratio,
-                        positions=list(self._positions),
-                    )
-
-                    logger.info("Ball left at (%d, %d), shot complete", x, y)
-                    self.reset()
-                    return result
+            min_dist = self.shot_settings.min_exit_distance_px
+            if self._is_rtl:
+                exited = x < gateway_x1 and len(self._positions) >= 2
+                if exited:
+                    prev_x = self._positions[-2][0]
+                    if x < prev_x - min_dist:
+                        self._state = ShotState.LEFT
+                        result = ShotResult(
+                            start_position=self._entry_pos,
+                            end_position=(x, y),
+                            start_radius=self._start_circle[2],
+                            entry_time=self._entry_time,
+                            exit_time=detection.timestamp,
+                            px_mm_ratio=self._px_mm_ratio,
+                            positions=list(self._positions),
+                        )
+                        logger.info("Ball left at (%d, %d), shot complete", x, y)
+                        self.reset()
+                        return result
+            else:
+                exited = x > gateway_x2 and len(self._positions) >= 2
+                if exited:
+                    prev_x = self._positions[-2][0]
+                    if x > prev_x + min_dist:
+                        self._state = ShotState.LEFT
+                        result = ShotResult(
+                            start_position=self._entry_pos,
+                            end_position=(x, y),
+                            start_radius=self._start_circle[2],
+                            entry_time=self._entry_time,
+                            exit_time=detection.timestamp,
+                            px_mm_ratio=self._px_mm_ratio,
+                            positions=list(self._positions),
+                        )
+                        logger.info("Ball left at (%d, %d), shot complete", x, y)
+                        self.reset()
+                        return result
 
             return None
 

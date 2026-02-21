@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from webcam_putting.config import BallSettings, DetectionZone, ShotSettings
 from webcam_putting.detection import BallDetection
 from webcam_putting.tracking import BallTracker, ShotState
 
@@ -106,3 +107,65 @@ class TestShotCounting:
             tracker.update(_det(50, 300, t + i * 0.016))
 
         assert tracker.shot_count == 1
+
+
+class TestRightToLeft:
+    """Tests for right-to-left ball roll direction."""
+
+    @pytest.fixture
+    def rtl_zone(self) -> DetectionZone:
+        """RtL detection zone with ball starting on the right side."""
+        return DetectionZone(
+            start_x1=400, start_x2=570, y1=180, y2=450,
+            direction="right_to_left",
+        )
+
+    @pytest.fixture
+    def rtl_tracker(
+        self, rtl_zone: DetectionZone, ball_settings: BallSettings,
+        shot_settings: ShotSettings,
+    ) -> BallTracker:
+        return BallTracker(
+            zone=rtl_zone,
+            ball_settings=ball_settings,
+            shot_settings=shot_settings,
+        )
+
+    def test_rtl_gateway_entry(self, rtl_tracker: BallTracker) -> None:
+        """Ball moving left into gateway should transition to ENTERED."""
+        zone = rtl_tracker.zone
+        t = time.perf_counter()
+
+        # Stabilize inside start zone
+        for i in range(10):
+            rtl_tracker.update(_det(500, 300, t + i * 0.016))
+
+        assert rtl_tracker.state == ShotState.STARTED
+
+        # Gateway is to the LEFT: gateway_x2 = start_x1 - gw_width = 390
+        gateway_x2 = zone.start_x1 - zone.gateway_width
+        rtl_tracker.update(_det(gateway_x2 - 5, 300, t + 0.5))
+        assert rtl_tracker.state == ShotState.ENTERED
+
+    def test_rtl_full_shot_cycle(self, rtl_tracker: BallTracker) -> None:
+        """Full RtL shot: stable -> entered -> exited with enough distance."""
+        zone = rtl_tracker.zone
+        t = time.perf_counter()
+
+        # Stabilize
+        for i in range(10):
+            rtl_tracker.update(_det(500, 300, t + i * 0.016))
+
+        assert rtl_tracker.state == ShotState.STARTED
+
+        # Enter gateway (moving left past start_x1)
+        gateway_x2 = zone.start_x1 - zone.gateway_width
+        gateway_x1 = gateway_x2 - zone.gateway_width
+        rtl_tracker.update(_det(gateway_x2 - 5, 300, t + 0.5))
+        assert rtl_tracker.state == ShotState.ENTERED
+
+        # Exit well past gateway to the left
+        result = rtl_tracker.update(_det(gateway_x1 - 200, 295, t + 0.6))
+
+        assert result is not None
+        assert result.end_position[0] == gateway_x1 - 200

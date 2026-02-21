@@ -18,14 +18,15 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
+from webcam_putting.calibration import AutoCalibrator, CalibrationState
 from webcam_putting.camera import Camera
 from webcam_putting.color_presets import HSVRange, get_preset
-from webcam_putting.config import AppConfig
+from webcam_putting.config import AppConfig, save_config
 from webcam_putting.detection import BallDetector, resize_with_aspect_ratio
 from webcam_putting.gspro_client import GSProClient
 from webcam_putting.physics import calculate_shot
 from webcam_putting.tracking import BallTracker, ShotState
-from webcam_putting.ui.overlay import draw_overlay
+from webcam_putting.ui.overlay import draw_calibration_overlay, draw_overlay
 
 if TYPE_CHECKING:
     from webcam_putting.ui.main_window import MainWindow
@@ -85,6 +86,10 @@ class PuttingApp:
         self._frame_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=3)  # type: ignore[type-arg]
         self._processing_thread: threading.Thread | None = None
 
+        # Calibration
+        self._calibrator: AutoCalibrator | None = None
+        self._calibrating: bool = False
+
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
 
@@ -108,6 +113,7 @@ class PuttingApp:
             on_stop=self._on_gui_stop,
             on_color_change=self._on_color_change,
             on_settings_changed=self._on_settings_changed,
+            on_auto_zone=self._on_auto_zone,
         )
 
         # Auto-start if camera/video is available
@@ -129,11 +135,21 @@ class PuttingApp:
         if self._video_path:
             if not self._camera.open_video(self._video_path):
                 logger.error("Failed to open video: %s", self._video_path)
+                if self._window:
+                    self._window.update_camera_status("Failed to open video", "error")
                 return
         else:
             if not self._camera.open_webcam():
                 logger.error("Failed to open webcam")
+                if self._window:
+                    self._window.update_camera_status(
+                        self._camera.status_message, "error"
+                    )
                 return
+            if self._window:
+                self._window.update_camera_status(
+                    self._camera.status_message, "ok"
+                )
 
         # Connect to GSPro
         connected = self._gspro.connect()
@@ -184,6 +200,27 @@ class PuttingApp:
 
         logger.info("Settings reloaded")
 
+    def _on_auto_zone(self) -> None:
+        """Handle Auto Zone button — toggle calibration mode."""
+        if self._calibrating:
+            # Cancel calibration
+            if self._calibrator:
+                self._calibrator.cancel()
+            self._calibrating = False
+            if self._window:
+                self._window.set_auto_zone_state(False)
+            logger.info("Auto-calibration cancelled")
+        else:
+            # Start calibration
+            direction = self.config.detection_zone.direction
+            self._calibrator = AutoCalibrator(direction=direction)
+            self._calibrator.start()
+            self._calibrating = True
+            self._tracker.reset()
+            if self._window:
+                self._window.set_auto_zone_state(True)
+            logger.info("Auto-calibration started (direction=%s)", direction)
+
     def _processing_loop(self) -> None:
         """Background thread: capture → detect → track → annotate → queue."""
         zone = self.config.detection_zone
@@ -213,6 +250,51 @@ class PuttingApp:
 
             # Resize for processing
             display_frame = resize_with_aspect_ratio(frame, width=640)
+
+            # --- Calibration mode ---
+            if self._calibrating and self._calibrator:
+                cal_detection = self._detector.detect_full_frame(
+                    display_frame, timestamp=frame_time,
+                )
+                dh, dw = display_frame.shape[:2]
+                cal_result = self._calibrator.update(cal_detection, dw, dh)
+
+                # Draw calibration overlay
+                state_text = f"AUTO ZONE: {self._calibrator.state.value}"
+                ball_pos = (cal_detection.x, cal_detection.y) if cal_detection else None
+                draw_calibration_overlay(display_frame, state_text, ball_pos)
+
+                if cal_result is not None:
+                    # Calibration complete — apply zone
+                    self.config.detection_zone = cal_result.zone
+                    self._tracker.zone = cal_result.zone
+                    self._tracker.reset()
+                    self._calibrating = False
+                    save_config(self.config)
+                    logger.info("Auto-calibration applied zone")
+                    if self._window:
+                        with contextlib.suppress(RuntimeError):
+                            self._window.after(
+                                0, self._window.set_auto_zone_state, False,
+                            )
+                elif self._calibrator.state == CalibrationState.FAILED:
+                    self._calibrating = False
+                    logger.warning("Auto-calibration failed")
+                    if self._window:
+                        with contextlib.suppress(RuntimeError):
+                            self._window.after(
+                                0, self._window.set_auto_zone_state, False,
+                            )
+
+                # Put frame and skip normal detect/track
+                try:
+                    self._frame_queue.put_nowait(display_frame)
+                except queue.Full:
+                    with contextlib.suppress(queue.Empty):
+                        self._frame_queue.get_nowait()
+                    with contextlib.suppress(queue.Full):
+                        self._frame_queue.put_nowait(display_frame)
+                continue
 
             # Detect ball
             detection = self._detector.detect(
@@ -301,6 +383,7 @@ class PuttingApp:
             return
 
         positions = list(shot_result.positions)
+        is_rtl = self.config.detection_zone.direction == "right_to_left"
         shot_data = calculate_shot(
             start_pos=shot_result.start_position,
             end_pos=shot_result.end_position,
@@ -309,6 +392,7 @@ class PuttingApp:
             px_mm_ratio=shot_result.px_mm_ratio,
             positions=positions,
             flip=self.config.camera.flip_image and self._video_path is None,
+            reverse_x=is_rtl,
         )
 
         if not shot_data:
@@ -408,6 +492,38 @@ class PuttingApp:
 
             display_frame = resize_with_aspect_ratio(frame, width=640)
 
+            # --- Calibration mode (headless) ---
+            if self._calibrating and self._calibrator:
+                cal_detection = self._detector.detect_full_frame(
+                    display_frame, timestamp=frame_time,
+                )
+                dh, dw = display_frame.shape[:2]
+                cal_result = self._calibrator.update(cal_detection, dw, dh)
+
+                state_text = f"AUTO ZONE: {self._calibrator.state.value}"
+                ball_pos = (
+                    (cal_detection.x, cal_detection.y) if cal_detection else None
+                )
+                draw_calibration_overlay(display_frame, state_text, ball_pos)
+
+                if cal_result is not None:
+                    self.config.detection_zone = cal_result.zone
+                    zone = cal_result.zone
+                    self._tracker.zone = cal_result.zone
+                    self._tracker.reset()
+                    self._calibrating = False
+                    save_config(self.config)
+                    logger.info("Auto-calibration applied zone (headless)")
+                elif self._calibrator.state == CalibrationState.FAILED:
+                    self._calibrating = False
+                    logger.warning("Auto-calibration failed (headless)")
+
+                cv2.imshow(window_name, display_frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    self._running = False
+                continue
+
             detection = self._detector.detect(
                 frame=display_frame,
                 zone_x1=zone.start_x1,
@@ -469,6 +585,8 @@ class PuttingApp:
                 self._debug = not self._debug
                 if not self._debug:
                     cv2.destroyWindow("Debug Mask")
+            elif key == ord("a"):
+                self._on_auto_zone()
 
     # ---- Shared ----
 

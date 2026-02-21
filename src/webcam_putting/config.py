@@ -34,6 +34,7 @@ class DetectionZone:
     y1: int = 180
     y2: int = 450
     gateway_width: int = 10  # Width of the detection gateway past start_x2
+    direction: str = "left_to_right"  # "left_to_right" or "right_to_left"
 
 
 @dataclass

@@ -166,3 +166,45 @@ class TestCalculateShot:
         assert result is not None
         assert result.speed_mph > 0
         assert result.distance_mm > 0
+
+    def test_reverse_x_straight_putt(self):
+        """RtL straight putt (decreasing x) should produce valid speed with ~0 HLA."""
+        ratio = pixel_to_mm_ratio(21)
+        px_distance = 100 * ratio
+
+        # Ball moves LEFT (decreasing x)
+        start = (500, 200)
+        end = (500 - int(px_distance), 200)
+
+        result = calculate_shot(
+            start_pos=start,
+            end_pos=end,
+            entry_time=0.0,
+            exit_time=0.5,
+            px_mm_ratio=ratio,
+            reverse_x=True,
+        )
+
+        assert result is not None
+        assert abs(result.distance_mm - 100.0) < 5.0
+        assert abs(result.hla_degrees) < 2.0
+        assert result.speed_mph > 0
+
+    def test_reverse_x_angled_putt(self):
+        """RtL angled putt should report correct HLA."""
+        ratio = pixel_to_mm_ratio(21)
+        # Ball moves left and up (decreasing x, decreasing y)
+        start = (500, 200)
+        end = (400, 100)
+
+        result = calculate_shot(
+            start_pos=start,
+            end_pos=end,
+            entry_time=0.0,
+            exit_time=0.5,
+            px_mm_ratio=ratio,
+            reverse_x=True,
+        )
+
+        assert result is not None
+        assert abs(result.hla_degrees - 45.0) < 2.0
