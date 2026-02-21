@@ -8,9 +8,12 @@ import platform
 import queue
 import subprocess
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import customtkinter as ctk
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from birdman_putting.color_presets import PRESET_DESCRIPTIONS
 from birdman_putting.config import CONFIG_FILE, AppConfig, save_config
@@ -70,6 +73,7 @@ class MainWindow(ctk.CTk):
         self._on_auto_zone = on_auto_zone
         self._is_running = False
         self._edit_zone_active = False
+        self._pick_mode_active = False
         self._auto_zone_active = False
         self._shot_history: list[ShotHistoryEntry] = []
         self._save_after_id: str | None = None
@@ -405,6 +409,13 @@ class MainWindow(ctk.CTk):
         )
         self._edit_config_btn.pack(side="left", padx=(8, 0))
 
+        # Pick Color button
+        self._pick_color_btn = ctk.CTkButton(
+            parent, text="Pick Color", command=self._toggle_pick_color,
+            width=100, fg_color="gray35", hover_color="gray30",
+        )
+        self._pick_color_btn.pack(side="left", padx=(8, 0))
+
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
         self._mode_label = ctk.CTkLabel(
@@ -708,6 +719,49 @@ class MainWindow(ctk.CTk):
                 text="Auto Zone", fg_color="gray35", hover_color="gray30",
             )
 
+    def _toggle_pick_color(self) -> None:
+        """Toggle color pick mode on the video panel."""
+        if self._pick_mode_active:
+            # Deactivate
+            self._pick_mode_active = False
+            self._pick_color_btn.configure(
+                text="Pick Color", fg_color="gray35", hover_color="gray30",
+            )
+            self._video_panel.set_color_pick_mode(False)
+        else:
+            # Exit edit zone mode first if active
+            if self._edit_zone_active:
+                self._toggle_edit_zone()
+            self._pick_mode_active = True
+            self._pick_color_btn.configure(
+                text="Cancel Pick", fg_color="#cc7700", hover_color="#aa6600",
+            )
+            self._video_panel.set_color_pick_mode(True, self._on_color_picked)
+
+    def _on_color_picked(self, x: int, y: int, frame: np.ndarray) -> None:
+        """Handle color pick from video panel — generate HSV range and apply."""
+        from birdman_putting.detection import generate_hsv_from_patch
+
+        hsv_range = generate_hsv_from_patch(frame, x, y)
+        self._config.ball.custom_hsv = hsv_range.to_dict()
+        logger.info(
+            "Picked HSV range at (%d, %d): H %d-%d  S %d-%d  V %d-%d",
+            x, y,
+            hsv_range.hmin, hsv_range.hmax,
+            hsv_range.smin, hsv_range.smax,
+            hsv_range.vmin, hsv_range.vmax,
+        )
+
+        # Exit pick mode
+        self._pick_mode_active = False
+        self._pick_color_btn.configure(
+            text="Pick Color", fg_color="gray35", hover_color="gray30",
+        )
+        self._video_panel.set_color_pick_mode(False)
+
+        # Propagate to detector and save
+        self._on_setting_changed()
+
     def _on_edit_config(self) -> None:
         """Open config.toml in the system's default text editor."""
         try:
@@ -735,6 +789,8 @@ class MainWindow(ctk.CTk):
 
     def _on_window_close(self) -> None:
         """Handle window close — flush pending save, clean up."""
+        if self._pick_mode_active:
+            self._toggle_pick_color()
         if self._edit_zone_active:
             self._toggle_edit_zone()
         # Flush any pending debounced save

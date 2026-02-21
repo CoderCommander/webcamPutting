@@ -68,6 +68,11 @@ class VideoPanel(ctk.CTkLabel):
         self._current_image: ImageTk.PhotoImage | None = None
         self._ctk_image: ctk.CTkImage | None = placeholder
 
+        # Color pick mode state
+        self._pick_mode = False
+        self._current_frame: np.ndarray | None = None  # Latest BGR frame (640px wide)
+        self._on_color_picked: Callable[[int, int, np.ndarray], None] | None = None
+
         # Edit mode state
         self._edit_mode = False
         self._zone: DetectionZone | None = None
@@ -115,6 +120,48 @@ class VideoPanel(ctk.CTkLabel):
             self._drag_mode = _DragMode.NONE
             self.configure(cursor="arrow")
 
+    def set_color_pick_mode(
+        self,
+        enabled: bool,
+        on_color_picked: Callable[[int, int, np.ndarray], None] | None = None,
+    ) -> None:
+        """Enable or disable color pick mode.
+
+        When enabled, clicking on the video samples that pixel's color.
+        Mutually exclusive with edit mode — caller should exit edit mode first.
+        """
+        self._pick_mode = enabled
+        self._on_color_picked = on_color_picked
+
+        if enabled:
+            self.bind("<Button-1>", self._on_pick_click)
+            self.configure(cursor="crosshair")
+        else:
+            self.unbind("<Button-1>")
+            self.configure(cursor="arrow")
+
+    @property
+    def pick_mode(self) -> bool:
+        """Whether color pick mode is active."""
+        return self._pick_mode
+
+    def _on_pick_click(self, event: Any) -> None:
+        """Handle click during color pick mode — sample color at click point."""
+        if not self._pick_mode or self._current_frame is None:
+            return
+
+        # Display coords map 1:1 on X (both 640px), Y needs scaling
+        frame_x = event.x
+        frame_y = self._display_y_to_frame(event.y)
+
+        # Clamp to frame bounds
+        fh, fw = self._current_frame.shape[:2]
+        frame_x = max(0, min(fw - 1, frame_x))
+        frame_y = max(0, min(fh - 1, frame_y))
+
+        if self._on_color_picked:
+            self._on_color_picked(frame_x, frame_y, self._current_frame)
+
     @property
     def edit_mode(self) -> bool:
         """Whether zone editing is active."""
@@ -148,6 +195,9 @@ class VideoPanel(ctk.CTkLabel):
         """Convert BGR frame to CTkImage and display."""
         # Track frame dimensions for coordinate mapping
         self._frame_height = frame.shape[0]
+
+        # Cache the BGR frame for color picking
+        self._current_frame = frame
 
         # BGR -> RGB
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
