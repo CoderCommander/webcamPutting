@@ -101,6 +101,9 @@ class BallDetector:
         )
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
+        if contours:
+            logger.info("Contours found: %d", len(contours))
+
         for contour in contours:
             ((cx, cy), r) = cv2.minEnclosingCircle(contour)
 
@@ -111,16 +114,22 @@ class BallDetector:
 
             # Check Y bounds
             if not (zone_y1 <= cy <= zone_y2):
-                continue  # Skip contours with center out of Y bounds
+                logger.info("  reject y-bounds: (%d,%d) r=%d", int(cx), int(cy), r_int)
+                continue
 
             # Filter by minimum radius
             if r_int < self.min_radius:
+                logger.info("  reject min-radius: (%d,%d) r=%d < %d", int(cx), int(cy), r_int, self.min_radius)
                 continue
 
             # Filter by circularity: area / (π * r²). A ball ≈ 0.7-0.85; a hand ≈ 0.3-0.5
             if r > 0 and self.min_circularity > 0:
                 area = cv2.contourArea(contour)
                 circularity = area / (np.pi * r * r)
+                logger.info(
+                    "  contour (%d,%d) r=%d circ=%.3f (min=%.2f)",
+                    int(cx), int(cy), r_int, circularity, self.min_circularity,
+                )
                 if circularity < self.min_circularity:
                     continue
 

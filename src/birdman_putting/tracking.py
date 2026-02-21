@@ -163,6 +163,11 @@ class BallTracker:
                         1 for cx, cy in self._start_candidates
                         if abs(cx - x) <= tolerance and abs(cy - y) <= tolerance
                     )
+                    logger.info(
+                        "Stability: (%d,%d) candidates=%d matching=%d/%d tol=%d",
+                        x, y, len(self._start_candidates), matching,
+                        self.ball_settings.start_stability_frames, tolerance,
+                    )
 
                     if matching >= self.ball_settings.start_stability_frames:
                         logger.info("New start found at (%d, %d) r=%d", x, y, detection.radius)
