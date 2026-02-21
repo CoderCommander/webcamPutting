@@ -40,11 +40,13 @@ class BallDetector:
         blur_kernel: tuple[int, int] = (11, 11),
         min_radius: int = 5,
         min_circularity: float = 0.5,
+        morph_iterations: int = 5,
     ):
         self.hsv_range = hsv_range
         self.blur_kernel = blur_kernel
         self.min_radius = min_radius
         self.min_circularity = min_circularity
+        self.morph_iterations = morph_iterations
 
     def update_hsv(self, hsv_range: HSVRange) -> None:
         """Update the HSV range for detection."""
@@ -91,6 +93,14 @@ class BallDetector:
             self.hsv_range.hmax, self.hsv_range.smax, self.hsv_range.vmax
         ])
         mask = cv2.inRange(hsv, lower, upper)
+
+        # Morphological close: fill gaps in the ball's mask so fragmented
+        # pixels merge into a solid contour. erode(1) removes noise,
+        # dilate(5) fills gaps and connects nearby blobs.
+        if self.morph_iterations > 0:
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.erode(mask, kernel, iterations=1)
+            mask = cv2.dilate(mask, kernel, iterations=self.morph_iterations)
 
         # Crop mask to detection zone
         zone_mask = mask[zone_y1:zone_y2, zone_x1:zone_x2_limit]
@@ -194,6 +204,10 @@ class BallDetector:
             self.hsv_range.hmax, self.hsv_range.smax, self.hsv_range.vmax
         ])
         mask = cv2.inRange(hsv, lower, upper)
+        if self.morph_iterations > 0:
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.erode(mask, kernel, iterations=1)
+            mask = cv2.dilate(mask, kernel, iterations=self.morph_iterations)
         return mask[zone_y1:zone_y2, zone_x1:zone_x2_limit]
 
 

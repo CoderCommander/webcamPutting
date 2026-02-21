@@ -79,6 +79,7 @@ class BallSettings:
     fixed_radius: int = 0  # 0 = auto-detect
     min_radius: int = 5
     min_circularity: float = 0.5  # Reject non-round contours (hand, noise); ball ≈ 0.7-0.85
+    morph_iterations: int = 5  # Dilate iterations to fill gaps in mask (0=disabled)
     start_stability_frames: int = 15  # Frames needed for stable start detection
     start_position_tolerance: int = 3  # Pixels tolerance for position clustering
 

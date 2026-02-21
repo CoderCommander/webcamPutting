@@ -70,6 +70,7 @@ class PuttingApp:
             hsv_range=self._hsv_range,
             min_radius=config.ball.min_radius,
             min_circularity=config.ball.min_circularity,
+            morph_iterations=config.ball.morph_iterations,
         )
         self._tracker = BallTracker(
             zone=config.detection_zone,
