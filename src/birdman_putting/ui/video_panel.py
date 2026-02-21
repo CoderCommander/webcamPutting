@@ -14,7 +14,7 @@ from PIL import Image, ImageTk
 
 from birdman_putting.config import DetectionZone
 
-_HANDLE_HALF = 6  # Half-size of handle hit area in display pixels
+_HANDLE_HALF = 10  # Half-size of handle hit area in display pixels
 
 
 class _DragMode(enum.Enum):

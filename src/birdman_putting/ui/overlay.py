@@ -19,7 +19,7 @@ COLOR_GRAY = (140, 140, 140)
 COLOR_DARK_GREEN = (0, 180, 0)
 COLOR_BLACK = (0, 0, 0)
 
-_HANDLE_SIZE = 5  # Half-size of handle square in pixels
+_HANDLE_SIZE = 8  # Half-size of handle square in pixels
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.45

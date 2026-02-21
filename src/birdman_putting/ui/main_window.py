@@ -227,10 +227,14 @@ class MainWindow(ctk.CTk):
             lambda v: setattr(self._config.camera, "flip_image", v),
         )
 
-        self._rotation_slider = self._add_live_slider(
-            scroll, "Rotation (\u00b0)", -45, 45, c.rotation,
-            lambda v: setattr(self._config.camera, "rotation", v),
+        self._rotation_entry = self._add_entry(
+            scroll, "Rotation:", str(c.rotation), width=60,
         )
+        ctk.CTkLabel(
+            self._rotation_entry.master, text="\u00b0 (-45 to 45)",
+            font=("", 10), text_color="gray50",
+        ).pack(side="left", padx=2)
+        self._bind_entry_apply(self._rotation_entry, self._apply_rotation)
 
         self._autofocus_var = self._add_live_checkbox(
             scroll, "Autofocus", bool(c.autofocus),
@@ -560,6 +564,18 @@ class MainWindow(ctk.CTk):
         """Parse and apply webcam index from entry."""
         with contextlib.suppress(ValueError):
             self._config.camera.webcam_index = int(value)
+
+    def _apply_rotation(self, value: str) -> None:
+        """Parse and apply rotation from entry (float, clamped to [-45, 45])."""
+        try:
+            v = float(value)
+        except ValueError:
+            return
+        v = max(-45.0, min(45.0, v))
+        self._config.camera.rotation = v
+        self._rotation_entry.delete(0, "end")
+        self._rotation_entry.insert(0, str(v))
+        self._on_setting_changed()
 
     def _apply_port(self, value: str) -> None:
         """Parse and apply port from entry."""

@@ -104,7 +104,7 @@ class BallDetector:
 
             # Check Y bounds
             if not (zone_y1 <= cy <= zone_y2):
-                break  # Contours are sorted by area; if largest is out of bounds, stop
+                continue  # Skip contours with center out of Y bounds
 
             # Filter by minimum radius
             if r_int < self.min_radius:
@@ -230,6 +230,8 @@ def generate_hsv_from_patch(
     if hue_shifted:
         h_lo = (h_lo - 90) % 180
         h_hi = (h_hi - 90) % 180
+        if h_lo > h_hi:
+            h_lo, h_hi = h_hi, h_lo
 
     return HSVRange(
         hmin=int(max(0, h_lo)),

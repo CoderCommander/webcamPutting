@@ -208,8 +208,8 @@ class BallTracker:
             if self._is_rtl:
                 exited = x < gateway_x1 and len(self._positions) >= 2
                 if exited:
-                    prev_x = self._positions[-2][0]
-                    if x < prev_x - min_dist:
+                    travel = self._entry_pos[0] - x
+                    if travel >= min_dist:
                         self._state = ShotState.LEFT
                         result = ShotResult(
                             start_position=self._entry_pos,
@@ -226,8 +226,8 @@ class BallTracker:
             else:
                 exited = x > gateway_x2 and len(self._positions) >= 2
                 if exited:
-                    prev_x = self._positions[-2][0]
-                    if x > prev_x + min_dist:
+                    travel = x - self._entry_pos[0]
+                    if travel >= min_dist:
                         self._state = ShotState.LEFT
                         result = ShotResult(
                             start_position=self._entry_pos,
