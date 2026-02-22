@@ -70,6 +70,69 @@ class TestShotMessageFormat:
         assert parsed["BallData"]["HLA"] == -3.7
 
 
+class TestFullShotMessageFormat:
+    def test_full_shot_message_has_all_ball_data(self):
+        """Verify full shot message includes VLA, spin, etc."""
+        settings = ConnectionSettings(mode="gspro_direct")
+        client = GSProClient(settings)
+        client._shot_number = 1
+
+        msg = client._build_full_shot_message(
+            ball_speed=120.5, vla=12.3, hla=-1.5,
+            total_spin=3000.0, spin_axis=15.0,
+            back_spin=2898.0, side_spin=776.0,
+            club_speed=95.0,
+        )
+
+        assert msg["DeviceID"] == "BirdmanPutting"
+        assert msg["APIversion"] == "1"
+
+        ball = msg["BallData"]
+        assert ball["Speed"] == 120.5
+        assert ball["VLA"] == 12.3
+        assert ball["HLA"] == -1.5
+        assert ball["TotalSpin"] == 3000.0
+        assert ball["SpinAxis"] == 15.0
+        assert ball["BackSpin"] == 2898.0
+        assert ball["SideSpin"] == 776.0
+
+        opts = msg["ShotDataOptions"]
+        assert opts["ContainsBallData"] is True
+        assert opts["ContainsClubData"] is True  # club_speed > 0
+        assert opts["IsHeartBeat"] is False
+
+    def test_full_shot_no_club_speed(self):
+        """ContainsClubData should be False when club_speed is 0."""
+        settings = ConnectionSettings()
+        client = GSProClient(settings)
+        client._shot_number = 1
+
+        msg = client._build_full_shot_message(
+            ball_speed=100.0, vla=10.0, hla=0.0,
+            total_spin=2500.0, spin_axis=0.0,
+            back_spin=2500.0, side_spin=0.0,
+            club_speed=0.0,
+        )
+        assert msg["ShotDataOptions"]["ContainsClubData"] is False
+
+    def test_full_shot_values_rounded(self):
+        """Values should be rounded to 2 decimal places."""
+        settings = ConnectionSettings()
+        client = GSProClient(settings)
+        client._shot_number = 1
+
+        msg = client._build_full_shot_message(
+            ball_speed=120.5678, vla=12.3456, hla=-1.5678,
+            total_spin=3000.1234, spin_axis=15.6789,
+            back_spin=2898.1234, side_spin=776.5678,
+            club_speed=95.1234,
+        )
+        ball = msg["BallData"]
+        assert ball["Speed"] == 120.57
+        assert ball["VLA"] == 12.35
+        assert ball["HLA"] == -1.57
+
+
 class TestHTTPMiddlewareFormat:
     def test_http_mode_is_connected(self):
         """HTTP mode is always 'connected' (stateless)."""

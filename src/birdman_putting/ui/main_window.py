@@ -150,6 +150,21 @@ class MainWindow(ctk.CTk):
         )
         self._conn_indicator.pack(anchor="w", padx=6, pady=(0, 4))
 
+        # Mevo
+        mevo_frame = ctk.CTkFrame(tab, corner_radius=6)
+        mevo_frame.pack(fill="x", padx=4, pady=(0, 3))
+
+        ctk.CTkLabel(
+            mevo_frame, text="MEVO", font=("", 10, "bold"),
+            text_color="gray60",
+        ).pack(anchor="w", padx=6, pady=(4, 1))
+
+        self._mevo_indicator = ctk.CTkLabel(
+            mevo_frame, text="  Disabled",
+            font=("", 12), text_color="gray50",
+        )
+        self._mevo_indicator.pack(anchor="w", padx=6, pady=(0, 4))
+
         # Last shot
         shot_frame = ctk.CTkFrame(tab, corner_radius=6)
         shot_frame.pack(fill="x", padx=4, pady=3)
@@ -371,6 +386,36 @@ class MainWindow(ctk.CTk):
             variable=self._mode_var, value="http_middleware",
             command=self._on_mode_changed, font=("", 11),
         ).pack(anchor="w")
+
+        # --- MEVO ---
+        self._section_label(scroll, "MEVO (LAUNCH MONITOR)")
+
+        self._mevo_enabled_var = self._add_live_checkbox(
+            scroll, "Enable Mevo OCR", self._config.mevo.enabled,
+            lambda v: setattr(self._config.mevo, "enabled", v),
+            live=False,
+        )
+
+        self._mevo_window_entry = self._add_entry(
+            scroll, "Window:", self._config.mevo.window_title, width=140,
+        )
+        self._bind_entry_apply(
+            self._mevo_window_entry,
+            lambda v: setattr(self._config.mevo, "window_title", v.strip()),
+        )
+
+        self._mevo_tessdata_entry = self._add_entry(
+            scroll, "Tessdata:", self._config.mevo.tessdata_dir, width=140,
+        )
+        self._bind_entry_apply(
+            self._mevo_tessdata_entry,
+            lambda v: setattr(self._config.mevo, "tessdata_dir", v.strip()),
+        )
+
+        ctk.CTkLabel(
+            scroll, text="Configure ROIs in config.toml",
+            font=("", 9), text_color="gray50",
+        ).pack(anchor="w", pady=(2, 0))
 
     def _build_control_bar(self, parent: ctk.CTkFrame) -> None:
         """Build the bottom control bar."""
@@ -630,6 +675,23 @@ class MainWindow(ctk.CTk):
             self._conn_indicator.configure(text="  Connected", text_color="#44cc44")
         else:
             self._conn_indicator.configure(text="  Disconnected", text_color="#ff4444")
+
+    def update_mevo_status(self, text: str, state: str = "disabled") -> None:
+        """Update the Mevo status indicator.
+
+        Args:
+            text: Human-readable status text.
+            state: One of "ok", "error", "watching", or "disabled".
+        """
+        colors = {
+            "ok": "#44cc44",
+            "error": "#ff4444",
+            "watching": "#ccaa00",
+            "disabled": "gray50",
+        }
+        self._mevo_indicator.configure(
+            text=f"  {text}", text_color=colors.get(state, "gray50"),
+        )
 
     def update_shot(self, speed: float, hla: float, shot_number: int) -> None:
         """Update last shot display and add to history."""

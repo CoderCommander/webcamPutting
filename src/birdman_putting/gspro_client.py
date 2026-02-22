@@ -104,6 +104,42 @@ class GSProClient:
         else:
             return self._send_socket(speed_mph, hla_degrees)
 
+    def send_full_shot(
+        self,
+        ball_speed: float,
+        vla: float,
+        hla: float,
+        total_spin: float,
+        spin_axis: float,
+        back_spin: float,
+        side_spin: float,
+        club_speed: float = 0.0,
+    ) -> GSProResponse:
+        """Send full shot data from a launch monitor to GSPro.
+
+        Args:
+            ball_speed: Ball speed in MPH.
+            vla: Vertical launch angle in degrees.
+            hla: Horizontal launch angle in degrees.
+            total_spin: Total spin in RPM.
+            spin_axis: Spin axis in degrees.
+            back_spin: Back spin in RPM.
+            side_spin: Side spin in RPM.
+            club_speed: Club head speed in MPH (0 if unavailable).
+
+        Returns:
+            GSProResponse indicating success or failure.
+        """
+        if not self._connected.is_set() and not self._connect_socket():
+            return GSProResponse(success=False, message="Not connected to GSPro")
+
+        self._shot_number += 1
+        message = self._build_full_shot_message(
+            ball_speed, vla, hla, total_spin, spin_axis,
+            back_spin, side_spin, club_speed,
+        )
+        return self._send_json(message)
+
     # --- GSPro Direct (Socket) ---
 
     def _connect_socket(self) -> bool:
@@ -195,6 +231,42 @@ class GSProClient:
             "ShotDataOptions": {
                 "ContainsBallData": True,
                 "ContainsClubData": False,
+                "LaunchMonitorIsReady": True,
+                "LaunchMonitorBallDetected": True,
+                "IsHeartBeat": False,
+            },
+        }
+
+    def _build_full_shot_message(
+        self,
+        ball_speed: float,
+        vla: float,
+        hla: float,
+        total_spin: float,
+        spin_axis: float,
+        back_spin: float,
+        side_spin: float,
+        club_speed: float,
+    ) -> dict[str, object]:
+        """Build GSPro Open Connect v1 message with full ball data."""
+        return {
+            "DeviceID": self._settings.device_id,
+            "Units": "Yards",
+            "ShotNumber": self._shot_number,
+            "APIversion": "1",
+            "BallData": {
+                "Speed": round(ball_speed, 2),
+                "SpinAxis": round(spin_axis, 2),
+                "TotalSpin": round(total_spin, 2),
+                "BackSpin": round(back_spin, 2),
+                "SideSpin": round(side_spin, 2),
+                "HLA": round(hla, 2),
+                "VLA": round(vla, 2),
+                "CarryDistance": 0.0,
+            },
+            "ShotDataOptions": {
+                "ContainsBallData": True,
+                "ContainsClubData": club_speed > 0,
                 "LaunchMonitorIsReady": True,
                 "LaunchMonitorBallDetected": True,
                 "IsHeartBeat": False,

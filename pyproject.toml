@@ -26,6 +26,9 @@ dev = [
     "ruff",
     "mypy",
 ]
+mevo = [
+    "pytesseract>=0.3.10",
+]
 build = [
     "pyinstaller>=6.0",
 ]
@@ -60,6 +63,7 @@ module = [
     "PIL.*",
     "tomli",
     "tomli_w",
+    "pytesseract",
 ]
 ignore_missing_imports = true
 

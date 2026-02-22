@@ -56,6 +56,10 @@ def main() -> None:
         help="Run in headless mode with OpenCV windows (no CustomTkinter UI)",
     )
     parser.add_argument(
+        "--mevo", action="store_true",
+        help="Enable Flightscope Mevo launch monitor via screenshot OCR",
+    )
+    parser.add_argument(
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)",
@@ -99,6 +103,9 @@ def main() -> None:
     if args.ballcolor:
         config.ball.color_preset = args.ballcolor
         config.ball.custom_hsv = None  # CLI color overrides custom HSV
+
+    if args.mevo:
+        config.mevo.enabled = True
 
     # Run app
     from birdman_putting.app import PuttingApp

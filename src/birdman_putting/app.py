@@ -33,6 +33,7 @@ from birdman_putting.tracking import BallTracker, ShotState
 from birdman_putting.ui.overlay import draw_calibration_overlay, draw_overlay
 
 if TYPE_CHECKING:
+    from birdman_putting.mevo.detector import MevoDetector
     from birdman_putting.ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,10 @@ class PuttingApp:
         # Calibration
         self._calibrator: AutoCalibrator | None = None
         self._calibrating: bool = False
+
+        # Mevo thread
+        self._mevo_detector: MevoDetector | None = None
+        self._mevo_thread: threading.Thread | None = None
 
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
@@ -167,6 +172,9 @@ class PuttingApp:
             self._window.update_connection_status(connected)
 
         self._running = True
+
+        # Start Mevo thread if enabled
+        self._start_mevo()
 
         # Start video display polling
         if self._window:
@@ -466,6 +474,10 @@ class PuttingApp:
             logger.warning("Could not connect to GSPro. Shots will be logged only.")
 
         self._running = True
+
+        # Start Mevo thread if enabled
+        self._start_mevo()
+
         logger.info("Putting app started (headless mode)")
 
         try:
@@ -633,6 +645,103 @@ class PuttingApp:
                 self._pick_mode = not self._pick_mode
                 logger.info("Color pick mode: %s", "ON" if self._pick_mode else "OFF")
 
+    # ---- Mevo ----
+
+    def _start_mevo(self) -> None:
+        """Start Mevo OCR thread if enabled."""
+        if not self.config.mevo.enabled:
+            return
+
+        try:
+            from birdman_putting.mevo.detector import MevoDetector, build_rois
+            from birdman_putting.mevo.ocr import MevoOCR
+            from birdman_putting.mevo.screenshot import WindowCapture
+        except (ImportError, OSError) as e:
+            logger.warning("Mevo dependencies not available: %s", e)
+            if self._window:
+                with contextlib.suppress(RuntimeError):
+                    self._window.after(
+                        0, self._window.update_mevo_status, f"Error: {e}", "error",
+                    )
+            return
+
+        rois = build_rois(self.config.mevo.rois)
+        if not rois:
+            logger.warning("No Mevo ROIs configured — Mevo disabled")
+            if self._window:
+                with contextlib.suppress(RuntimeError):
+                    self._window.after(
+                        0, self._window.update_mevo_status, "No ROIs configured", "error",
+                    )
+            return
+
+        capture = WindowCapture(self.config.mevo.window_title)
+        tessdata = self.config.mevo.tessdata_dir or None
+        ocr = MevoOCR(rois=rois, tessdata_dir=tessdata)
+        self._mevo_detector = MevoDetector(self.config.mevo, ocr, capture)
+
+        self._mevo_thread = threading.Thread(
+            target=self._mevo_loop, daemon=True, name="mevo",
+        )
+        self._mevo_thread.start()
+        logger.info("Mevo OCR thread started (window='%s')", self.config.mevo.window_title)
+
+        if self._window:
+            with contextlib.suppress(RuntimeError):
+                self._window.after(
+                    0, self._window.update_mevo_status, "Watching...", "watching",
+                )
+
+    def _mevo_loop(self) -> None:
+        """Background thread: poll Mevo display for new shots."""
+        while self._running:
+            if self._mevo_detector:
+                shot = self._mevo_detector.poll()
+                if shot is not None:
+                    self._handle_mevo_shot(shot)
+            time.sleep(self.config.mevo.poll_interval)
+
+    def _handle_mevo_shot(self, shot: object) -> None:
+        """Process a Mevo shot — send full data to GSPro, update UI."""
+        from birdman_putting.mevo.detector import MevoShotData
+
+        if not isinstance(shot, MevoShotData):
+            return
+
+        response = self._gspro.send_full_shot(
+            ball_speed=shot.ball_speed,
+            vla=shot.launch_angle,
+            hla=shot.launch_direction,
+            total_spin=shot.spin_rate,
+            spin_axis=shot.spin_axis,
+            back_spin=shot.back_spin,
+            side_spin=shot.side_spin,
+            club_speed=shot.club_speed,
+        )
+        logger.info(
+            "Mevo shot: %.1f mph, VLA=%.1f, HLA=%.1f, Spin=%d → %s",
+            shot.ball_speed, shot.launch_angle, shot.launch_direction,
+            int(shot.spin_rate), "OK" if response.success else response.message,
+        )
+
+        if self._window:
+            with contextlib.suppress(RuntimeError):
+                self._window.after(
+                    0, self._window.update_mevo_status, "Shot detected!", "ok",
+                )
+                self._window.after(
+                    0, self._window.update_shot,
+                    shot.ball_speed, shot.launch_direction,
+                    self._gspro.shot_number,
+                )
+
+    def _stop_mevo(self) -> None:
+        """Stop the Mevo thread."""
+        if self._mevo_thread is not None:
+            self._mevo_thread.join(timeout=5)
+            self._mevo_thread = None
+        self._mevo_detector = None
+
     # ---- Shared ----
 
     def _stop_processing(self) -> None:
@@ -644,6 +753,7 @@ class PuttingApp:
 
     def _cleanup(self) -> None:
         """Release all resources."""
+        self._stop_mevo()
         self._camera.release()
         self._gspro.disconnect()
         cv2.destroyAllWindows()
