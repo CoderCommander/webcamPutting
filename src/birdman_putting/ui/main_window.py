@@ -7,6 +7,7 @@ import logging
 import platform
 import queue
 import subprocess
+import tkinter as tk
 from collections.abc import Callable
 from typing import Any
 
@@ -615,14 +616,14 @@ class MainWindow(ctk.CTk):
 
     def _on_rotation_left(self, event: Any) -> None:
         """Decrease rotation by 0.5 degrees (Left arrow key)."""
-        if isinstance(self.focus_get(), ctk.CTkEntry):
+        if isinstance(self.focus_get(), (ctk.CTkEntry, tk.Entry)):
             return
         current = float(self._rotation_entry.get() or "0")
         self._apply_rotation(str(current - 0.5))
 
     def _on_rotation_right(self, event: Any) -> None:
         """Increase rotation by 0.5 degrees (Right arrow key)."""
-        if isinstance(self.focus_get(), ctk.CTkEntry):
+        if isinstance(self.focus_get(), (ctk.CTkEntry, tk.Entry)):
             return
         current = float(self._rotation_entry.get() or "0")
         self._apply_rotation(str(current + 0.5))
