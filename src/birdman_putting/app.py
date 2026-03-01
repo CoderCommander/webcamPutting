@@ -332,6 +332,11 @@ class PuttingApp:
             # Track ball
             shot_result = self._tracker.update(detection)
 
+            # Signal GSPro when ball is detected and ready
+            self._gspro.ball_detected = self._tracker.state not in (
+                ShotState.IDLE,
+            )
+
             # Process completed shot
             if shot_result is not None:
                 self._handle_shot(shot_result)
@@ -587,6 +592,12 @@ class PuttingApp:
             )
 
             shot_result = self._tracker.update(detection)
+
+            # Signal GSPro when ball is detected and ready
+            self._gspro.ball_detected = self._tracker.state not in (
+                ShotState.IDLE,
+            )
+
             if shot_result is not None:
                 self._handle_shot(shot_result)
 
@@ -684,6 +695,7 @@ class PuttingApp:
             target=self._mevo_loop, daemon=True, name="mevo",
         )
         self._mevo_thread.start()
+        self._gspro.ball_detected = True  # Mevo always has ball ready
         logger.info("Mevo OCR thread started (window='%s')", self.config.mevo.window_title)
 
         if self._window:

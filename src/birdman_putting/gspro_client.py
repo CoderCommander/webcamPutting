@@ -47,6 +47,7 @@ class GSProClient:
         self._lock = threading.Lock()
         self._heartbeat_thread: threading.Thread | None = None
         self._running = False
+        self._ball_detected = False  # Set True when ball is ready for shot
 
     @property
     def is_connected(self) -> bool:
@@ -61,6 +62,14 @@ class GSProClient:
     @property
     def shot_number(self) -> int:
         return self._shot_number
+
+    @property
+    def ball_detected(self) -> bool:
+        return self._ball_detected
+
+    @ball_detected.setter
+    def ball_detected(self, value: bool) -> None:
+        self._ball_detected = value
 
     def connect(self) -> bool:
         """Establish connection to GSPro.
@@ -182,7 +191,7 @@ class GSProClient:
         return self._send_json(message)
 
     def _send_json(self, message: dict[str, object]) -> GSProResponse:
-        """Send a JSON message over the socket."""
+        """Send a JSON message over the socket and wait for response."""
         with self._lock:
             if self._socket is None:
                 return GSProResponse(success=False, message="Socket not connected")
@@ -208,6 +217,37 @@ class GSProClient:
 
             except (OSError, json.JSONDecodeError) as e:
                 logger.error("Failed to send to GSPro: %s", e)
+                self._connected.clear()
+                return GSProResponse(success=False, message=str(e))
+
+    def _send_heartbeat_json(self, message: dict[str, object]) -> GSProResponse:
+        """Send a heartbeat message without waiting for a response.
+
+        GSPro does not respond to heartbeats, so blocking on recv causes
+        a 10-second timeout that cascades into connection failures.
+        """
+        with self._lock:
+            if self._socket is None:
+                return GSProResponse(success=False, message="Socket not connected")
+
+            try:
+                data = json.dumps(message).encode("utf-8")
+                self._socket.sendall(data)
+
+                # Drain any pending response data without blocking
+                self._socket.setblocking(False)
+                try:
+                    self._socket.recv(4096)
+                except BlockingIOError:
+                    pass  # No data available — expected for heartbeats
+                finally:
+                    self._socket.setblocking(True)
+                    self._socket.settimeout(10.0)
+
+                return GSProResponse(success=True)
+
+            except OSError as e:
+                logger.error("Heartbeat send failed: %s", e)
                 self._connected.clear()
                 return GSProResponse(success=False, message=str(e))
 
@@ -294,7 +334,7 @@ class GSProClient:
                 "ContainsBallData": False,
                 "ContainsClubData": False,
                 "LaunchMonitorIsReady": True,
-                "LaunchMonitorBallDetected": False,
+                "LaunchMonitorBallDetected": self._ball_detected,
                 "IsHeartBeat": True,
             },
         }
@@ -310,7 +350,7 @@ class GSProClient:
 
             if self._connected.is_set():
                 message = self._build_heartbeat_message()
-                result = self._send_json(message)
+                result = self._send_heartbeat_json(message)
                 if not result.success:
                     logger.warning("Heartbeat failed, will attempt reconnect")
                     self._connected.clear()
