@@ -41,6 +41,13 @@ else:
     DIB_RGB_COLORS = 0
     BI_RGB = 0
 
+    # Set argtypes for GDI functions that take pointers (fixes 64-bit overflow)
+    gdi32.GetDIBits.argtypes = [
+        wt.HDC, wt.HBITMAP, ctypes.c_uint, ctypes.c_uint,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+    ]
+    gdi32.GetDIBits.restype = ctypes.c_int
+
     class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [
             ("biSize", wt.DWORD),
