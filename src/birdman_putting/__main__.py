@@ -60,6 +60,10 @@ def main() -> None:
         help="Enable Flightscope Mevo launch monitor via screenshot OCR",
     )
     parser.add_argument(
+        "--calibrate-mevo", action="store_true",
+        help="Interactive ROI calibration for Mevo OCR",
+    )
+    parser.add_argument(
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)",
@@ -106,6 +110,13 @@ def main() -> None:
 
     if args.mevo:
         config.mevo.enabled = True
+
+    # Handle calibration mode
+    if args.calibrate_mevo:
+        from birdman_putting.mevo.calibrate import run_calibration
+
+        run_calibration(config)
+        sys.exit(0)
 
     # Run app
     from birdman_putting.app import PuttingApp
