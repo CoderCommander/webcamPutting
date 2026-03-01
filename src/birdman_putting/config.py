@@ -124,7 +124,7 @@ class MevoSettings:
     """Flightscope Mevo launch monitor OCR settings."""
 
     enabled: bool = False
-    window_title: str = "FS Golf"  # Title of the Mevo app window
+    window_title: str = "FS Golf PC"  # Title of the Mevo app window
     poll_interval: float = 0.5  # Seconds between screenshot captures
     mse_threshold: float = 100.0  # Pixel-change threshold for new-shot detection
     tessdata_dir: str = ""  # Path to tessdata directory (empty = system default)
