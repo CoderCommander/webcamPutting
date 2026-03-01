@@ -25,12 +25,22 @@ _METRICS: list[tuple[str, bool]] = [
 ]
 
 _WINDOW_NAME = "Mevo ROI Calibration"
+_MAX_DISPLAY_WIDTH = 1280
+_MAX_DISPLAY_HEIGHT = 720
+
+
+def _compute_scale(img_w: int, img_h: int) -> float:
+    """Compute scale factor to fit image within max display bounds."""
+    scale_w = _MAX_DISPLAY_WIDTH / img_w if img_w > _MAX_DISPLAY_WIDTH else 1.0
+    scale_h = _MAX_DISPLAY_HEIGHT / img_h if img_h > _MAX_DISPLAY_HEIGHT else 1.0
+    return min(scale_w, scale_h)
 
 
 class _RectDrawer:
     """Mouse callback handler for drawing rectangles on an image."""
 
-    def __init__(self) -> None:
+    def __init__(self, scale: float) -> None:
+        self.scale = scale
         self.drawing = False
         self.start: tuple[int, int] = (0, 0)
         self.end: tuple[int, int] = (0, 0)
@@ -60,12 +70,18 @@ class _RectDrawer:
                 self.rect_ready = True
 
     def get_roi(self) -> tuple[int, int, int, int]:
-        """Return (x, y, width, height) with top-left normalization."""
+        """Return (x, y, width, height) in display coordinates."""
         x1 = min(self.start[0], self.end[0])
         y1 = min(self.start[1], self.end[1])
         x2 = max(self.start[0], self.end[0])
         y2 = max(self.start[1], self.end[1])
         return (x1, y1, x2 - x1, y2 - y1)
+
+    def get_roi_original(self) -> tuple[int, int, int, int]:
+        """Return (x, y, width, height) mapped back to original image coordinates."""
+        x, y, w, h = self.get_roi()
+        inv = 1.0 / self.scale
+        return (round(x * inv), round(y * inv), round(w * inv), round(h * inv))
 
 
 def _draw_overlay(
@@ -141,7 +157,18 @@ def run_calibration(config: AppConfig) -> None:
         print("ERROR: Failed to capture window screenshot.")
         sys.exit(1)
 
-    print(f"Captured screenshot: {screenshot.shape[1]}x{screenshot.shape[0]}")
+    img_h, img_w = screenshot.shape[:2]
+    scale = _compute_scale(img_w, img_h)
+    display_w = round(img_w * scale)
+    display_h = round(img_h * scale)
+
+    if scale < 1.0:
+        display_img = cv2.resize(screenshot, (display_w, display_h), interpolation=cv2.INTER_AREA)
+    else:
+        display_img = screenshot
+
+    print(f"Captured screenshot: {img_w}x{img_h}"
+          f" (display: {display_w}x{display_h}, scale: {scale:.2f})")
     print()
     print("Instructions:")
     print("  - Draw a rectangle around each metric value")
@@ -152,18 +179,15 @@ def run_calibration(config: AppConfig) -> None:
     print()
 
     # Set up OpenCV window
-    cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    # Size window to fit screen reasonably
-    h, w = screenshot.shape[:2]
-    if w > 1400:
-        cv2.resizeWindow(_WINDOW_NAME, 1400, int(1400 * h / w))
-    else:
-        cv2.resizeWindow(_WINDOW_NAME, w, h)
+    cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
 
-    drawer = _RectDrawer()
+    drawer = _RectDrawer(scale)
     cv2.setMouseCallback(_WINDOW_NAME, drawer.mouse_callback)  # type: ignore[arg-type]
 
-    completed: dict[str, tuple[int, int, int, int]] = {}
+    # completed_display stores coords in display space (for overlay drawing)
+    # completed_original stores coords in original image space (for saving)
+    completed_display: dict[str, tuple[int, int, int, int]] = {}
+    completed_original: dict[str, tuple[int, int, int, int]] = {}
 
     for metric_name, is_required in _METRICS:
         drawer.reset()
@@ -174,7 +198,9 @@ def run_calibration(config: AppConfig) -> None:
               f" ({'required' if is_required else 'optional, s=skip'})")
 
         while not confirmed and not skipped:
-            display = _draw_overlay(screenshot, drawer, completed, metric_name, is_required)
+            display = _draw_overlay(
+                display_img, drawer, completed_display, metric_name, is_required,
+            )
             cv2.imshow(_WINDOW_NAME, display)
             key = cv2.waitKey(30) & 0xFF
 
@@ -191,26 +217,27 @@ def run_calibration(config: AppConfig) -> None:
                 print(f"    Skipped {metric_name}")
 
             if key in (13, 10) and drawer.rect_ready:  # Enter
-                roi = drawer.get_roi()
-                completed[metric_name] = roi
+                completed_display[metric_name] = drawer.get_roi()
+                roi = drawer.get_roi_original()
+                completed_original[metric_name] = roi
                 confirmed = True
                 print(f"    {metric_name}: x={roi[0]}, y={roi[1]}, "
                       f"w={roi[2]}, h={roi[3]}")
 
     cv2.destroyAllWindows()
 
-    if not completed:
+    if not completed_original:
         print("\nNo regions were selected. Calibration cancelled.")
         return
 
-    # Test OCR on each selected region
+    # Test OCR on each selected region (using original-resolution screenshot)
     print()
     print("-" * 40)
     print("  OCR Test Results")
     print("-" * 40)
 
     rois = [ROI(name=name, x=r[0], y=r[1], width=r[2], height=r[3])
-            for name, r in completed.items()]
+            for name, r in completed_original.items()]
 
     tessdata = config.mevo.tessdata_dir or None
     try:
@@ -225,7 +252,7 @@ def run_calibration(config: AppConfig) -> None:
 
     # Save to config
     roi_dict: dict[str, list[int]] = {}
-    for name, rect in completed.items():
+    for name, rect in completed_original.items():
         roi_dict[name] = list(rect)
 
     config.mevo.rois = roi_dict
