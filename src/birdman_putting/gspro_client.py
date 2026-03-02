@@ -289,7 +289,8 @@ class GSProClient:
         club_speed: float,
     ) -> dict[str, object]:
         """Build GSPro Open Connect v1 message with full ball data."""
-        return {
+        has_club = club_speed > 0
+        msg: dict[str, object] = {
             "DeviceID": self._settings.device_id,
             "Units": "Yards",
             "ShotNumber": self._shot_number,
@@ -302,16 +303,20 @@ class GSProClient:
                 "SideSpin": round(side_spin, 2),
                 "HLA": round(hla, 2),
                 "VLA": round(vla, 2),
-                "CarryDistance": 0.0,
             },
             "ShotDataOptions": {
                 "ContainsBallData": True,
-                "ContainsClubData": club_speed > 0,
+                "ContainsClubData": has_club,
                 "LaunchMonitorIsReady": True,
                 "LaunchMonitorBallDetected": True,
                 "IsHeartBeat": False,
             },
         }
+        if has_club:
+            msg["ClubData"] = {
+                "Speed": round(club_speed, 2),
+            }
+        return msg
 
     def _build_heartbeat_message(self) -> dict[str, object]:
         """Build GSPro heartbeat message."""

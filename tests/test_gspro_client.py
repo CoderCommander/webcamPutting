@@ -101,6 +101,9 @@ class TestFullShotMessageFormat:
         assert opts["ContainsClubData"] is True  # club_speed > 0
         assert opts["IsHeartBeat"] is False
 
+        club = msg["ClubData"]
+        assert club["Speed"] == 95.0
+
     def test_full_shot_no_club_speed(self):
         """ContainsClubData should be False when club_speed is 0."""
         settings = ConnectionSettings()
@@ -114,6 +117,7 @@ class TestFullShotMessageFormat:
             club_speed=0.0,
         )
         assert msg["ShotDataOptions"]["ContainsClubData"] is False
+        assert "ClubData" not in msg
 
     def test_full_shot_values_rounded(self):
         """Values should be rounded to 2 decimal places."""
