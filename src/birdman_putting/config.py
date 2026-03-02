@@ -94,6 +94,7 @@ class ShotSettings:
     max_hla_degrees: float = 40.0
     hla_consistency_threshold: float = 30.0
     min_exit_distance_px: int = 50  # Minimum pixel distance beyond gateway to count as exit
+    extended_tracking: bool = False  # Track ball across full frame after start
 
 
 @dataclass
@@ -125,11 +126,25 @@ class MevoSettings:
 
     enabled: bool = False
     window_title: str = "FS Golf PC"  # Title of the Mevo app window
-    poll_interval: float = 0.5  # Seconds between screenshot captures
+    poll_interval: float = 0.2  # Seconds between screenshot captures
     mse_threshold: float = 100.0  # Pixel-change threshold for new-shot detection
     tessdata_dir: str = ""  # Path to tessdata directory (empty = system default)
     rois: dict[str, list[int]] = field(default_factory=dict)
     # ROI format: {"ball_speed": [x, y, w, h], "launch_angle": [x, y, w, h], ...}
+
+
+@dataclass
+class OBSSettings:
+    """OBS WebSocket integration settings."""
+
+    enabled: bool = False
+    host: str = "localhost"
+    port: int = 4455
+    password: str = ""
+    mevo_scene: str = "Mevo Shot Data"
+    putt_scene: str = "Putt Data"
+    idle_scene: str = "Main"
+    display_duration: float = 8.0  # Seconds to show shot data before returning to idle
 
 
 @dataclass
@@ -143,6 +158,7 @@ class AppConfig:
     connection: ConnectionSettings = field(default_factory=ConnectionSettings)
     replay: ReplaySettings = field(default_factory=ReplaySettings)
     mevo: MevoSettings = field(default_factory=MevoSettings)
+    obs: OBSSettings = field(default_factory=OBSSettings)
 
 
 def _dataclass_to_dict(obj: Any) -> dict[str, Any]:

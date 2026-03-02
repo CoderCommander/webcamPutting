@@ -34,6 +34,7 @@ from birdman_putting.ui.overlay import draw_calibration_overlay, draw_overlay
 
 if TYPE_CHECKING:
     from birdman_putting.mevo.detector import MevoDetector
+    from birdman_putting.obs_controller import OBSController
     from birdman_putting.ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,9 @@ class PuttingApp:
         self._mevo_detector: MevoDetector | None = None
         self._mevo_thread: threading.Thread | None = None
 
+        # OBS controller
+        self._obs: OBSController | None = None
+
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
 
@@ -129,6 +133,7 @@ class PuttingApp:
             on_color_change=self._on_color_change,
             on_settings_changed=self._on_settings_changed,
             on_auto_zone=self._on_auto_zone,
+            on_reset_putt=self.reset_putt,
         )
 
         # Auto-start if camera/video is available
@@ -172,6 +177,9 @@ class PuttingApp:
             self._window.update_connection_status(connected)
 
         self._running = True
+
+        # Connect to OBS if enabled
+        self._start_obs()
 
         # Start Mevo thread if enabled
         self._start_mevo()
@@ -217,6 +225,11 @@ class PuttingApp:
         self._camera.apply_properties()
 
         logger.info("Settings reloaded")
+
+    def reset_putt(self) -> None:
+        """Force-reset the putt tracker to IDLE state."""
+        self._tracker.reset()
+        logger.info("Putt tracker manually reset")
 
     def _on_auto_zone(self) -> None:
         """Handle Auto Zone button — toggle calibration mode."""
@@ -314,11 +327,22 @@ class PuttingApp:
                         self._frame_queue.put_nowait(display_frame)
                 continue
 
+            # Widen detection zone when ball is in motion (extended tracking)
+            if (
+                self.config.shot.extended_tracking
+                and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+            ):
+                detect_x1 = 0
+                detect_x2 = 640
+            else:
+                detect_x1 = zone.start_x1
+                detect_x2 = 640
+
             # Detect ball
             detection = self._detector.detect(
                 frame=display_frame,
-                zone_x1=zone.start_x1,
-                zone_x2_limit=640,
+                zone_x1=detect_x1,
+                zone_x2_limit=detect_x2,
                 zone_y1=zone.y1,
                 zone_y2=zone.y2,
                 timestamp=frame_time,
@@ -329,8 +353,13 @@ class PuttingApp:
                 ),
             )
 
-            # Track ball
+            # Track ball (with state transition logging)
+            prev_state = self._tracker.state
             shot_result = self._tracker.update(detection)
+            if self._tracker.state != prev_state:
+                logger.debug(
+                    "Tracker: %s → %s", prev_state.value, self._tracker.state.value,
+                )
 
             # Signal GSPro when ball is detected and ready
             self._gspro.ball_detected = self._tracker.state not in (
@@ -451,6 +480,10 @@ class PuttingApp:
         if not response.success:
             logger.warning("GSPro rejected shot: %s", response.message)
 
+        # Show putt data on OBS overlay
+        if self._obs:
+            self._obs.show_putt(shot_data.speed_mph, shot_data.hla_degrees)
+
         # Update GUI shot display
         if self._window:
             with contextlib.suppress(RuntimeError):
@@ -479,6 +512,9 @@ class PuttingApp:
             logger.warning("Could not connect to GSPro. Shots will be logged only.")
 
         self._running = True
+
+        # Connect to OBS if enabled
+        self._start_obs()
 
         # Start Mevo thread if enabled
         self._start_mevo()
@@ -577,10 +613,21 @@ class PuttingApp:
                     self._running = False
                 continue
 
+            # Widen detection zone when ball is in motion (extended tracking)
+            if (
+                self.config.shot.extended_tracking
+                and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+            ):
+                detect_x1 = 0
+                detect_x2 = 640
+            else:
+                detect_x1 = zone.start_x1
+                detect_x2 = 640
+
             detection = self._detector.detect(
                 frame=display_frame,
-                zone_x1=zone.start_x1,
-                zone_x2_limit=640,
+                zone_x1=detect_x1,
+                zone_x2_limit=detect_x2,
                 zone_y1=zone.y1,
                 zone_y2=zone.y2,
                 timestamp=frame_time,
@@ -652,9 +699,31 @@ class PuttingApp:
                     cv2.destroyWindow("Debug Mask")
             elif key == ord("a"):
                 self._on_auto_zone()
+            elif key == ord("r"):
+                self.reset_putt()
             elif key == ord("c"):
                 self._pick_mode = not self._pick_mode
                 logger.info("Color pick mode: %s", "ON" if self._pick_mode else "OFF")
+
+    # ---- OBS ----
+
+    def _start_obs(self) -> None:
+        """Connect to OBS WebSocket if enabled."""
+        if not self.config.obs.enabled:
+            return
+
+        from birdman_putting.obs_controller import OBSController
+
+        self._obs = OBSController(self.config.obs)
+        if not self._obs.connect():
+            logger.warning("OBS connection failed — overlay disabled")
+            self._obs = None
+
+    def _stop_obs(self) -> None:
+        """Disconnect from OBS."""
+        if self._obs is not None:
+            self._obs.disconnect()
+            self._obs = None
 
     # ---- Mevo ----
 
@@ -706,12 +775,16 @@ class PuttingApp:
 
     def _mevo_loop(self) -> None:
         """Background thread: poll Mevo display for new shots."""
+        interval = self.config.mevo.poll_interval
         while self._running:
+            start = time.perf_counter()
             if self._mevo_detector:
                 shot = self._mevo_detector.poll()
                 if shot is not None:
                     self._handle_mevo_shot(shot)
-            time.sleep(self.config.mevo.poll_interval)
+            elapsed = time.perf_counter() - start
+            remaining = max(0.01, interval - elapsed)
+            time.sleep(remaining)
 
     def _handle_mevo_shot(self, shot: object) -> None:
         """Process a Mevo shot — send full data to GSPro, update UI."""
@@ -735,6 +808,10 @@ class PuttingApp:
             shot.ball_speed, shot.launch_angle, shot.launch_direction,
             int(shot.spin_rate), "OK" if response.success else response.message,
         )
+
+        # Show Mevo shot data on OBS overlay
+        if self._obs:
+            self._obs.show_mevo_shot(shot)
 
         if self._window:
             with contextlib.suppress(RuntimeError):
@@ -766,6 +843,7 @@ class PuttingApp:
     def _cleanup(self) -> None:
         """Release all resources."""
         self._stop_mevo()
+        self._stop_obs()
         self._camera.release()
         self._gspro.disconnect()
         cv2.destroyAllWindows()

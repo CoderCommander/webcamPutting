@@ -64,6 +64,10 @@ def main() -> None:
         help="Interactive ROI calibration for Mevo OCR",
     )
     parser.add_argument(
+        "--obs", action="store_true",
+        help="Enable OBS WebSocket integration for shot data overlay",
+    )
+    parser.add_argument(
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)",
@@ -110,6 +114,9 @@ def main() -> None:
 
     if args.mevo:
         config.mevo.enabled = True
+
+    if args.obs:
+        config.obs.enabled = True
 
     # Handle calibration mode
     if args.calibrate_mevo:

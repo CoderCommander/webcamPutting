@@ -52,6 +52,7 @@ class MainWindow(ctk.CTk):
         on_color_change: Callable[[str], None] | None = None,
         on_settings_changed: Callable[[], None] | None = None,
         on_auto_zone: Callable[[], None] | None = None,
+        on_reset_putt: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -69,6 +70,7 @@ class MainWindow(ctk.CTk):
         self._on_color_change = on_color_change
         self._on_settings_changed = on_settings_changed
         self._on_auto_zone = on_auto_zone
+        self._on_reset_putt = on_reset_putt
         self._is_running = False
         self._edit_zone_active = False
         self._auto_zone_active = False
@@ -455,6 +457,13 @@ class MainWindow(ctk.CTk):
         )
         self._auto_zone_btn.pack(side="left", padx=(8, 0))
 
+        # Reset Putt button
+        self._reset_putt_btn = ctk.CTkButton(
+            parent, text="Reset Putt", command=self._on_reset_putt_clicked,
+            width=90, fg_color="gray35", hover_color="gray30",
+        )
+        self._reset_putt_btn.pack(side="left", padx=(8, 0))
+
         # Edit Config button
         self._edit_config_btn = ctk.CTkButton(
             parent, text="Edit Config", command=self._on_edit_config,
@@ -790,6 +799,11 @@ class MainWindow(ctk.CTk):
             if self._on_color_change:
                 self._on_color_change(preset_name)
             self._schedule_save()
+
+    def _on_reset_putt_clicked(self) -> None:
+        """Handle Reset Putt button click."""
+        if self._on_reset_putt:
+            self._on_reset_putt()
 
     def _on_auto_zone_clicked(self) -> None:
         """Handle Auto Zone button click."""

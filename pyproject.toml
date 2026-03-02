@@ -29,6 +29,9 @@ dev = [
 mevo = [
     "pytesseract>=0.3.10",
 ]
+obs = [
+    "obsws-python>=1.4",
+]
 build = [
     "pyinstaller>=6.0",
 ]
