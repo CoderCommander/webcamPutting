@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sys
 
@@ -33,14 +34,27 @@ _METRICS: list[tuple[str, bool]] = [
 ]
 
 _WINDOW_NAME = "Mevo ROI Calibration"
-_MAX_DISPLAY_WIDTH = 1920
-_MAX_DISPLAY_HEIGHT = 1080
 
 
-def _compute_scale(img_w: int, img_h: int) -> float:
-    """Compute scale factor to fit image within max display bounds."""
-    scale_w = _MAX_DISPLAY_WIDTH / img_w if img_w > _MAX_DISPLAY_WIDTH else 1.0
-    scale_h = _MAX_DISPLAY_HEIGHT / img_h if img_h > _MAX_DISPLAY_HEIGHT else 1.0
+def _get_screen_size() -> tuple[int, int]:
+    """Get primary screen resolution in physical pixels (DPI-aware)."""
+    try:
+        import ctypes
+
+        # Enable DPI awareness to get actual pixel dimensions, not logical
+        with contextlib.suppress(Exception):
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # type: ignore[union-attr]
+
+        user32 = ctypes.windll.user32  # type: ignore[union-attr]
+        return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    except Exception:
+        return 1920, 1080
+
+
+def _compute_scale(img_w: int, img_h: int, max_w: int, max_h: int) -> float:
+    """Compute scale factor to fit image within display bounds."""
+    scale_w = max_w / img_w if img_w > max_w else 1.0
+    scale_h = max_h / img_h if img_h > max_h else 1.0
     return min(scale_w, scale_h)
 
 
@@ -166,7 +180,8 @@ def run_calibration(config: AppConfig) -> None:
         sys.exit(1)
 
     img_h, img_w = screenshot.shape[:2]
-    scale = _compute_scale(img_w, img_h)
+    screen_w, screen_h = _get_screen_size()
+    scale = _compute_scale(img_w, img_h, screen_w, screen_h)
     display_w = round(img_w * scale)
     display_h = round(img_h * scale)
 
@@ -176,7 +191,8 @@ def run_calibration(config: AppConfig) -> None:
         display_img = screenshot
 
     print(f"Captured screenshot: {img_w}x{img_h}"
-          f" (display: {display_w}x{display_h}, scale: {scale:.2f})")
+          f" (screen: {screen_w}x{screen_h}, display: {display_w}x{display_h},"
+          f" scale: {scale:.2f})")
     print()
     print("Instructions:")
     print("  - Draw a rectangle around each metric value")
@@ -186,9 +202,9 @@ def run_calibration(config: AppConfig) -> None:
     print("  - Press ESC to abort calibration")
     print()
 
-    # Set up OpenCV window
+    # Set up fullscreen OpenCV window — uses entire screen for maximum visibility
     cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(_WINDOW_NAME, display_w, display_h)
+    cv2.setWindowProperty(_WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     drawer = _RectDrawer(scale)
     cv2.setMouseCallback(_WINDOW_NAME, drawer.mouse_callback)  # type: ignore[arg-type]
