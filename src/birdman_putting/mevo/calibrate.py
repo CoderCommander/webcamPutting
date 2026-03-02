@@ -33,8 +33,8 @@ _METRICS: list[tuple[str, bool]] = [
 ]
 
 _WINDOW_NAME = "Mevo ROI Calibration"
-_MAX_DISPLAY_WIDTH = 1280
-_MAX_DISPLAY_HEIGHT = 720
+_MAX_DISPLAY_WIDTH = 1920
+_MAX_DISPLAY_HEIGHT = 1080
 
 
 def _compute_scale(img_w: int, img_h: int) -> float:
@@ -187,7 +187,8 @@ def run_calibration(config: AppConfig) -> None:
     print()
 
     # Set up OpenCV window
-    cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(_WINDOW_NAME, display_w, display_h)
 
     drawer = _RectDrawer(scale)
     cv2.setMouseCallback(_WINDOW_NAME, drawer.mouse_callback)  # type: ignore[arg-type]
