@@ -26,6 +26,12 @@ if sys.platform != "win32":
         def capture(self) -> np.ndarray | None:  # pragma: no cover
             return None
 
+        def widen(self, extra_pct: float = 0.3) -> bool:  # pragma: no cover
+            return False
+
+        def restore(self) -> None:  # pragma: no cover
+            pass
+
         def close(self) -> None:  # pragma: no cover
             pass
 
@@ -162,6 +168,67 @@ else:
 
             # BGRA → BGR
             return np.ascontiguousarray(buffer[:, :, :3])
+
+        def widen(self, extra_pct: float = 0.3) -> bool:
+            """Temporarily widen the window to reveal overflowing content.
+
+            FS Golf's web-based layout may have columns that overflow the
+            viewport.  Making the window wider forces a reflow so all
+            columns render and can be captured.
+
+            Returns True if the window was resized.
+            """
+            if not self._hwnd:
+                return False
+
+            SW_RESTORE = 9
+            SWP_NOZORDER = 0x0004
+
+            self._was_maximized = bool(user32.IsZoomed(self._hwnd))
+            if self._was_maximized:
+                user32.ShowWindow(self._hwnd, SW_RESTORE)
+                import time
+                time.sleep(0.3)
+
+            rect = wt.RECT()
+            user32.GetWindowRect(self._hwnd, ctypes.byref(rect))
+            self._orig_rect = (
+                rect.left, rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            )
+            wider_w = int(self._orig_rect[2] * (1.0 + extra_pct))
+            user32.SetWindowPos(
+                self._hwnd, 0,
+                rect.left, rect.top, wider_w, self._orig_rect[3],
+                SWP_NOZORDER,
+            )
+            import time
+            time.sleep(0.5)
+            logger.info(
+                "Widened window '%s' from %d to %d px",
+                self._title, self._orig_rect[2], wider_w,
+            )
+            return True
+
+        def restore(self) -> None:
+            """Restore the original window size after widen()."""
+            if not self._hwnd:
+                return
+
+            SWP_NOZORDER = 0x0004
+            SW_MAXIMIZE = 3
+
+            orig = getattr(self, "_orig_rect", None)
+            if orig is not None:
+                user32.SetWindowPos(
+                    self._hwnd, 0,
+                    orig[0], orig[1], orig[2], orig[3],
+                    SWP_NOZORDER,
+                )
+                if getattr(self, "_was_maximized", False):
+                    user32.ShowWindow(self._hwnd, SW_MAXIMIZE)
+                logger.info("Restored window '%s' to original size", self._title)
 
         def close(self) -> None:
             """Release any held resources."""

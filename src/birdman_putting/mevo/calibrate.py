@@ -166,14 +166,22 @@ def run_calibration(config: AppConfig) -> None:
     print(f"Looking for window: '{config.mevo.window_title}'")
     print()
 
-    # Capture the FS Golf window
+    # Capture the FS Golf window — temporarily widen it so overflowing
+    # columns (like Spin Axis in the 5th column) are fully rendered.
     capture = WindowCapture(config.mevo.window_title)
     if not capture.find_window():
         print(f"ERROR: Could not find window '{config.mevo.window_title}'.")
         print("Make sure FS Golf is running and visible.")
         sys.exit(1)
 
+    print("Widening FS Golf window to reveal all columns...")
+    capture.widen()
+
     screenshot = capture.capture()
+
+    # Restore the window immediately so it doesn't stay oversized
+    capture.restore()
+
     if screenshot is None:
         print("ERROR: Failed to capture window screenshot.")
         sys.exit(1)
