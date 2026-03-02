@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import sys
 
@@ -37,13 +36,13 @@ _WINDOW_NAME = "Mevo ROI Calibration"
 
 
 def _get_screen_size() -> tuple[int, int]:
-    """Get primary screen resolution in physical pixels (DPI-aware)."""
+    """Get primary screen resolution in physical pixels.
+
+    DPI awareness is set at import time in screenshot.py, so
+    GetSystemMetrics returns physical pixel dimensions.
+    """
     try:
         import ctypes
-
-        # Enable DPI awareness to get actual pixel dimensions, not logical
-        with contextlib.suppress(Exception):
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # type: ignore[union-attr]
 
         user32 = ctypes.windll.user32  # type: ignore[union-attr]
         return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)

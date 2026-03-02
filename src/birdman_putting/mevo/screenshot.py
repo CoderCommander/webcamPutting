@@ -36,6 +36,18 @@ else:
     user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     gdi32 = ctypes.windll.gdi32  # type: ignore[attr-defined]
 
+    # Enable per-monitor DPI awareness so GetClientRect/PrintWindow return
+    # physical pixels, not logical.  Without this, 125% DPI scaling causes
+    # the capture to miss ~20% of the window content on the right side.
+    import contextlib
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # type: ignore[attr-defined]
+    except Exception:
+        # Windows 7 or already set — fall back to older API
+        with contextlib.suppress(Exception):
+            user32.SetProcessDPIAware()
+
     # GDI constants
     SRCCOPY = 0x00CC0020
     DIB_RGB_COLORS = 0
