@@ -24,6 +24,7 @@ class OBSController:
         self._settings = settings
         self._client: object | None = None
         self._idle_timer: threading.Timer | None = None
+        self._created_sources: set[str] = set()  # Track auto-created text sources
 
     def connect(self) -> bool:
         """Connect to OBS WebSocket server.
@@ -96,33 +97,34 @@ class OBSController:
             cl: obs.ReqClient = self._client  # type: ignore[assignment]
 
             # Switch to Mevo scene
-            cl.set_current_program_scene(self._settings.mevo_scene)
+            scene = self._settings.mevo_scene
+            cl.set_current_program_scene(scene)
 
             # Update text sources with shot data
-            self._set_text(cl, "BallSpeed", f"{shot.ball_speed:.1f}")
-            self._set_text(cl, "LaunchAngle", f"{shot.launch_angle:.1f}")
-            self._set_text(cl, "LaunchDirection", f"{shot.launch_direction:+.1f}")
-            self._set_text(cl, "SpinRate", f"{int(shot.spin_rate)}")
-            self._set_text(cl, "SpinAxis", f"{shot.spin_axis:+.1f}")
+            self._set_text(cl, "BallSpeed", f"{shot.ball_speed:.1f}", scene)
+            self._set_text(cl, "LaunchAngle", f"{shot.launch_angle:.1f}", scene)
+            self._set_text(cl, "LaunchDirection", f"{shot.launch_direction:+.1f}", scene)
+            self._set_text(cl, "SpinRate", f"{int(shot.spin_rate)}", scene)
+            self._set_text(cl, "SpinAxis", f"{shot.spin_axis:+.1f}", scene)
 
             if shot.club_speed > 0:
-                self._set_text(cl, "ClubSpeed", f"{shot.club_speed:.1f}")
+                self._set_text(cl, "ClubSpeed", f"{shot.club_speed:.1f}", scene)
             if shot.smash_factor > 0:
-                self._set_text(cl, "SmashFactor", f"{shot.smash_factor:.2f}")
+                self._set_text(cl, "SmashFactor", f"{shot.smash_factor:.2f}", scene)
             if shot.carry_distance > 0:
-                self._set_text(cl, "CarryDistance", f"{shot.carry_distance:.0f}")
+                self._set_text(cl, "CarryDistance", f"{shot.carry_distance:.0f}", scene)
             if shot.total_distance > 0:
-                self._set_text(cl, "TotalDistance", f"{shot.total_distance:.0f}")
+                self._set_text(cl, "TotalDistance", f"{shot.total_distance:.0f}", scene)
             if shot.apex_height > 0:
-                self._set_text(cl, "ApexHeight", f"{shot.apex_height:.0f}")
+                self._set_text(cl, "ApexHeight", f"{shot.apex_height:.0f}", scene)
             if shot.flight_time > 0:
-                self._set_text(cl, "FlightTime", f"{shot.flight_time:.1f}")
+                self._set_text(cl, "FlightTime", f"{shot.flight_time:.1f}", scene)
             if shot.descent_angle > 0:
-                self._set_text(cl, "DescentAngle", f"{shot.descent_angle:.1f}")
+                self._set_text(cl, "DescentAngle", f"{shot.descent_angle:.1f}", scene)
             if shot.curve != 0:
-                self._set_text(cl, "Curve", f"{shot.curve:+.1f}")
+                self._set_text(cl, "Curve", f"{shot.curve:+.1f}", scene)
             if shot.roll_distance > 0:
-                self._set_text(cl, "RollDistance", f"{shot.roll_distance:.0f}")
+                self._set_text(cl, "RollDistance", f"{shot.roll_distance:.0f}", scene)
 
             logger.info("OBS: Mevo shot data displayed")
         except Exception as e:
@@ -142,9 +144,10 @@ class OBSController:
 
             cl: obs.ReqClient = self._client  # type: ignore[assignment]
 
-            cl.set_current_program_scene(self._settings.putt_scene)
-            self._set_text(cl, "PuttSpeed", f"{speed:.1f}")
-            self._set_text(cl, "PuttHLA", f"{hla:+.1f}")
+            scene = self._settings.putt_scene
+            cl.set_current_program_scene(scene)
+            self._set_text(cl, "PuttSpeed", f"{speed:.1f}", scene)
+            self._set_text(cl, "PuttHLA", f"{hla:+.1f}", scene)
 
             logger.info("OBS: Putt data displayed")
         except Exception as e:
@@ -166,16 +169,52 @@ class OBSController:
         except Exception as e:
             logger.error("OBS: Failed to switch to idle scene: %s", e)
 
-    @staticmethod
-    def _set_text(client: object, source_name: str, text: str) -> None:
-        """Update an OBS text source's content (ignores errors for missing sources)."""
+    def _set_text(self, client: object, source_name: str, text: str, scene_name: str) -> None:
+        """Update an OBS text source, auto-creating it if missing."""
         try:
             client.set_input_settings(  # type: ignore[union-attr]
                 source_name, {"text": text}, overlay=True,
             )
         except Exception:
-            # Source may not exist in the user's OBS setup — that's fine
-            pass
+            # Source doesn't exist — try to create it
+            if source_name in self._created_sources:
+                return  # Already failed to create, don't retry
+            self._create_text_source(client, source_name, text, scene_name)
+
+    def _create_text_source(
+        self, client: object, source_name: str, text: str, scene_name: str,
+    ) -> None:
+        """Create a GDI+ (Windows) or FreeType2 (macOS/Linux) text source."""
+        import sys
+
+        settings = {
+            "text": text,
+            "font": {"face": "Arial", "size": 36, "style": "Bold"},
+        }
+
+        # Windows uses GDI+, macOS/Linux use FreeType2
+        if sys.platform == "win32":
+            input_kinds = ["text_gdiplus_v2", "text_gdiplus"]
+        else:
+            input_kinds = ["text_ft2_source_v2", "text_ft2_source"]
+
+        for kind in input_kinds:
+            try:
+                client.create_input(  # type: ignore[union-attr]
+                    scene_name, source_name, kind, settings, True,
+                )
+                self._created_sources.add(source_name)
+                logger.info(
+                    "OBS: Auto-created text source '%s' (%s) in '%s'",
+                    source_name, kind, scene_name,
+                )
+                return
+            except Exception:
+                continue  # Try next input kind
+
+        # All kinds failed
+        self._created_sources.add(source_name)  # Don't retry
+        logger.warning("OBS: Could not create text source '%s' in '%s'", source_name, scene_name)
 
     def _schedule_idle(self) -> None:
         """Schedule a return to idle scene after display_duration."""
