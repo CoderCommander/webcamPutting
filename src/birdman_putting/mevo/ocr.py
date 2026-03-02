@@ -39,10 +39,15 @@ _CHAR_FIXES: dict[str, str] = {
     "q": "9",
 }
 
+# Metrics where R/L suffix indicates direction (R=positive, L=negative)
+_SIGNED_METRICS: set[str] = {"launch_direction", "spin_axis"}
+
 
 def _fix_ocr_text(text: str) -> str:
-    """Apply common character substitutions for digit-mode OCR."""
-    # Strip everything except digits, dots, dashes, and known misreads
+    """Apply common character substitutions for digit-mode OCR.
+
+    Preserves trailing R/L characters for direction parsing.
+    """
     cleaned = text.strip()
     result: list[str] = []
     for ch in cleaned:
@@ -50,22 +55,40 @@ def _fix_ocr_text(text: str) -> str:
             result.append(_CHAR_FIXES[ch])
         elif ch.isdigit() or ch in ".-":
             result.append(ch)
+        elif ch in "RrLl":
+            result.append(ch.upper())
     return "".join(result)
 
 
-def _parse_float(text: str) -> float | None:
-    """Parse a float from OCR text, returning None on failure."""
+def _parse_float(text: str, signed: bool = False) -> float | None:
+    """Parse a float from OCR text, returning None on failure.
+
+    Args:
+        text: Raw OCR text.
+        signed: If True, treat trailing R as positive and L as negative.
+    """
     fixed = _fix_ocr_text(text)
     if not fixed:
         return None
+
+    # Detect R/L direction suffix
+    negate = False
+    if signed and fixed and fixed[-1] in "RL":
+        if fixed[-1] == "L":
+            negate = True
+        fixed = fixed[:-1]
+
     # Handle stray leading/trailing dots or dashes
     fixed = fixed.strip(".")
+    # Strip any remaining letters (e.g. R/L in non-signed mode)
+    fixed = re.sub(r"[A-Za-z]", "", fixed)
     # Allow a single leading dash for negative values
     match = re.match(r"^-?\d+\.?\d*$", fixed)
     if not match:
         return None
     try:
-        return float(match.group())
+        value = float(match.group())
+        return -value if negate else value
     except ValueError:
         return None
 
@@ -84,8 +107,8 @@ class MevoOCR:
         self._rois = rois
         self._tessdata_dir = tessdata_dir
 
-        # Build Tesseract config string
-        parts = ["--psm 7", "-c tessedit_char_whitelist=0123456789.-"]
+        # Build Tesseract config string (include R/L for direction suffixes)
+        parts = ["--psm 7", "-c tessedit_char_whitelist=0123456789.-RL"]
         if tessdata_dir:
             parts.append(f"--tessdata-dir {tessdata_dir}")
         self._tess_config = " ".join(parts)
@@ -104,7 +127,8 @@ class MevoOCR:
             crop = self._crop_roi(frame, roi)
             preprocessed = self._preprocess(crop)
             text = self._ocr(preprocessed)
-            value = _parse_float(text)
+            signed = roi.name in _SIGNED_METRICS
+            value = _parse_float(text, signed=signed)
             if value is not None:
                 logger.debug("ROI '%s': raw='%s' → %.2f", roi.name, text.strip(), value)
             else:

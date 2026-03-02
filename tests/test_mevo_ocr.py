@@ -7,9 +7,6 @@ import pytest
 
 from birdman_putting.mevo.ocr import ROI, _fix_ocr_text, _parse_float
 
-# Skip the full OCR tests if pytesseract isn't installed
-pytesseract = pytest.importorskip("pytesseract")
-
 
 class TestFixOcrText:
     def test_clean_digits(self) -> None:
@@ -26,6 +23,12 @@ class TestFixOcrText:
 
     def test_negative_value(self) -> None:
         assert _fix_ocr_text("-3.5") == "-3.5"
+
+    def test_preserves_R_suffix(self) -> None:
+        assert _fix_ocr_text("12.9 R") == "12.9R"
+
+    def test_preserves_L_suffix(self) -> None:
+        assert _fix_ocr_text("3.1 L") == "3.1L"
 
 
 class TestParseFloat:
@@ -47,7 +50,30 @@ class TestParseFloat:
     def test_ocr_misread(self) -> None:
         assert _parse_float("l2O") == 120.0
 
+    def test_signed_right_is_positive(self) -> None:
+        assert _parse_float("2.4 R", signed=True) == 2.4
 
+    def test_signed_left_is_negative(self) -> None:
+        assert _parse_float("3.1 L", signed=True) == -3.1
+
+    def test_signed_no_suffix_stays_positive(self) -> None:
+        assert _parse_float("12.5", signed=True) == 12.5
+
+    def test_unsigned_ignores_R_suffix(self) -> None:
+        assert _parse_float("2.4 R") == 2.4
+
+    def test_unsigned_ignores_L_suffix(self) -> None:
+        assert _parse_float("3.1 L") == 3.1
+
+
+try:
+    import pytesseract  # noqa: F401
+    _has_pytesseract = True
+except ImportError:
+    _has_pytesseract = False
+
+
+@pytest.mark.skipif(not _has_pytesseract, reason="pytesseract not installed")
 class TestMevoOCRIntegration:
     """Integration tests that require pytesseract to be installed."""
 
