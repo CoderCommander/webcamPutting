@@ -158,50 +158,75 @@ class TestMevoDetector:
 
         frame1 = np.zeros((100, 100, 3), dtype=np.uint8)
         frame2 = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        frame3 = np.ones((100, 100, 3), dtype=np.uint8) * 200
 
-        # First call: no previous frame, valid metrics
+        # First call: baseline capture — returns None (stale data suppressed)
         capture.capture.return_value = frame1
         ocr.read_metrics.return_value = {
             "ball_speed": 120.0,
             "launch_angle": 12.0,
             "launch_direction": 1.5,
         }
-        shot = detector.poll()
-        assert shot is not None
-        assert isinstance(shot, MevoShotData)
-        assert shot.ball_speed == 120.0
+        baseline = detector.poll()
+        assert baseline is None
 
-        # Second call: different frame, different metrics
+        # Second call: different frame, different metrics → new shot
         capture.capture.return_value = frame2
         ocr.read_metrics.return_value = {
             "ball_speed": 130.0,
             "launch_angle": 15.0,
             "launch_direction": -2.0,
         }
+        shot = detector.poll()
+        assert shot is not None
+        assert isinstance(shot, MevoShotData)
+        assert shot.ball_speed == 130.0
+
+        # Third call: different frame, different metrics → another shot
+        capture.capture.return_value = frame3
+        ocr.read_metrics.return_value = {
+            "ball_speed": 140.0,
+            "launch_angle": 18.0,
+            "launch_direction": 3.0,
+        }
         shot2 = detector.poll()
         assert shot2 is not None
-        assert shot2.ball_speed == 130.0
+        assert shot2.ball_speed == 140.0
 
     def test_same_shot_suppressed(self) -> None:
         detector, ocr, capture = self._make_detector(mse_threshold=1.0)
 
         frame1 = np.zeros((100, 100, 3), dtype=np.uint8)
         frame2 = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        frame3 = np.ones((100, 100, 3), dtype=np.uint8) * 200
         metrics = {
             "ball_speed": 120.0,
             "launch_angle": 12.0,
             "launch_direction": 1.5,
         }
 
-        # First call
+        # First call: baseline capture
         capture.capture.return_value = frame1
         ocr.read_metrics.return_value = metrics.copy()
+        assert detector.poll() is None  # baseline
+
+        # Second call: different frame, different metrics → fires shot
+        capture.capture.return_value = frame2
+        ocr.read_metrics.return_value = {
+            "ball_speed": 130.0,
+            "launch_angle": 15.0,
+            "launch_direction": -2.0,
+        }
         shot = detector.poll()
         assert shot is not None
 
-        # Second call: different frame but same metrics
-        capture.capture.return_value = frame2
-        ocr.read_metrics.return_value = metrics.copy()
+        # Third call: different frame but same metrics as second → suppressed
+        capture.capture.return_value = frame3
+        ocr.read_metrics.return_value = {
+            "ball_speed": 130.0,
+            "launch_angle": 15.0,
+            "launch_direction": -2.0,
+        }
         result = detector.poll()
         assert result is None
 

@@ -43,6 +43,29 @@ class OBSController:
                 "Connected to OBS at %s:%d",
                 self._settings.host, self._settings.port,
             )
+
+            # Log available scenes so user can configure correct names
+            try:
+                cl: obs.ReqClient = self._client  # type: ignore[assignment]
+                resp = cl.get_scene_list()
+                names = [s["sceneName"] for s in resp.scenes]  # type: ignore[union-attr]
+                logger.info("OBS scenes available: %s", names)
+
+                # Warn about missing configured scenes
+                for label, name in [
+                    ("mevo_scene", self._settings.mevo_scene),
+                    ("putt_scene", self._settings.putt_scene),
+                    ("idle_scene", self._settings.idle_scene),
+                ]:
+                    if name not in names:
+                        logger.warning(
+                            "OBS scene '%s' (config: %s) not found — "
+                            "create it in OBS or update config.toml [obs] %s",
+                            name, label, label,
+                        )
+            except Exception:
+                pass  # Non-fatal — scene listing is informational
+
             return True
         except Exception as e:
             logger.error("Failed to connect to OBS: %s", e)

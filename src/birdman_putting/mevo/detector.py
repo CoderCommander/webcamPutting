@@ -153,6 +153,7 @@ class MevoDetector:
         self._prev_frame: np.ndarray | None = None
         self._prev_crops: dict[str, np.ndarray] | None = None
         self._prev_metrics: dict[str, float | None] = {}
+        self._baseline_captured: bool = False
 
     def _compute_roi_mse(self, frame: np.ndarray) -> float:
         """Compute MSE over ROI regions only (faster than full-frame)."""
@@ -203,6 +204,17 @@ class MevoDetector:
 
         # Run OCR
         metrics = self._ocr.read_metrics(frame)
+
+        # First poll captures baseline — don't fire stale data as a shot
+        if not self._baseline_captured:
+            self._baseline_captured = True
+            if _validate_metrics(metrics):
+                self._prev_metrics = metrics
+                logger.info(
+                    "Mevo baseline captured (stale): %.1f mph — waiting for new shot",
+                    metrics.get("ball_speed", 0) or 0,
+                )
+            return None
 
         # Check if values are different from previous shot
         if self._prev_metrics and not _values_changed(self._prev_metrics, metrics):
