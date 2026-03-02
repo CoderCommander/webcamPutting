@@ -151,10 +151,20 @@ class GSProClient:
 
     # --- GSPro Direct (Socket) ---
 
-    def _connect_socket(self) -> bool:
-        """Connect to GSPro Open Connect API via TCP socket."""
+    def _open_socket(self) -> bool:
+        """Open a TCP socket to GSPro (no heartbeat thread).
+
+        Used by both initial connect and reconnects from the heartbeat loop.
+        """
         host = self._settings.gspro_host
         port = self._settings.gspro_port
+
+        # Close any existing socket
+        with self._lock:
+            if self._socket is not None:
+                with contextlib.suppress(OSError):
+                    self._socket.close()
+                self._socket = None
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -167,19 +177,26 @@ class GSProClient:
 
             self._connected.set()
             logger.info("Connected to GSPro at %s:%d", host, port)
+            return True
 
-            # Start heartbeat thread
+        except (OSError, ConnectionRefusedError) as e:
+            logger.error("Failed to connect to GSPro at %s:%d: %s", host, port, e)
+            return False
+
+    def _connect_socket(self) -> bool:
+        """Connect to GSPro and start the heartbeat thread."""
+        if not self._open_socket():
+            return False
+
+        # Only start heartbeat if not already running
+        if self._heartbeat_thread is None or not self._heartbeat_thread.is_alive():
             self._running = True
             self._heartbeat_thread = threading.Thread(
                 target=self._heartbeat_loop, daemon=True
             )
             self._heartbeat_thread.start()
 
-            return True
-
-        except (OSError, ConnectionRefusedError) as e:
-            logger.error("Failed to connect to GSPro at %s:%d: %s", host, port, e)
-            return False
+        return True
 
     def _send_socket(self, speed_mph: float, hla_degrees: float) -> GSProResponse:
         """Send shot via TCP socket."""
@@ -266,7 +283,6 @@ class GSProClient:
                 "SideSpin": 0.0,
                 "HLA": round(hla_degrees, 2),
                 "VLA": 0.0,
-                "CarryDistance": 0.0,
             },
             "ShotDataOptions": {
                 "ContainsBallData": True,
@@ -333,7 +349,6 @@ class GSProClient:
                 "SideSpin": 0.0,
                 "HLA": 0.0,
                 "VLA": 0.0,
-                "CarryDistance": 0.0,
             },
             "ShotDataOptions": {
                 "ContainsBallData": False,
@@ -361,9 +376,10 @@ class GSProClient:
                     self._connected.clear()
                     backoff = 1.0
             else:
-                # Attempt reconnect with exponential backoff
+                # Reconnect using _open_socket (not _connect_socket which
+                # would spawn another heartbeat thread)
                 logger.info("Attempting reconnect (backoff=%.1fs)", backoff)
-                if self._connect_socket():
+                if self._open_socket():
                     backoff = 1.0
                 else:
                     time.sleep(backoff)
