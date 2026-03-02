@@ -142,7 +142,7 @@ def _draw_overlay(
     # Instructions at bottom
     bot_y = display.shape[0]
     cv2.rectangle(display, (0, bot_y - 30), (display.shape[1], bot_y), (40, 40, 40), -1)
-    instructions = "Draw rectangle | Enter=confirm | r=redo | ESC=abort"
+    instructions = "Draw rect | Enter=confirm | r=redo | c=recapture | ESC=abort"
     if not is_required:
         instructions += " | s=skip"
     cv2.putText(
@@ -151,6 +151,36 @@ def _draw_overlay(
     )
 
     return display
+
+
+def _capture_and_scale(
+    capture: WindowCapture,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Capture the window and compute a display-scaled version.
+
+    Returns (original_screenshot, display_image, scale_factor).
+    """
+    screenshot = capture.capture()
+    if screenshot is None:
+        msg = "Failed to capture window screenshot."
+        raise RuntimeError(msg)
+
+    img_h, img_w = screenshot.shape[:2]
+    screen_w, screen_h = _get_screen_size()
+    scale = _compute_scale(img_w, img_h, screen_w, screen_h)
+    display_w = round(img_w * scale)
+    display_h = round(img_h * scale)
+
+    if scale < 1.0:
+        display_img = cv2.resize(
+            screenshot, (display_w, display_h), interpolation=cv2.INTER_AREA,
+        )
+    else:
+        display_img = screenshot.copy()
+
+    print(f"  Captured: {img_w}x{img_h}"
+          f" (display: {display_w}x{display_h}, scale: {scale:.2f})")
+    return screenshot, display_img, scale
 
 
 def run_calibration(config: AppConfig) -> None:
@@ -166,45 +196,24 @@ def run_calibration(config: AppConfig) -> None:
     print(f"Looking for window: '{config.mevo.window_title}'")
     print()
 
-    # Capture the FS Golf window — temporarily widen it so overflowing
-    # columns (like Spin Axis in the 5th column) are fully rendered.
     capture = WindowCapture(config.mevo.window_title)
     if not capture.find_window():
         print(f"ERROR: Could not find window '{config.mevo.window_title}'.")
         print("Make sure FS Golf is running and visible.")
         sys.exit(1)
 
-    print("Widening FS Golf window to reveal all columns...")
-    capture.widen()
-
-    screenshot = capture.capture()
-
-    # Restore the window immediately so it doesn't stay oversized
-    capture.restore()
-
-    if screenshot is None:
-        print("ERROR: Failed to capture window screenshot.")
+    try:
+        screenshot, display_img, scale = _capture_and_scale(capture)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
 
-    img_h, img_w = screenshot.shape[:2]
-    screen_w, screen_h = _get_screen_size()
-    scale = _compute_scale(img_w, img_h, screen_w, screen_h)
-    display_w = round(img_w * scale)
-    display_h = round(img_h * scale)
-
-    if scale < 1.0:
-        display_img = cv2.resize(screenshot, (display_w, display_h), interpolation=cv2.INTER_AREA)
-    else:
-        display_img = screenshot
-
-    print(f"Captured screenshot: {img_w}x{img_h}"
-          f" (screen: {screen_w}x{screen_h}, display: {display_w}x{display_h},"
-          f" scale: {scale:.2f})")
     print()
     print("Instructions:")
     print("  - Draw a rectangle around each metric value")
     print("  - Press Enter to confirm the selection")
     print("  - Press 'r' to redraw the current region")
+    print("  - Press 'c' to re-capture (resize FS Golf first if content is cut off)")
     print("  - Press 's' to skip optional metrics")
     print("  - Press ESC to abort calibration")
     print()
@@ -243,6 +252,22 @@ def run_calibration(config: AppConfig) -> None:
 
             if key == ord("r"):
                 drawer.reset()
+
+            if key == ord("c"):
+                # Re-capture: user may have resized the FS Golf window
+                print("  Re-capturing window...")
+                try:
+                    screenshot, display_img, scale = _capture_and_scale(capture)
+                    drawer = _RectDrawer(scale)
+                    cv2.setMouseCallback(  # type: ignore[arg-type]
+                        _WINDOW_NAME, drawer.mouse_callback,
+                    )
+                    # Clear previously completed display coords (scale changed)
+                    completed_display.clear()
+                    completed_original.clear()
+                    print("  NOTE: Previous selections cleared — starting over.")
+                except RuntimeError:
+                    print("  Re-capture failed, continuing with current screenshot.")
 
             if key == ord("s") and not is_required:
                 skipped = True
