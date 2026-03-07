@@ -197,17 +197,25 @@ else:
                 rect.right - rect.left,
                 rect.bottom - rect.top,
             )
-            wider_w = int(self._orig_rect[2] * (1.0 + extra_pct))
+            # Use full screen width so the web-based FS Golf layout reflows
+            # all columns on-screen.  Position at x=0 to prevent the widened
+            # window from extending past the right screen edge (off-screen
+            # content won't render in web-based apps).
+            screen_w = user32.GetSystemMetrics(0)
+            wider_w = max(
+                int(self._orig_rect[2] * (1.0 + extra_pct)),
+                screen_w,
+            )
             user32.SetWindowPos(
                 self._hwnd, 0,
-                rect.left, rect.top, wider_w, self._orig_rect[3],
+                0, rect.top, wider_w, self._orig_rect[3],
                 SWP_NOZORDER,
             )
             import time
             time.sleep(0.5)
             logger.info(
-                "Widened window '%s' from %d to %d px",
-                self._title, self._orig_rect[2], wider_w,
+                "Widened window '%s' from %d to %d px (screen=%d)",
+                self._title, self._orig_rect[2], wider_w, screen_w,
             )
             return True
 
