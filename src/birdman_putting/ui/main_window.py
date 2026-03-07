@@ -61,7 +61,8 @@ class MainWindow(ctk.CTk):
 
         self.title("Birdman Putting")
         self.geometry("940x480")
-        self.resizable(False, False)
+        self.minsize(700, 400)
+        self.resizable(True, True)
 
         self._config = config
         self._frame_queue = frame_queue
@@ -89,17 +90,14 @@ class MainWindow(ctk.CTk):
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
         main_frame.pack(fill="both", expand=True, padx=8, pady=8)
 
-        # Left: video panel
-        video_container = ctk.CTkFrame(
-            main_frame, width=644, height=364, corner_radius=6,
-        )
-        video_container.pack(side="left", fill="both", padx=(0, 8))
-        video_container.pack_propagate(False)
+        # Left: video panel (expands to fill available space)
+        video_container = ctk.CTkFrame(main_frame, corner_radius=6)
+        video_container.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
         self._video_panel = VideoPanel(
             video_container, self._frame_queue, width=640, height=360,
         )
-        self._video_panel.pack(padx=2, pady=2)
+        self._video_panel.pack(fill="both", expand=True, padx=2, pady=2)
 
         # Right: tabbed panel (Status + Settings)
         right_frame = ctk.CTkFrame(main_frame, width=270)
@@ -305,6 +303,34 @@ class MainWindow(ctk.CTk):
             scroll, "Gateway Width", 5, 50, z.gateway_width,
             lambda v: setattr(self._config.detection_zone, "gateway_width", v),
         )
+
+        # Zone color dropdowns
+        zone_colors = [
+            "Yellow", "Red", "Green", "Cyan", "White",
+            "Orange", "Magenta", "Blue", "Gray",
+        ]
+
+        zone_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        zone_color_frame.pack(fill="x", pady=1)
+        ctk.CTkLabel(
+            zone_color_frame, text="Zone Color", width=110, anchor="w", font=("", 11),
+        ).pack(side="left")
+        self._zone_color_var = ctk.StringVar(value=z.zone_color.capitalize())
+        ctk.CTkOptionMenu(
+            zone_color_frame, variable=self._zone_color_var,
+            values=zone_colors, command=self._on_zone_color_changed, width=100,
+        ).pack(side="left", padx=2)
+
+        gw_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        gw_color_frame.pack(fill="x", pady=1)
+        ctk.CTkLabel(
+            gw_color_frame, text="Gateway Color", width=110, anchor="w", font=("", 11),
+        ).pack(side="left")
+        self._gw_color_var = ctk.StringVar(value=z.gateway_color.capitalize())
+        ctk.CTkOptionMenu(
+            gw_color_frame, variable=self._gw_color_var,
+            values=zone_colors, command=self._on_gateway_color_changed, width=100,
+        ).pack(side="left", padx=2)
 
         self._fixed_radius = self._add_live_slider(
             scroll, "Fixed Radius", 0, 50, b.fixed_radius,
@@ -840,6 +866,16 @@ class MainWindow(ctk.CTk):
                 subprocess.Popen(["xdg-open", path])  # noqa: S603
         except Exception:
             logger.error("Failed to open config file in editor", exc_info=True)
+
+    def _on_zone_color_changed(self, label: str) -> None:
+        """Handle zone color dropdown change."""
+        self._config.detection_zone.zone_color = label.lower()
+        self._on_setting_changed()
+
+    def _on_gateway_color_changed(self, label: str) -> None:
+        """Handle gateway color dropdown change."""
+        self._config.detection_zone.gateway_color = label.lower()
+        self._on_setting_changed()
 
     def _on_direction_changed(self, label: str) -> None:
         """Handle roll direction dropdown change."""

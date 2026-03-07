@@ -70,13 +70,14 @@ class VideoPanel(ctk.CTkLabel):
 
         # Color pick mode state
         self._pick_mode = False
-        self._current_frame: np.ndarray | None = None  # Latest BGR frame (640px wide)
+        self._current_frame: np.ndarray | None = None  # Latest BGR frame
         self._on_color_picked: Callable[[int, int, np.ndarray], None] | None = None
 
         # Edit mode state
         self._edit_mode = False
         self._zone: DetectionZone | None = None
         self._on_zone_changed: Callable[[], None] | None = None
+        self._frame_width: int = width  # Updated from actual frames
         self._frame_height: int = height  # Updated from actual frames
         self._drag_mode = _DragMode.NONE
         self._drag_start: tuple[int, int] = (0, 0)
@@ -150,8 +151,7 @@ class VideoPanel(ctk.CTkLabel):
         if not self._pick_mode or self._current_frame is None:
             return
 
-        # Display coords map 1:1 on X (both 640px), Y needs scaling
-        frame_x = event.x
+        frame_x = self._display_x_to_frame(event.x)
         frame_y = self._display_y_to_frame(event.y)
 
         # Clamp to frame bounds
@@ -195,9 +195,23 @@ class VideoPanel(ctk.CTkLabel):
         """Convert BGR frame to CTkImage and display."""
         # Track frame dimensions for coordinate mapping
         self._frame_height = frame.shape[0]
+        self._frame_width = frame.shape[1]
 
         # Cache the BGR frame for color picking
         self._current_frame = frame
+
+        # Compute display size from available widget space
+        avail_w = self.winfo_width()
+        avail_h = self.winfo_height()
+        if avail_w > 10 and avail_h > 10:
+            frame_aspect = frame.shape[1] / frame.shape[0]
+            avail_aspect = avail_w / avail_h
+            if frame_aspect > avail_aspect:
+                self._display_width = avail_w
+                self._display_height = max(1, int(avail_w / frame_aspect))
+            else:
+                self._display_height = avail_h
+                self._display_width = max(1, int(avail_h * frame_aspect))
 
         # BGR -> RGB
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -219,15 +233,21 @@ class VideoPanel(ctk.CTkLabel):
 
     # ---- Coordinate mapping (display ↔ frame space) ----
 
+    def _display_x_to_frame(self, dx: int) -> int:
+        """Convert display-space X to frame-space X."""
+        return int(dx * self._frame_width / self._display_width)
+
     def _display_y_to_frame(self, dy: int) -> int:
         """Convert display-space Y to frame-space Y."""
         return int(dy * self._frame_height / self._display_height)
 
+    def _frame_x_to_display(self, fx: int) -> int:
+        """Convert frame-space X to display-space X."""
+        return int(fx * self._display_width / self._frame_width)
+
     def _frame_y_to_display(self, fy: int) -> int:
         """Convert frame-space Y to display-space Y."""
         return int(fy * self._display_height / self._frame_height)
-
-    # X coordinates are 1:1 (both 640px wide)
 
     # ---- Hit testing ----
 
@@ -237,7 +257,8 @@ class VideoPanel(ctk.CTkLabel):
             return _DragMode.NONE
 
         z = self._zone
-        x1, x2 = z.start_x1, z.start_x2
+        x1 = self._frame_x_to_display(z.start_x1)
+        x2 = self._frame_x_to_display(z.start_x2)
         dy1 = self._frame_y_to_display(z.y1)
         dy2 = self._frame_y_to_display(z.y2)
         h = _HANDLE_HALF
@@ -306,7 +327,10 @@ class VideoPanel(ctk.CTkLabel):
         if self._drag_mode == _DragMode.NONE or not self._zone:
             return
 
-        dx = event.x - self._drag_start[0]
+        dx_frame = (
+            self._display_x_to_frame(event.x)
+            - self._display_x_to_frame(self._drag_start[0])
+        )
         dy_frame = (
             self._display_y_to_frame(event.y)
             - self._display_y_to_frame(self._drag_start[1])
@@ -317,23 +341,23 @@ class VideoPanel(ctk.CTkLabel):
         mode = self._drag_mode
 
         if mode == _DragMode.MOVE:
-            z.start_x1 = ox1 + dx
-            z.start_x2 = ox2 + dx
+            z.start_x1 = ox1 + dx_frame
+            z.start_x2 = ox2 + dx_frame
             z.y1 = oy1 + dy_frame
             z.y2 = oy2 + dy_frame
         else:
             if mode in (_DragMode.TOP_LEFT, _DragMode.BOTTOM_LEFT, _DragMode.LEFT):
-                z.start_x1 = ox1 + dx
+                z.start_x1 = ox1 + dx_frame
             if mode in (_DragMode.TOP_RIGHT, _DragMode.BOTTOM_RIGHT, _DragMode.RIGHT):
-                z.start_x2 = ox2 + dx
+                z.start_x2 = ox2 + dx_frame
             if mode in (_DragMode.TOP_LEFT, _DragMode.TOP_RIGHT, _DragMode.TOP):
                 z.y1 = oy1 + dy_frame
             if mode in (_DragMode.BOTTOM_LEFT, _DragMode.BOTTOM_RIGHT, _DragMode.BOTTOM):
                 z.y2 = oy2 + dy_frame
 
         # Clamp to frame bounds
-        z.start_x1 = max(0, min(640, z.start_x1))
-        z.start_x2 = max(0, min(640, z.start_x2))
+        z.start_x1 = max(0, min(self._frame_width, z.start_x1))
+        z.start_x2 = max(0, min(self._frame_width, z.start_x2))
         z.y1 = max(0, min(self._frame_height, z.y1))
         z.y2 = max(0, min(self._frame_height, z.y2))
 

@@ -21,6 +21,26 @@ COLOR_BLACK = (0, 0, 0)
 
 _HANDLE_SIZE = 8  # Half-size of handle square in pixels
 
+# Named color palette for zone/gateway customization (BGR)
+ZONE_COLOR_PALETTE: dict[str, tuple[int, int, int]] = {
+    "yellow": COLOR_YELLOW,
+    "red": COLOR_RED,
+    "green": COLOR_GREEN,
+    "cyan": COLOR_CYAN,
+    "white": COLOR_WHITE,
+    "orange": (0, 140, 255),
+    "magenta": (255, 0, 255),
+    "blue": (255, 128, 0),
+    "gray": COLOR_GRAY,
+}
+
+
+def _resolve_zone_color(
+    name: str, fallback: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    """Look up a named zone color, falling back to a default."""
+    return ZONE_COLOR_PALETTE.get(name, fallback)
+
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.45
 FONT_THICKNESS = 1
@@ -33,6 +53,9 @@ def draw_detection_zones(
     edit_mode: bool = False,
 ) -> None:
     """Draw start zone and detection gateway rectangles."""
+    zone_color = _resolve_zone_color(zone.zone_color, COLOR_YELLOW)
+    gw_idle_color = _resolve_zone_color(zone.gateway_color, COLOR_RED)
+
     if zone.direction == "right_to_left":
         gateway_x2 = zone.start_x1 - zone.gateway_width
         gateway_x1 = gateway_x2 - zone.gateway_width
@@ -40,27 +63,27 @@ def draw_detection_zones(
         gateway_x1 = zone.start_x2 + zone.gateway_width
         gateway_x2 = gateway_x1 + zone.gateway_width
 
-    # Semi-transparent yellow fill when editing
+    # Semi-transparent fill when editing
     if edit_mode:
         overlay = frame.copy()
         cv2.rectangle(
             overlay,
             (zone.start_x1, zone.y1),
             (zone.start_x2, zone.y2),
-            COLOR_YELLOW, -1,
+            zone_color, -1,
         )
         cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
 
-    # Start zone (yellow)
+    # Start zone outline
     cv2.rectangle(
         frame,
         (zone.start_x1, zone.y1),
         (zone.start_x2, zone.y2),
-        COLOR_YELLOW, 2,
+        zone_color, 2,
     )
 
-    # Detection gateway — green when ball has crossed, red otherwise
-    gw_color = COLOR_GREEN if state in (ShotState.ENTERED, ShotState.LEFT) else COLOR_RED
+    # Detection gateway — green when ball has crossed, user color otherwise
+    gw_color = COLOR_GREEN if state in (ShotState.ENTERED, ShotState.LEFT) else gw_idle_color
     cv2.rectangle(
         frame,
         (gateway_x1, zone.y1),
@@ -108,21 +131,20 @@ def draw_ball_trail(
     frame: np.ndarray,
     positions: list[tuple[int, int]],
     color: tuple[int, int, int] = COLOR_CYAN,
-    max_dots: int = 30,
-    dot_radius: int = 3,
+    max_points: int = 50,
 ) -> None:
-    """Draw golf-simulator-style dotted trail along ball path.
+    """Draw a smooth streaking trail with taper and fade.
 
-    Renders evenly-spaced marker dots with a brightness fade
-    from dim (oldest) to bright (newest), each with a thin white outline.
+    Renders connected line segments that taper from thin (oldest) to thick
+    (newest) with brightness fade and a subtle glow effect.
     """
     if len(positions) < 2:
         return
 
-    # Subsample to max_dots evenly-spaced points
-    if len(positions) > max_dots:
-        step = len(positions) / max_dots
-        indices = [int(i * step) for i in range(max_dots)]
+    # Subsample to max_points evenly-spaced points
+    if len(positions) > max_points:
+        step = len(positions) / max_points
+        indices = [int(i * step) for i in range(max_points)]
         if indices[-1] != len(positions) - 1:
             indices.append(len(positions) - 1)
         sampled = [positions[i] for i in indices]
@@ -130,12 +152,27 @@ def draw_ball_trail(
         sampled = positions
 
     n = len(sampled)
-    for i, (x, y) in enumerate(sampled):
-        # Brightness ramp: oldest ~30%, newest 100%
-        alpha = 0.3 + 0.7 * (i / max(1, n - 1))
+    if n < 2:
+        return
+
+    # Glow pass: wider, semi-transparent lines on an overlay
+    glow = frame.copy()
+    for i in range(1, n):
+        t = i / (n - 1)  # 0.0 (oldest) → 1.0 (newest)
+        alpha = 0.2 + 0.8 * t
+        thickness = max(1, int(2 + 10 * t))
+        c = (int(color[0] * alpha * 0.4), int(color[1] * alpha * 0.4),
+             int(color[2] * alpha * 0.4))
+        cv2.line(glow, sampled[i - 1], sampled[i], c, thickness, cv2.LINE_AA)
+    cv2.addWeighted(glow, 0.6, frame, 0.4, 0, frame)
+
+    # Main trail: tapering, bright line segments
+    for i in range(1, n):
+        t = i / (n - 1)
+        alpha = 0.2 + 0.8 * t
+        thickness = max(1, int(1 + 5 * t))
         c = (int(color[0] * alpha), int(color[1] * alpha), int(color[2] * alpha))
-        cv2.circle(frame, (x, y), dot_radius, c, -1)
-        cv2.circle(frame, (x, y), dot_radius, COLOR_WHITE, 1)
+        cv2.line(frame, sampled[i - 1], sampled[i], c, thickness, cv2.LINE_AA)
 
 
 def draw_overlay(
@@ -167,7 +204,7 @@ def draw_overlay(
     if last_shot_trail:
         draw_ball_trail(frame, last_shot_trail, color=COLOR_CYAN)
     if active_trail:
-        draw_ball_trail(frame, active_trail, color=COLOR_GREEN, dot_radius=4)
+        draw_ball_trail(frame, active_trail, color=COLOR_GREEN)
 
     # --- Status text (top-left) ---
     y = 18
