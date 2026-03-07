@@ -35,13 +35,12 @@ _METRICS: list[tuple[str, bool]] = [
 _WINDOW_NAME = "Mevo ROI Calibration"
 
 
-def _get_logical_screen_size() -> tuple[int, int]:
-    """Get primary screen resolution in logical (DPI-scaled) pixels.
+def _get_display_bounds() -> tuple[int, int]:
+    """Get usable display size for OpenCV windows.
 
     The process is DPI-aware (set in screenshot.py) so GetSystemMetrics
-    returns physical pixels.  OpenCV HighGUI windows use logical pixels,
-    so we divide by the system DPI scale factor to avoid zoom on
-    high-DPI displays.
+    returns physical pixels.  We query the actual DPI to convert to
+    logical pixels that OpenCV HighGUI uses for window sizing.
     """
     try:
         import ctypes
@@ -49,13 +48,17 @@ def _get_logical_screen_size() -> tuple[int, int]:
         user32 = ctypes.windll.user32  # type: ignore[union-attr]
         phys_w = user32.GetSystemMetrics(0)
         phys_h = user32.GetSystemMetrics(1)
-        # GetDpiForSystem returns 96 at 100%, 120 at 125%, 144 at 150%, etc.
         try:
             dpi = user32.GetDpiForSystem()
         except Exception:
             dpi = 96
         dpi_scale = dpi / 96.0 if dpi > 0 else 1.0
-        return int(phys_w / dpi_scale), int(phys_h / dpi_scale)
+        logical_w = int(phys_w / dpi_scale)
+        logical_h = int(phys_h / dpi_scale)
+        print(f"  Screen: {phys_w}x{phys_h} physical, "
+              f"DPI={dpi} ({dpi_scale:.2f}x), "
+              f"logical={logical_w}x{logical_h}")
+        return logical_w, logical_h
     except Exception:
         return 1920, 1080
 
@@ -176,8 +179,11 @@ def _capture_and_scale(
         raise RuntimeError(msg)
 
     img_h, img_w = screenshot.shape[:2]
-    screen_w, screen_h = _get_logical_screen_size()
-    scale = _compute_scale(img_w, img_h, screen_w, screen_h)
+    max_w, max_h = _get_display_bounds()
+    # Leave some margin for window chrome / taskbar
+    max_w = int(max_w * 0.92)
+    max_h = int(max_h * 0.88)
+    scale = _compute_scale(img_w, img_h, max_w, max_h)
     display_w = round(img_w * scale)
     display_h = round(img_h * scale)
 
@@ -189,7 +195,7 @@ def _capture_and_scale(
         display_img = screenshot.copy()
 
     print(f"  Captured: {img_w}x{img_h}"
-          f" (display: {display_w}x{display_h}, scale: {scale:.2f})")
+          f" → display: {display_w}x{display_h} (scale: {scale:.2f})")
     return screenshot, display_img, scale
 
 
