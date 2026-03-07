@@ -202,9 +202,14 @@ def run_calibration(config: AppConfig) -> None:
         print("Make sure FS Golf is running and visible.")
         sys.exit(1)
 
+    # Widen the FS Golf window so all columns are visible before capture
+    if capture.widen(extra_pct=0.5):
+        print("  Widened FS Golf window to reveal all columns.")
+
     try:
         screenshot, display_img, scale = _capture_and_scale(capture)
     except RuntimeError as exc:
+        capture.restore()
         print(f"ERROR: {exc}")
         sys.exit(1)
 
@@ -248,6 +253,7 @@ def run_calibration(config: AppConfig) -> None:
             if key == 27:  # ESC
                 print("\nCalibration aborted.")
                 cv2.destroyAllWindows()
+                capture.restore()
                 return
 
             if key == ord("r"):
@@ -314,6 +320,9 @@ def run_calibration(config: AppConfig) -> None:
 
     config.mevo.rois = roi_dict
     save_config(config)
+
+    # Restore FS Golf window to original size
+    capture.restore()
 
     print()
     print("ROIs saved to config.toml")
