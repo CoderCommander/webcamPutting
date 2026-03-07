@@ -223,9 +223,10 @@ def run_calibration(config: AppConfig) -> None:
     print("  - Press ESC to abort calibration")
     print()
 
-    # Set up fullscreen OpenCV window — uses entire screen for maximum visibility
+    # Normal resizable window — displayed at natural image size, no stretching
     cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(_WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    disp_h, disp_w = display_img.shape[:2]
+    cv2.resizeWindow(_WINDOW_NAME, disp_w, disp_h)
 
     drawer = _RectDrawer(scale)
     cv2.setMouseCallback(_WINDOW_NAME, drawer.mouse_callback)  # type: ignore[arg-type]
