@@ -35,17 +35,27 @@ _METRICS: list[tuple[str, bool]] = [
 _WINDOW_NAME = "Mevo ROI Calibration"
 
 
-def _get_screen_size() -> tuple[int, int]:
-    """Get primary screen resolution in physical pixels.
+def _get_logical_screen_size() -> tuple[int, int]:
+    """Get primary screen resolution in logical (DPI-scaled) pixels.
 
-    DPI awareness is set at import time in screenshot.py, so
-    GetSystemMetrics returns physical pixel dimensions.
+    The process is DPI-aware (set in screenshot.py) so GetSystemMetrics
+    returns physical pixels.  OpenCV HighGUI windows use logical pixels,
+    so we divide by the system DPI scale factor to avoid zoom on
+    high-DPI displays.
     """
     try:
         import ctypes
 
         user32 = ctypes.windll.user32  # type: ignore[union-attr]
-        return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        phys_w = user32.GetSystemMetrics(0)
+        phys_h = user32.GetSystemMetrics(1)
+        # GetDpiForSystem returns 96 at 100%, 120 at 125%, 144 at 150%, etc.
+        try:
+            dpi = user32.GetDpiForSystem()
+        except Exception:
+            dpi = 96
+        dpi_scale = dpi / 96.0 if dpi > 0 else 1.0
+        return int(phys_w / dpi_scale), int(phys_h / dpi_scale)
     except Exception:
         return 1920, 1080
 
@@ -166,7 +176,7 @@ def _capture_and_scale(
         raise RuntimeError(msg)
 
     img_h, img_w = screenshot.shape[:2]
-    screen_w, screen_h = _get_screen_size()
+    screen_w, screen_h = _get_logical_screen_size()
     scale = _compute_scale(img_w, img_h, screen_w, screen_h)
     display_w = round(img_w * scale)
     display_h = round(img_h * scale)
