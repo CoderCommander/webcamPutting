@@ -223,10 +223,8 @@ def run_calibration(config: AppConfig) -> None:
     print("  - Press ESC to abort calibration")
     print()
 
-    # Normal resizable window — displayed at natural image size, no stretching
-    cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    disp_h, disp_w = display_img.shape[:2]
-    cv2.resizeWindow(_WINDOW_NAME, disp_w, disp_h)
+    # AUTOSIZE shows the pre-scaled image at 1:1 pixels — no DPI zoom issues
+    cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
 
     drawer = _RectDrawer(scale)
     cv2.setMouseCallback(_WINDOW_NAME, drawer.mouse_callback)  # type: ignore[arg-type]
