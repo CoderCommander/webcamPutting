@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from birdman_putting.config import DetectionZone
+from birdman_putting.ui.theme import BG_VIDEO
 
 _HANDLE_HALF = 10  # Half-size of handle hit area in display pixels
 
@@ -52,10 +53,11 @@ class VideoPanel(ctk.CTkLabel):
         height: int = 360,
         **kwargs: Any,
     ):
-        # Create a blank placeholder image
+        # Create a blank placeholder image matching theme background
+        _bg = tuple(int(BG_VIDEO.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
         placeholder = ctk.CTkImage(
-            light_image=Image.new("RGB", (width, height), (30, 30, 30)),
-            dark_image=Image.new("RGB", (width, height), (30, 30, 30)),
+            light_image=Image.new("RGB", (width, height), _bg),
+            dark_image=Image.new("RGB", (width, height), _bg),
             size=(width, height),
         )
         super().__init__(master, image=placeholder, text="", **kwargs)

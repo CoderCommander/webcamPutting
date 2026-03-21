@@ -8,16 +8,26 @@ import numpy as np
 from birdman_putting.config import DetectionZone
 from birdman_putting.detection import BallDetection
 from birdman_putting.tracking import ShotState
+from birdman_putting.ui.theme import (
+    CV_BLUE,
+    CV_CYAN,
+    CV_GRAY,
+    CV_GREEN,
+    CV_GREEN_DIM,
+    CV_RED,
+    CV_WHITE,
+)
 
-# Colors (BGR)
+# Colors (BGR) — theme-consistent, sourced from theme.py
 COLOR_YELLOW = (0, 210, 255)
-COLOR_RED = (0, 0, 255)
-COLOR_GREEN = (0, 255, 0)
-COLOR_WHITE = (255, 255, 255)
-COLOR_CYAN = (255, 255, 0)
-COLOR_GRAY = (140, 140, 140)
-COLOR_DARK_GREEN = (0, 180, 0)
+COLOR_RED = CV_RED
+COLOR_GREEN = CV_GREEN
+COLOR_WHITE = CV_WHITE
+COLOR_CYAN = CV_CYAN
+COLOR_GRAY = CV_GRAY
+COLOR_DARK_GREEN = CV_GREEN_DIM
 COLOR_BLACK = (0, 0, 0)
+COLOR_BLUE = CV_BLUE
 
 _HANDLE_SIZE = 8  # Half-size of handle square in pixels
 
@@ -206,12 +216,19 @@ def draw_overlay(
     if active_trail:
         draw_ball_trail(frame, active_trail, color=COLOR_GREEN)
 
-    # --- Status text (top-left) ---
+    # --- Status text (top-left) with semi-transparent backdrop ---
     y = 18
     line_h = 18
+    num_lines = 4 + (1 if last_speed > 0 else 0)
+    _pad = 6
+
+    # Draw dark backdrop behind status text
+    overlay_bg = frame.copy()
+    cv2.rectangle(overlay_bg, (0, 0), (180, _pad + num_lines * line_h), COLOR_BLACK, -1)
+    cv2.addWeighted(overlay_bg, 0.55, frame, 0.45, 0, frame)
 
     def _text(text: str, pos: tuple[int, int], color: tuple[int, int, int]) -> None:
-        cv2.putText(frame, text, pos, FONT, FONT_SCALE, color, FONT_THICKNESS)
+        cv2.putText(frame, text, pos, FONT, FONT_SCALE, color, FONT_THICKNESS, cv2.LINE_AA)
 
     # FPS
     _text(f"FPS: {fps:.1f}", (8, y), COLOR_GREEN)
@@ -223,7 +240,7 @@ def draw_overlay(
     y += line_h
 
     # Connection
-    conn_color = COLOR_DARK_GREEN if connected else COLOR_RED
+    conn_color = COLOR_GREEN if connected else COLOR_RED
     conn_label = "Connected" if connected else "Disconnected"
     _text(f"GSPro: {conn_label}", (8, y), conn_color)
     y += line_h
@@ -234,11 +251,15 @@ def draw_overlay(
     # --- Last shot (bottom-left) ---
     if last_speed > 0:
         h = frame.shape[0]
+        # Backdrop for last shot
+        shot_bg = frame.copy()
+        cv2.rectangle(shot_bg, (0, h - 28), (280, h), COLOR_BLACK, -1)
+        cv2.addWeighted(shot_bg, 0.55, frame, 0.45, 0, frame)
         cv2.putText(
             frame,
             f"Last: {last_speed:.1f} MPH  /  {last_hla:+.1f} HLA",
-            (8, h - 12),
-            FONT, 0.55, COLOR_WHITE, FONT_THICKNESS,
+            (8, h - 10),
+            FONT, 0.55, COLOR_GREEN, FONT_THICKNESS, cv2.LINE_AA,
         )
 
 

@@ -15,6 +15,7 @@ import customtkinter as ctk
 
 from birdman_putting.color_presets import PRESET_DESCRIPTIONS
 from birdman_putting.config import CONFIG_FILE, AppConfig, save_config
+from birdman_putting.ui import theme
 from birdman_putting.ui.video_panel import VideoPanel
 
 logger = logging.getLogger(__name__)
@@ -59,10 +60,14 @@ class MainWindow(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
+        # Load Space Grotesk font
+        self._font_family = theme.load_font()
+
         self.title("Birdman Putting")
         self.geometry("940x480")
         self.minsize(700, 400)
         self.resizable(True, True)
+        self.configure(fg_color=theme.BG_ROOT)
 
         self._config = config
         self._frame_queue = frame_queue
@@ -91,7 +96,10 @@ class MainWindow(ctk.CTk):
         main_frame.pack(fill="both", expand=True, padx=8, pady=8)
 
         # Left: video panel (expands to fill available space)
-        video_container = ctk.CTkFrame(main_frame, corner_radius=6)
+        video_container = ctk.CTkFrame(
+            main_frame, corner_radius=theme.CORNER_RADIUS,
+            fg_color=theme.BG_PANEL, border_width=1, border_color=theme.BORDER_SUBTLE,
+        )
         video_container.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
         self._video_panel = VideoPanel(
@@ -100,11 +108,24 @@ class MainWindow(ctk.CTk):
         self._video_panel.pack(fill="both", expand=True, padx=2, pady=2)
 
         # Right: tabbed panel (Status + Settings)
-        right_frame = ctk.CTkFrame(main_frame, width=270)
+        right_frame = ctk.CTkFrame(
+            main_frame, width=270,
+            fg_color=theme.BG_PANEL, corner_radius=theme.CORNER_RADIUS,
+            border_width=1, border_color=theme.BORDER_SUBTLE,
+        )
         right_frame.pack(side="right", fill="y")
         right_frame.pack_propagate(False)
 
-        self._right_tabs = ctk.CTkTabview(right_frame, width=260)
+        self._right_tabs = ctk.CTkTabview(
+            right_frame, width=260,
+            fg_color=theme.BG_PANEL,
+            segmented_button_fg_color=theme.BG_CARD,
+            segmented_button_selected_color=theme.ACCENT_BLUE,
+            segmented_button_unselected_color=theme.BG_CARD,
+            segmented_button_selected_hover_color=theme.ACCENT_BLUE_HOVER,
+            segmented_button_unselected_hover_color=theme.BG_CARD_HOVER,
+            corner_radius=theme.CORNER_RADIUS,
+        )
         self._right_tabs.pack(fill="both", expand=True, padx=4, pady=4)
         self._right_tabs.add("Status")
         self._right_tabs.add("Settings")
@@ -113,124 +134,129 @@ class MainWindow(ctk.CTk):
         self._build_settings_tab()
 
         # Bottom: control bar
-        control_bar = ctk.CTkFrame(self, height=44, fg_color="transparent")
+        control_bar = ctk.CTkFrame(
+            self, height=44, fg_color=theme.BG_PANEL,
+            corner_radius=theme.CORNER_RADIUS,
+            border_width=1, border_color=theme.BORDER_SUBTLE,
+        )
         control_bar.pack(fill="x", padx=8, pady=(0, 8))
         self._build_control_bar(control_bar)
 
     def _build_status_tab(self) -> None:
         """Build the Status tab content."""
         tab = self._right_tabs.tab("Status")
+        tab.configure(fg_color=theme.BG_PANEL)
+
+        def _card(parent: Any, **kw: Any) -> ctk.CTkFrame:
+            return ctk.CTkFrame(
+                parent, corner_radius=theme.CORNER_RADIUS_SM,
+                fg_color=theme.BG_CARD, border_width=1,
+                border_color=theme.BORDER_SUBTLE, **kw,
+            )
+
+        def _header(parent: Any, text: str) -> ctk.CTkLabel:
+            return ctk.CTkLabel(
+                parent, text=text, font=theme.font(9, "bold"),
+                text_color=theme.TEXT_HEADER,
+            )
 
         # Camera
-        cam_frame = ctk.CTkFrame(tab, corner_radius=6)
+        cam_frame = _card(tab)
         cam_frame.pack(fill="x", padx=4, pady=(4, 3))
-
-        ctk.CTkLabel(
-            cam_frame, text="CAMERA", font=("", 10, "bold"),
-            text_color="gray60",
-        ).pack(anchor="w", padx=6, pady=(4, 1))
+        _header(cam_frame, "CAMERA").pack(anchor="w", padx=8, pady=(6, 1))
 
         self._cam_indicator = ctk.CTkLabel(
             cam_frame, text="  Idle",
-            font=("", 12), text_color="gray50",
+            font=theme.font(12), text_color=theme.STATUS_IDLE,
         )
-        self._cam_indicator.pack(anchor="w", padx=6, pady=(0, 4))
+        self._cam_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Connection
-        conn_frame = ctk.CTkFrame(tab, corner_radius=6)
+        conn_frame = _card(tab)
         conn_frame.pack(fill="x", padx=4, pady=(0, 3))
-
-        ctk.CTkLabel(
-            conn_frame, text="CONNECTION", font=("", 10, "bold"),
-            text_color="gray60",
-        ).pack(anchor="w", padx=6, pady=(4, 1))
+        _header(conn_frame, "CONNECTION").pack(anchor="w", padx=8, pady=(6, 1))
 
         self._conn_indicator = ctk.CTkLabel(
             conn_frame, text="  Disconnected",
-            font=("", 12), text_color="#ff4444",
+            font=theme.font(12), text_color=theme.STATUS_ERROR,
         )
-        self._conn_indicator.pack(anchor="w", padx=6, pady=(0, 4))
+        self._conn_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Mevo
-        mevo_frame = ctk.CTkFrame(tab, corner_radius=6)
+        mevo_frame = _card(tab)
         mevo_frame.pack(fill="x", padx=4, pady=(0, 3))
-
-        ctk.CTkLabel(
-            mevo_frame, text="MEVO", font=("", 10, "bold"),
-            text_color="gray60",
-        ).pack(anchor="w", padx=6, pady=(4, 1))
+        _header(mevo_frame, "MEVO").pack(anchor="w", padx=8, pady=(6, 1))
 
         self._mevo_indicator = ctk.CTkLabel(
             mevo_frame, text="  Disabled",
-            font=("", 12), text_color="gray50",
+            font=theme.font(12), text_color=theme.STATUS_IDLE,
         )
-        self._mevo_indicator.pack(anchor="w", padx=6, pady=(0, 4))
+        self._mevo_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Last shot
-        shot_frame = ctk.CTkFrame(tab, corner_radius=6)
+        shot_frame = _card(tab)
         shot_frame.pack(fill="x", padx=4, pady=3)
-
-        ctk.CTkLabel(
-            shot_frame, text="LAST SHOT", font=("", 10, "bold"),
-            text_color="gray60",
-        ).pack(anchor="w", padx=6, pady=(4, 1))
+        _header(shot_frame, "LAST SHOT").pack(anchor="w", padx=8, pady=(6, 1))
 
         self._speed_label = ctk.CTkLabel(
             shot_frame, text="-- MPH",
-            font=("", 22, "bold"), text_color="white",
+            font=theme.font(22, "bold"), text_color=theme.ACCENT_GREEN,
         )
-        self._speed_label.pack(anchor="w", padx=6)
+        self._speed_label.pack(anchor="w", padx=8)
 
         self._hla_label = ctk.CTkLabel(
             shot_frame, text="-- HLA",
-            font=("", 16), text_color="gray70",
+            font=theme.font(16), text_color=theme.TEXT_SECONDARY,
         )
-        self._hla_label.pack(anchor="w", padx=6, pady=(0, 4))
+        self._hla_label.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Shot history
-        history_frame = ctk.CTkFrame(tab, corner_radius=6)
+        history_frame = _card(tab)
         history_frame.pack(fill="both", expand=True, padx=4, pady=3)
-
-        ctk.CTkLabel(
-            history_frame, text="SHOT HISTORY", font=("", 10, "bold"),
-            text_color="gray60",
-        ).pack(anchor="w", padx=6, pady=(4, 1))
+        _header(history_frame, "SESSION HISTORY").pack(anchor="w", padx=8, pady=(6, 1))
 
         self._history_text = ctk.CTkTextbox(
-            history_frame, font=("Courier", 11), height=100,
-            state="disabled", fg_color="gray14",
+            history_frame, font=theme.font(11), height=100,
+            state="disabled", fg_color=theme.BG_INPUT,
+            text_color=theme.TEXT_PRIMARY,
+            border_width=0, corner_radius=theme.CORNER_RADIUS_SM,
         )
-        self._history_text.pack(fill="both", expand=True, padx=4, pady=(0, 4))
+        self._history_text.pack(fill="both", expand=True, padx=6, pady=(0, 6))
 
         # FPS / state
-        fps_frame = ctk.CTkFrame(tab, corner_radius=6, height=32)
+        fps_frame = _card(tab, height=32)
         fps_frame.pack(fill="x", padx=4, pady=(3, 4))
         fps_frame.pack_propagate(False)
 
         self._fps_label = ctk.CTkLabel(
-            fps_frame, text="FPS: --", font=("", 12), text_color="gray60",
+            fps_frame, text="FPS: --", font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         )
-        self._fps_label.pack(side="left", padx=6, pady=3)
+        self._fps_label.pack(side="left", padx=8, pady=3)
 
         self._state_label = ctk.CTkLabel(
-            fps_frame, text="idle", font=("", 11), text_color="gray50",
+            fps_frame, text="idle", font=theme.font(10), text_color=theme.STATUS_IDLE,
         )
-        self._state_label.pack(side="right", padx=6, pady=3)
+        self._state_label.pack(side="right", padx=8, pady=3)
 
         self._shot_count_label = ctk.CTkLabel(
-            fps_frame, text="Shots: 0", font=("", 12), text_color="gray60",
+            fps_frame, text="Shots: 0", font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         )
         self._shot_count_label.pack(side="left", padx=6, pady=3)
 
     def _build_settings_tab(self) -> None:
         """Build the Settings tab with real-time controls."""
         tab = self._right_tabs.tab("Settings")
+        tab.configure(fg_color=theme.BG_PANEL)
         c = self._config.camera
         b = self._config.ball
         z = self._config.detection_zone
         conn = self._config.connection
 
-        scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        scroll = ctk.CTkScrollableFrame(
+            tab, fg_color="transparent",
+            scrollbar_button_color=theme.BG_CARD,
+            scrollbar_button_hover_color=theme.BG_CARD_HOVER,
+        )
         scroll.pack(fill="both", expand=True)
 
         # --- CAMERA ---
@@ -246,7 +272,7 @@ class MainWindow(ctk.CTk):
         )
         ctk.CTkLabel(
             self._rotation_entry.master, text="\u00b0 (-45 to 45)",
-            font=("", 10), text_color="gray50",
+            font=theme.font(10), text_color=theme.TEXT_MUTED,
         ).pack(side="left", padx=2)
         self._bind_entry_apply(self._rotation_entry, self._apply_rotation)
 
@@ -283,7 +309,8 @@ class MainWindow(ctk.CTk):
         dir_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         dir_frame.pack(fill="x", pady=1)
         ctk.CTkLabel(
-            dir_frame, text="Roll Direction", width=110, anchor="w", font=("", 11),
+            dir_frame, text="Roll Direction", width=110, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
         dir_display = {
@@ -297,6 +324,13 @@ class MainWindow(ctk.CTk):
             dir_frame, variable=self._direction_var,
             values=list(dir_display.values()),
             command=self._on_direction_changed, width=130,
+            font=theme.font(11),
+            fg_color=theme.BG_CARD, button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+            dropdown_fg_color=theme.BG_CARD,
+            dropdown_hover_color=theme.BG_CARD_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.CORNER_RADIUS_SM,
         ).pack(side="left", padx=2)
 
         self._gateway_w = self._add_live_slider(
@@ -313,23 +347,39 @@ class MainWindow(ctk.CTk):
         zone_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         zone_color_frame.pack(fill="x", pady=1)
         ctk.CTkLabel(
-            zone_color_frame, text="Zone Color", width=110, anchor="w", font=("", 11),
+            zone_color_frame, text="Zone Color", width=110, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
         self._zone_color_var = ctk.StringVar(value=z.zone_color.capitalize())
         ctk.CTkOptionMenu(
             zone_color_frame, variable=self._zone_color_var,
             values=zone_colors, command=self._on_zone_color_changed, width=100,
+            font=theme.font(11),
+            fg_color=theme.BG_CARD, button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+            dropdown_fg_color=theme.BG_CARD,
+            dropdown_hover_color=theme.BG_CARD_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.CORNER_RADIUS_SM,
         ).pack(side="left", padx=2)
 
         gw_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         gw_color_frame.pack(fill="x", pady=1)
         ctk.CTkLabel(
-            gw_color_frame, text="Gateway Color", width=110, anchor="w", font=("", 11),
+            gw_color_frame, text="Gateway Color", width=110, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
         self._gw_color_var = ctk.StringVar(value=z.gateway_color.capitalize())
         ctk.CTkOptionMenu(
             gw_color_frame, variable=self._gw_color_var,
             values=zone_colors, command=self._on_gateway_color_changed, width=100,
+            font=theme.font(11),
+            fg_color=theme.BG_CARD, button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+            dropdown_fg_color=theme.BG_CARD,
+            dropdown_hover_color=theme.BG_CARD_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.CORNER_RADIUS_SM,
         ).pack(side="left", padx=2)
 
         self._fixed_radius = self._add_live_slider(
@@ -352,7 +402,7 @@ class MainWindow(ctk.CTk):
 
         ctk.CTkLabel(
             scroll, text="Restart required for changes below:",
-            font=("", 9), text_color="gray50",
+            font=theme.font(9), text_color=theme.TEXT_MUTED,
         ).pack(anchor="w", pady=(6, 2))
 
         self._mjpeg_var = self._add_live_checkbox(
@@ -408,12 +458,16 @@ class MainWindow(ctk.CTk):
         ctk.CTkRadioButton(
             mode_frame, text="Direct GSPro",
             variable=self._mode_var, value="gspro_direct",
-            command=self._on_mode_changed, font=("", 11),
+            command=self._on_mode_changed, font=theme.font(11),
+            text_color=theme.TEXT_SECONDARY,
+            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
         ).pack(anchor="w")
         ctk.CTkRadioButton(
             mode_frame, text="HTTP Middleware",
             variable=self._mode_var, value="http_middleware",
-            command=self._on_mode_changed, font=("", 11),
+            command=self._on_mode_changed, font=theme.font(11),
+            text_color=theme.TEXT_SECONDARY,
+            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
         ).pack(anchor="w")
 
         # --- MEVO ---
@@ -443,7 +497,7 @@ class MainWindow(ctk.CTk):
 
         ctk.CTkLabel(
             scroll, text="Configure ROIs in config.toml",
-            font=("", 9), text_color="gray50",
+            font=theme.font(9), text_color=theme.TEXT_MUTED,
         ).pack(anchor="w", pady=(2, 0))
 
     def _build_control_bar(self, parent: ctk.CTkFrame) -> None:
@@ -459,48 +513,65 @@ class MainWindow(ctk.CTk):
         self._color_menu = ctk.CTkOptionMenu(
             parent, variable=self._color_var, values=preset_labels,
             command=self._on_color_selected, width=180,
+            font=theme.font(11),
+            fg_color=theme.BG_CARD, button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+            dropdown_fg_color=theme.BG_CARD,
+            dropdown_hover_color=theme.BG_CARD_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.CORNER_RADIUS,
         )
-        self._color_menu.pack(side="left", padx=(0, 8))
+        self._color_menu.pack(side="left", padx=(8, 8))
 
         # Start/Stop
         self._start_btn = ctk.CTkButton(
             parent, text="Start", command=self._toggle_running,
-            width=100, fg_color="#2d8f2d", hover_color="#248f24",
+            width=100, font=theme.font(12, "bold"),
+            fg_color=theme.BTN_SUCCESS[0], hover_color=theme.BTN_SUCCESS[1],
+            corner_radius=theme.CORNER_RADIUS,
         )
         self._start_btn.pack(side="left", padx=(0, 8))
 
         # Edit Zone toggle
         self._edit_zone_btn = ctk.CTkButton(
             parent, text="Edit Zone", command=self._toggle_edit_zone,
-            width=100, fg_color="gray35", hover_color="gray30",
+            width=100, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
         )
         self._edit_zone_btn.pack(side="left")
 
         # Auto Zone button
         self._auto_zone_btn = ctk.CTkButton(
             parent, text="Auto Zone", command=self._on_auto_zone_clicked,
-            width=100, fg_color="gray35", hover_color="gray30",
+            width=100, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
         )
         self._auto_zone_btn.pack(side="left", padx=(8, 0))
 
         # Reset Putt button
         self._reset_putt_btn = ctk.CTkButton(
             parent, text="Reset Putt", command=self._on_reset_putt_clicked,
-            width=90, fg_color="gray35", hover_color="gray30",
+            width=90, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
         )
         self._reset_putt_btn.pack(side="left", padx=(8, 0))
 
         # Edit Config button
         self._edit_config_btn = ctk.CTkButton(
             parent, text="Edit Config", command=self._on_edit_config,
-            width=100, fg_color="gray35", hover_color="gray30",
+            width=100, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
         )
         self._edit_config_btn.pack(side="left", padx=(8, 0))
 
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
         self._mode_label = ctk.CTkLabel(
-            parent, text=mode_text, font=("", 11), text_color="gray50",
+            parent, text=mode_text, font=theme.font(11), text_color=theme.TEXT_MUTED,
         )
         self._mode_label.pack(side="right", padx=8)
 
@@ -510,8 +581,9 @@ class MainWindow(ctk.CTk):
     def _section_label(parent: Any, text: str) -> None:
         """Add a bold section header."""
         ctk.CTkLabel(
-            parent, text=text, font=("", 10, "bold"), text_color="gray60",
-        ).pack(anchor="w", pady=(8, 3))
+            parent, text=text, font=theme.font(9, "bold"),
+            text_color=theme.TEXT_HEADER,
+        ).pack(anchor="w", pady=(theme.SECTION_PAD_TOP, 3))
 
     def _add_live_slider(
         self,
@@ -528,10 +600,14 @@ class MainWindow(ctk.CTk):
         frame.pack(fill="x", pady=1)
 
         ctk.CTkLabel(
-            frame, text=label, width=110, anchor="w", font=("", 11),
+            frame, text=label, width=110, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
-        value_label = ctk.CTkLabel(frame, text=str(initial), width=30, font=("", 11))
+        value_label = ctk.CTkLabel(
+            frame, text=str(initial), width=30,
+            font=theme.font(11), text_color=theme.TEXT_PRIMARY,
+        )
         value_label.pack(side="right")
 
         def on_change(v: float) -> None:
@@ -547,6 +623,10 @@ class MainWindow(ctk.CTk):
             frame, from_=from_, to=to,
             number_of_steps=max(1, abs(to - from_)),
             width=90, command=on_change,
+            fg_color=theme.SLIDER_BG,
+            progress_color=theme.SLIDER_PROGRESS,
+            button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
         )
         slider.set(initial)
         slider.pack(side="right", padx=2)
@@ -573,7 +653,13 @@ class MainWindow(ctk.CTk):
 
         ctk.CTkCheckBox(
             parent, text=text, variable=var,
-            command=on_change, font=("", 11),
+            command=on_change, font=theme.font(11),
+            text_color=theme.TEXT_SECONDARY,
+            fg_color=theme.ACCENT_BLUE,
+            hover_color=theme.ACCENT_BLUE_HOVER,
+            border_color=theme.BORDER_SUBTLE,
+            checkmark_color=theme.TEXT_PRIMARY,
+            corner_radius=4,
         ).pack(anchor="w", pady=1)
         return var
 
@@ -586,10 +672,16 @@ class MainWindow(ctk.CTk):
         frame.pack(fill="x", pady=1)
 
         ctk.CTkLabel(
-            frame, text=label, width=70, anchor="w", font=("", 11),
+            frame, text=label, width=70, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
-        entry = ctk.CTkEntry(frame, width=width, font=("", 11), height=26)
+        entry = ctk.CTkEntry(
+            frame, width=width, font=theme.font(11), height=26,
+            fg_color=theme.BG_INPUT, text_color=theme.TEXT_PRIMARY,
+            border_color=theme.BORDER_SUBTLE, border_width=1,
+            corner_radius=theme.CORNER_RADIUS_SM,
+        )
         entry.insert(0, initial)
         entry.pack(side="left", padx=2)
         return entry
@@ -700,17 +792,17 @@ class MainWindow(ctk.CTk):
             status: Human-readable status text.
             state: One of "ok", "error", or "idle".
         """
-        colors = {"ok": "#44cc44", "error": "#ff4444", "idle": "gray50"}
+        colors = {"ok": theme.STATUS_OK, "error": theme.STATUS_ERROR, "idle": theme.STATUS_IDLE}
         self._cam_indicator.configure(
-            text=f"  {status}", text_color=colors.get(state, "gray50"),
+            text=f"  {status}", text_color=colors.get(state, theme.STATUS_IDLE),
         )
 
     def update_connection_status(self, connected: bool) -> None:
         """Update the connection indicator."""
         if connected:
-            self._conn_indicator.configure(text="  Connected", text_color="#44cc44")
+            self._conn_indicator.configure(text="  Connected", text_color=theme.STATUS_OK)
         else:
-            self._conn_indicator.configure(text="  Disconnected", text_color="#ff4444")
+            self._conn_indicator.configure(text="  Disconnected", text_color=theme.STATUS_ERROR)
 
     def update_mevo_status(self, text: str, state: str = "disabled") -> None:
         """Update the Mevo status indicator.
@@ -720,13 +812,13 @@ class MainWindow(ctk.CTk):
             state: One of "ok", "error", "watching", or "disabled".
         """
         colors = {
-            "ok": "#44cc44",
-            "error": "#ff4444",
-            "watching": "#ccaa00",
-            "disabled": "gray50",
+            "ok": theme.STATUS_OK,
+            "error": theme.STATUS_ERROR,
+            "watching": theme.STATUS_WARNING,
+            "disabled": theme.STATUS_IDLE,
         }
         self._mevo_indicator.configure(
-            text=f"  {text}", text_color=colors.get(state, "gray50"),
+            text=f"  {text}", text_color=colors.get(state, theme.STATUS_IDLE),
         )
 
     def update_shot(self, speed: float, hla: float, shot_number: int) -> None:
@@ -735,8 +827,8 @@ class MainWindow(ctk.CTk):
 
         hla_text = f"{hla:+.1f}\u00b0 HLA"
         hla_color = (
-            "#44cc44" if abs(hla) < 5
-            else ("#ffaa00" if abs(hla) < 15 else "#ff4444")
+            theme.STATUS_OK if abs(hla) < 5
+            else (theme.STATUS_WARNING if abs(hla) < 15 else theme.STATUS_ERROR)
         )
         self._hla_label.configure(text=hla_text, text_color=hla_color)
 
@@ -785,14 +877,16 @@ class MainWindow(ctk.CTk):
         if self._edit_zone_active:
             self._edit_zone_active = False
             self._edit_zone_btn.configure(
-                text="Edit Zone", fg_color="gray35", hover_color="gray30",
+                text="Edit Zone",
+                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
             self._video_panel.set_edit_mode(False)
             self._on_setting_changed()
         else:
             self._edit_zone_active = True
             self._edit_zone_btn.configure(
-                text="Done Editing", fg_color="#cc7700", hover_color="#aa6600",
+                text="Done Editing",
+                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
             )
             self._video_panel.set_edit_mode(
                 True, self._config.detection_zone,
@@ -803,14 +897,16 @@ class MainWindow(ctk.CTk):
         if self._is_running:
             self._is_running = False
             self._start_btn.configure(
-                text="Start", fg_color="#2d8f2d", hover_color="#248f24",
+                text="Start",
+                fg_color=theme.BTN_SUCCESS[0], hover_color=theme.BTN_SUCCESS[1],
             )
             if self._on_stop:
                 self._on_stop()
         else:
             self._is_running = True
             self._start_btn.configure(
-                text="Stop", fg_color="#cc3333", hover_color="#aa2222",
+                text="Stop",
+                fg_color=theme.BTN_DANGER[0], hover_color=theme.BTN_DANGER[1],
             )
             if self._on_start:
                 self._on_start()
@@ -841,11 +937,13 @@ class MainWindow(ctk.CTk):
         self._auto_zone_active = active
         if active:
             self._auto_zone_btn.configure(
-                text="Cancel Cal.", fg_color="#cc7700", hover_color="#aa6600",
+                text="Cancel Cal.",
+                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
             )
         else:
             self._auto_zone_btn.configure(
-                text="Auto Zone", fg_color="gray35", hover_color="gray30",
+                text="Auto Zone",
+                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
 
     def _on_edit_config(self) -> None:
