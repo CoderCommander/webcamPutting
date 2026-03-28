@@ -920,6 +920,7 @@ class MainWindow(ctk.CTk):
             )
             self._video_panel.set_edit_mode(
                 True, self._config.detection_zone,
+                on_zone_changed=self._on_setting_changed,
             )
 
     def _toggle_running(self) -> None:

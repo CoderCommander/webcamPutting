@@ -15,7 +15,7 @@ from PIL import Image, ImageTk
 from birdman_putting.config import DetectionZone
 from birdman_putting.ui.theme import BG_VIDEO
 
-_HANDLE_HALF = 10  # Half-size of handle hit area in display pixels
+_HANDLE_HALF = 16  # Half-size of handle hit area in display pixels
 
 
 class _DragMode(enum.Enum):
@@ -312,11 +312,19 @@ class VideoPanel(ctk.CTkLabel):
     @staticmethod
     def _cursor_for(mode: _DragMode) -> str:
         """Return a cursor name for the given drag mode."""
-        if mode == _DragMode.MOVE:
-            return "fleur"
-        if mode == _DragMode.NONE:
-            return "arrow"
-        return "crosshair"
+        cursors = {
+            _DragMode.NONE: "arrow",
+            _DragMode.MOVE: "fleur",
+            _DragMode.TOP: "sb_v_double_arrow",
+            _DragMode.BOTTOM: "sb_v_double_arrow",
+            _DragMode.LEFT: "sb_h_double_arrow",
+            _DragMode.RIGHT: "sb_h_double_arrow",
+            _DragMode.TOP_LEFT: "top_left_corner",
+            _DragMode.TOP_RIGHT: "top_right_corner",
+            _DragMode.BOTTOM_LEFT: "bottom_left_corner",
+            _DragMode.BOTTOM_RIGHT: "bottom_right_corner",
+        }
+        return cursors.get(mode, "crosshair")
 
     # ---- Mouse event handlers ----
 
