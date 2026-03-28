@@ -134,6 +134,9 @@ class MevoOCR:
         results: dict[str, float | None] = {}
         for roi in self._rois:
             crop = self._crop_roi(frame, roi)
+            if crop is None or crop.size == 0:
+                results[roi.name] = None
+                continue
             preprocessed = self._preprocess(crop)
             text = self._ocr(preprocessed)
             signed = roi.name in _SIGNED_METRICS
@@ -160,13 +163,22 @@ class MevoOCR:
         return results
 
     @staticmethod
-    def _crop_roi(frame: np.ndarray, roi: ROI) -> np.ndarray:
-        """Crop a region of interest from the frame."""
+    def _crop_roi(frame: np.ndarray, roi: ROI) -> np.ndarray | None:
+        """Crop a region of interest from the frame.
+
+        Returns None if the ROI is outside the frame bounds.
+        """
         h, w = frame.shape[:2]
         x1 = max(0, roi.x)
         y1 = max(0, roi.y)
         x2 = min(w, roi.x + roi.width)
         y2 = min(h, roi.y + roi.height)
+        if x2 <= x1 or y2 <= y1:
+            logger.warning(
+                "ROI '%s' (%d,%d %dx%d) outside frame (%dx%d)",
+                roi.name, roi.x, roi.y, roi.width, roi.height, w, h,
+            )
+            return None
         return frame[y1:y2, x1:x2]
 
     @staticmethod
