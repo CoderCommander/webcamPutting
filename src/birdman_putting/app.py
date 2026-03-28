@@ -427,6 +427,8 @@ class PuttingApp:
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
                 obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                trail_color_name=self.config.overlay.trail_color,
+                active_trail_color_name=self.config.overlay.active_trail_color,
             )
 
             # Put frame into queue (drop old frames if queue is full)
@@ -733,6 +735,8 @@ class PuttingApp:
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
                 obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                trail_color_name=self.config.overlay.trail_color,
+                active_trail_color_name=self.config.overlay.active_trail_color,
             )
 
             if self._pick_mode:
@@ -779,10 +783,16 @@ class PuttingApp:
 
         from birdman_putting.obs_controller import OBSController
 
-        self._obs = OBSController(self.config.obs)
+        self._obs = OBSController(self.config.obs, on_idle=self._on_obs_idle)
         if not self._obs.connect():
             logger.warning("OBS connection failed — overlay disabled")
             self._obs = None
+
+    def _on_obs_idle(self) -> None:
+        """Called when OBS transitions back to idle scene — clear trail."""
+        self._tracker.last_shot_positions.clear()
+        self._post_shot_tracking = False
+        logger.debug("Trail cleared on OBS idle transition")
 
     def _stop_obs(self) -> None:
         """Disconnect from OBS."""

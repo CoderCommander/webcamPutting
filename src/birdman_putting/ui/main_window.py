@@ -526,9 +526,66 @@ class MainWindow(ctk.CTk):
             self._on_trail_length_changed,
         )
 
+        # Trail color dropdowns
+        trail_colors = [
+            "Cyan", "Green", "Yellow", "Red", "White",
+            "Orange", "Magenta", "Blue",
+        ]
+
+        trail_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        trail_color_frame.pack(fill="x", pady=1)
+        ctk.CTkLabel(
+            trail_color_frame, text="Trail Color", width=110, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+        self._trail_color_var = ctk.StringVar(value=ov.trail_color.capitalize())
+        ctk.CTkOptionMenu(
+            trail_color_frame, variable=self._trail_color_var,
+            values=trail_colors, command=self._on_trail_color_changed, width=100,
+            font=theme.font(11),
+            fg_color=theme.BG_CARD, button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+            dropdown_fg_color=theme.BG_CARD,
+            dropdown_hover_color=theme.BG_CARD_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.CORNER_RADIUS_SM,
+        ).pack(side="left", padx=2)
+
+        active_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        active_color_frame.pack(fill="x", pady=1)
+        ctk.CTkLabel(
+            active_color_frame, text="Active Color", width=110, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+        self._active_trail_color_var = ctk.StringVar(
+            value=ov.active_trail_color.capitalize(),
+        )
+        ctk.CTkOptionMenu(
+            active_color_frame, variable=self._active_trail_color_var,
+            values=trail_colors,
+            command=self._on_active_trail_color_changed, width=100,
+            font=theme.font(11),
+            fg_color=theme.BG_CARD, button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+            dropdown_fg_color=theme.BG_CARD,
+            dropdown_hover_color=theme.BG_CARD_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.CORNER_RADIUS_SM,
+        ).pack(side="left", padx=2)
+
     def _on_trail_length_changed(self, val: int) -> None:
         """Update trail length in config and resize tracker deque."""
         self._config.overlay.max_trail_points = val
+
+    def _on_trail_color_changed(self, label: str) -> None:
+        """Handle trail color dropdown change."""
+        self._config.overlay.trail_color = label.lower()
+        self._on_setting_changed()
+
+    def _on_active_trail_color_changed(self, label: str) -> None:
+        """Handle active trail color dropdown change."""
+        self._config.overlay.active_trail_color = label.lower()
+        self._on_setting_changed()
 
     def _build_control_bar(self, parent: ctk.CTkFrame) -> None:
         """Build the bottom control bar."""

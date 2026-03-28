@@ -156,6 +156,8 @@ class OverlaySettings:
     obs_overlay_mode: bool = False  # Black bg, no zones/status, tracer only
     max_trail_points: int = 150  # Max ball positions stored for trail rendering
     trail_duration: float = 5.0  # Seconds to keep the last-shot trail visible
+    trail_color: str = "cyan"  # Named color for last-shot trail (from ZONE_COLOR_PALETTE)
+    active_trail_color: str = "green"  # Named color for in-flight trail
 
 
 @dataclass

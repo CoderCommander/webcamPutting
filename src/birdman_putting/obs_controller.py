@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,11 +22,16 @@ class OBSController:
     text sources with shot metrics after full swings and putts.
     """
 
-    def __init__(self, settings: OBSSettings) -> None:
+    def __init__(
+        self,
+        settings: OBSSettings,
+        on_idle: Callable[[], None] | None = None,
+    ) -> None:
         self._settings = settings
         self._client: object | None = None
         self._idle_timer: threading.Timer | None = None
         self._created_sources: set[str] = set()  # Track auto-created text sources
+        self._on_idle = on_idle  # Called when transitioning back to idle scene
 
     def connect(self) -> bool:
         """Connect to OBS WebSocket server.
@@ -77,10 +84,8 @@ class OBSController:
         """Disconnect from OBS."""
         self._cancel_idle_timer()
         if self._client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._client.base_client.ws.close()  # type: ignore[union-attr]
-            except Exception:
-                pass
             self._client = None
             logger.info("Disconnected from OBS")
 
@@ -156,7 +161,7 @@ class OBSController:
         self._schedule_idle()
 
     def show_idle(self) -> None:
-        """Switch back to idle/default scene."""
+        """Switch back to idle/default scene and clear trail."""
         if self._client is None:
             return
 
@@ -168,6 +173,9 @@ class OBSController:
             logger.info("OBS: Switched to idle scene")
         except Exception as e:
             logger.error("OBS: Failed to switch to idle scene: %s", e)
+
+        if self._on_idle:
+            self._on_idle()
 
     def _set_text(self, client: object, source_name: str, text: str, scene_name: str) -> None:
         """Update an OBS text source, auto-creating it if missing."""

@@ -202,6 +202,8 @@ def draw_overlay(
     active_trail: list[tuple[int, int]] | None = None,
     last_shot_trail: list[tuple[int, int]] | None = None,
     obs_overlay_mode: bool = False,
+    trail_color_name: str = "cyan",
+    active_trail_color_name: str = "green",
 ) -> None:
     """Draw the complete HUD overlay onto a frame.
 
@@ -211,13 +213,16 @@ def draw_overlay(
     When obs_overlay_mode is True, the frame is blacked out and only
     the ball tracer is rendered — ideal for OBS browser/window capture.
     """
+    trail_c = _resolve_zone_color(trail_color_name, COLOR_CYAN)
+    active_c = _resolve_zone_color(active_trail_color_name, COLOR_GREEN)
+
     if obs_overlay_mode:
         # Black background — only render trails and ball marker
         frame[:] = 0
         if last_shot_trail:
-            draw_ball_trail(frame, last_shot_trail, color=COLOR_CYAN)
+            draw_ball_trail(frame, last_shot_trail, color=trail_c)
         if active_trail:
-            draw_ball_trail(frame, active_trail, color=COLOR_GREEN)
+            draw_ball_trail(frame, active_trail, color=active_c)
         draw_ball_marker(frame, detection)
 
         # Minimal last-shot readout at bottom
@@ -227,7 +232,7 @@ def draw_overlay(
                 frame,
                 f"{last_speed:.1f} MPH  |  {last_hla:+.1f} HLA",
                 (8, h - 10),
-                FONT, 0.55, COLOR_GREEN, FONT_THICKNESS, cv2.LINE_AA,
+                FONT, 0.55, trail_c, FONT_THICKNESS, cv2.LINE_AA,
             )
         return
 
@@ -236,9 +241,9 @@ def draw_overlay(
 
     # Ball trails (golf simulator stripe style)
     if last_shot_trail:
-        draw_ball_trail(frame, last_shot_trail, color=COLOR_CYAN)
+        draw_ball_trail(frame, last_shot_trail, color=trail_c)
     if active_trail:
-        draw_ball_trail(frame, active_trail, color=COLOR_GREEN)
+        draw_ball_trail(frame, active_trail, color=active_c)
 
     # --- Status text (top-left) with semi-transparent backdrop ---
     y = 18
