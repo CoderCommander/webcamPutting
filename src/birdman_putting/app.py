@@ -487,19 +487,20 @@ class PuttingApp:
             return
 
         s = self.config.shot
-        if not (s.min_speed_mph <= shot_data.speed_mph <= s.max_speed_mph
-                and abs(shot_data.hla_degrees) <= s.max_hla_degrees):
+        in_range = (s.min_speed_mph <= shot_data.speed_mph <= s.max_speed_mph
+                    and abs(shot_data.hla_degrees) <= s.max_hla_degrees)
+        if not in_range:
             logger.info(
                 "Shot out of range (%.2f MPH, %.2f HLA) - not sent",
                 shot_data.speed_mph, shot_data.hla_degrees,
             )
-            return
 
         logger.info(
-            "Shot #%d: %.2f MPH, HLA: %.2f, Dist: %.1f mm, Time: %.3f s",
+            "Shot #%d: %.2f MPH, HLA: %.2f, Dist: %.1f mm, Time: %.3f s%s",
             self._tracker.shot_count,
             shot_data.speed_mph, shot_data.hla_degrees,
             shot_data.distance_mm, shot_data.elapsed_seconds,
+            "" if in_range else " (OUT OF RANGE)",
         )
 
         # Store for overlay display
@@ -511,22 +512,22 @@ class PuttingApp:
             (x, y) for x, y, _t in shot_result.positions
         ]
 
-        # Send to GSPro in a background thread to avoid blocking video
-        speed = shot_data.speed_mph
-        hla = shot_data.hla_degrees
+        # Only send valid shots to GSPro and OBS
+        if in_range:
+            speed = shot_data.speed_mph
+            hla = shot_data.hla_degrees
 
-        def _send() -> None:
-            response = self._gspro.send_shot(speed, hla)
-            if not response.success:
-                logger.warning("GSPro rejected shot: %s", response.message)
+            def _send() -> None:
+                response = self._gspro.send_shot(speed, hla)
+                if not response.success:
+                    logger.warning("GSPro rejected shot: %s", response.message)
 
-        threading.Thread(target=_send, daemon=True).start()
+            threading.Thread(target=_send, daemon=True).start()
 
-        # Show putt data on OBS overlay
-        if self._obs:
-            self._obs.show_putt(shot_data.speed_mph, shot_data.hla_degrees)
+            if self._obs:
+                self._obs.show_putt(shot_data.speed_mph, shot_data.hla_degrees)
 
-        # Update GUI shot display
+        # Always update GUI shot display (even for out-of-range shots)
         if self._window:
             with contextlib.suppress(RuntimeError):
                 self._window.after(

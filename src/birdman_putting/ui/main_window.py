@@ -178,18 +178,18 @@ class MainWindow(ctk.CTk):
 
         self._cam_indicator = ctk.CTkLabel(
             cam_frame, text="  Idle",
-            font=theme.font(12), text_color=theme.STATUS_IDLE,
+            font=theme.font(13), text_color=theme.TEXT_SECONDARY,
         )
         self._cam_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Connection
         conn_frame = _card(tab)
         conn_frame.pack(fill="x", padx=4, pady=(0, 3))
-        _header(conn_frame, "CONNECTION").pack(anchor="w", padx=8, pady=(6, 1))
+        _header(conn_frame, "GSPRO CONNECTION").pack(anchor="w", padx=8, pady=(6, 1))
 
         self._conn_indicator = ctk.CTkLabel(
             conn_frame, text="  Disconnected",
-            font=theme.font(12), text_color=theme.STATUS_ERROR,
+            font=theme.font(13), text_color=theme.STATUS_ERROR,
         )
         self._conn_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
@@ -200,7 +200,7 @@ class MainWindow(ctk.CTk):
 
         self._mevo_indicator = ctk.CTkLabel(
             mevo_frame, text="  Disabled",
-            font=theme.font(12), text_color=theme.STATUS_IDLE,
+            font=theme.font(13), text_color=theme.TEXT_SECONDARY,
         )
         self._mevo_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
@@ -234,25 +234,30 @@ class MainWindow(ctk.CTk):
         )
         self._history_text.pack(fill="both", expand=True, padx=6, pady=(0, 6))
 
-        # FPS / state
-        fps_frame = _card(tab, height=32)
-        fps_frame.pack(fill="x", padx=4, pady=(3, 4))
-        fps_frame.pack_propagate(False)
+        # FPS / state / shot count
+        info_frame = _card(tab)
+        info_frame.pack(fill="x", padx=4, pady=(3, 4))
+
+        # Row 1: FPS + State
+        row1 = ctk.CTkFrame(info_frame, fg_color="transparent")
+        row1.pack(fill="x", padx=8, pady=(6, 2))
 
         self._fps_label = ctk.CTkLabel(
-            fps_frame, text="FPS: --", font=theme.font(11), text_color=theme.TEXT_SECONDARY,
+            row1, text="FPS: --", font=theme.font(12), text_color=theme.TEXT_PRIMARY,
         )
-        self._fps_label.pack(side="left", padx=8, pady=3)
+        self._fps_label.pack(side="left")
 
         self._state_label = ctk.CTkLabel(
-            fps_frame, text="idle", font=theme.font(10), text_color=theme.STATUS_IDLE,
+            row1, text="idle", font=theme.font(12), text_color=theme.STATUS_IDLE,
         )
-        self._state_label.pack(side="right", padx=8, pady=3)
+        self._state_label.pack(side="right")
 
+        # Row 2: Shot count
         self._shot_count_label = ctk.CTkLabel(
-            fps_frame, text="Shots: 0", font=theme.font(11), text_color=theme.TEXT_SECONDARY,
+            info_frame, text="Shots: 0", font=theme.font(12),
+            text_color=theme.TEXT_PRIMARY,
         )
-        self._shot_count_label.pack(side="left", padx=6, pady=3)
+        self._shot_count_label.pack(anchor="w", padx=8, pady=(0, 6))
 
     def _build_settings_tab(self) -> None:
         """Build the Settings tab with real-time controls."""
