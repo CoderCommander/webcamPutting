@@ -737,6 +737,7 @@ class PuttingApp:
                 obs_overlay_mode=self.config.overlay.obs_overlay_mode,
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
+                headless=True,
             )
 
             if self._pick_mode:

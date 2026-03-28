@@ -204,6 +204,7 @@ def draw_overlay(
     obs_overlay_mode: bool = False,
     trail_color_name: str = "cyan",
     active_trail_color_name: str = "green",
+    headless: bool = False,
 ) -> None:
     """Draw the complete HUD overlay onto a frame.
 
@@ -245,51 +246,38 @@ def draw_overlay(
     if active_trail:
         draw_ball_trail(frame, active_trail, color=active_c)
 
-    # --- Status text (top-left) with semi-transparent backdrop ---
-    y = 18
-    line_h = 18
-    num_lines = 4 + (1 if last_speed > 0 else 0)
-    _pad = 6
+    # In GUI mode, status info is in the right panel. In headless mode,
+    # render it on the video frame since there's no side panel.
+    if headless:
+        y = 18
+        line_h = 18
+        _pad = 6
+        overlay_bg = frame.copy()
+        cv2.rectangle(overlay_bg, (0, 0), (180, _pad + 4 * line_h), COLOR_BLACK, -1)
+        cv2.addWeighted(overlay_bg, 0.55, frame, 0.45, 0, frame)
 
-    # Draw dark backdrop behind status text
-    overlay_bg = frame.copy()
-    cv2.rectangle(overlay_bg, (0, 0), (180, _pad + num_lines * line_h), COLOR_BLACK, -1)
-    cv2.addWeighted(overlay_bg, 0.55, frame, 0.45, 0, frame)
+        def _text(text: str, pos: tuple[int, int], color: tuple[int, int, int]) -> None:
+            cv2.putText(frame, text, pos, FONT, FONT_SCALE, color, FONT_THICKNESS, cv2.LINE_AA)
 
-    def _text(text: str, pos: tuple[int, int], color: tuple[int, int, int]) -> None:
-        cv2.putText(frame, text, pos, FONT, FONT_SCALE, color, FONT_THICKNESS, cv2.LINE_AA)
+        _text(f"FPS: {fps:.1f}", (8, y), COLOR_GREEN)
+        y += line_h
+        state_color = COLOR_GREEN if state in (ShotState.STARTED, ShotState.ENTERED) else COLOR_GRAY
+        _text(f"State: {state.value}", (8, y), state_color)
+        y += line_h
+        conn_color = COLOR_GREEN if connected else COLOR_RED
+        _text(f"GSPro: {'Connected' if connected else 'Disconnected'}", (8, y), conn_color)
+        y += line_h
+        _text(f"Shots: {shot_count}", (8, y), COLOR_WHITE)
 
-    # FPS
-    _text(f"FPS: {fps:.1f}", (8, y), COLOR_GREEN)
-    y += line_h
-
-    # State
-    state_color = COLOR_GREEN if state in (ShotState.STARTED, ShotState.ENTERED) else COLOR_GRAY
-    _text(f"State: {state.value}", (8, y), state_color)
-    y += line_h
-
-    # Connection
-    conn_color = COLOR_GREEN if connected else COLOR_RED
-    conn_label = "Connected" if connected else "Disconnected"
-    _text(f"GSPro: {conn_label}", (8, y), conn_color)
-    y += line_h
-
-    # Shot count
-    _text(f"Shots: {shot_count}", (8, y), COLOR_WHITE)
-
-    # --- Last shot (bottom-left) ---
-    if last_speed > 0:
-        h = frame.shape[0]
-        # Backdrop for last shot
-        shot_bg = frame.copy()
-        cv2.rectangle(shot_bg, (0, h - 28), (280, h), COLOR_BLACK, -1)
-        cv2.addWeighted(shot_bg, 0.55, frame, 0.45, 0, frame)
-        cv2.putText(
-            frame,
-            f"Last: {last_speed:.1f} MPH  /  {last_hla:+.1f} HLA",
-            (8, h - 10),
-            FONT, 0.55, COLOR_GREEN, FONT_THICKNESS, cv2.LINE_AA,
-        )
+        if last_speed > 0:
+            h = frame.shape[0]
+            shot_bg = frame.copy()
+            cv2.rectangle(shot_bg, (0, h - 28), (280, h), COLOR_BLACK, -1)
+            cv2.addWeighted(shot_bg, 0.55, frame, 0.45, 0, frame)
+            cv2.putText(
+                frame, f"Last: {last_speed:.1f} MPH  /  {last_hla:+.1f} HLA",
+                (8, h - 10), FONT, 0.55, COLOR_GREEN, FONT_THICKNESS, cv2.LINE_AA,
+            )
 
 
 def draw_calibration_overlay(
