@@ -345,11 +345,17 @@ class PuttingApp:
                 detect_x2 = display_frame.shape[1]
 
             # Detect ball
-            # When ball is in motion (STARTED/ENTERED), widen Y range to
-            # full frame height so slight vertical drift doesn't lose the ball
-            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+            # When ball is in motion (STARTED/ENTERED):
+            # - Widen Y range so vertical drift doesn't lose the ball
+            # - Disable circularity filter (motion blur makes ball non-circular)
+            ball_in_motion = self._tracker.state in (
+                ShotState.STARTED, ShotState.ENTERED,
+            )
+            if ball_in_motion:
                 det_y1 = max(0, zone.y1 - 50)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+                saved_circ = self._detector.min_circularity
+                self._detector.min_circularity = 0.0
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2
@@ -367,6 +373,9 @@ class PuttingApp:
                     else None
                 ),
             )
+
+            if ball_in_motion:
+                self._detector.min_circularity = saved_circ
 
             # Track ball (with state transition logging)
             prev_state = self._tracker.state
@@ -711,9 +720,14 @@ class PuttingApp:
                 detect_x1 = zone.start_x1
                 detect_x2 = display_frame.shape[1]
 
-            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+            ball_in_motion = self._tracker.state in (
+                ShotState.STARTED, ShotState.ENTERED,
+            )
+            if ball_in_motion:
                 det_y1 = max(0, zone.y1 - 50)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+                saved_circ = self._detector.min_circularity
+                self._detector.min_circularity = 0.0
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2
@@ -731,6 +745,9 @@ class PuttingApp:
                     else None
                 ),
             )
+
+            if ball_in_motion:
+                self._detector.min_circularity = saved_circ
 
             shot_result = self._tracker.update(detection)
 
