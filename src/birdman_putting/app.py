@@ -339,10 +339,10 @@ class PuttingApp:
                 and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
             ):
                 detect_x1 = 0
-                detect_x2 = 640
+                detect_x2 = display_frame.shape[1]
             else:
                 detect_x1 = zone.start_x1
-                detect_x2 = 640
+                detect_x2 = display_frame.shape[1]
 
             # Detect ball
             detection = self._detector.detect(
@@ -368,6 +368,19 @@ class PuttingApp:
                 )
             if shot_result is not None:
                 logger.info("Shot result received from tracker")
+            # Log when ball is lost during active tracking
+            if (
+                detection is None
+                and prev_state in (ShotState.STARTED, ShotState.ENTERED)
+                and self._tracker.state == ShotState.IDLE
+            ):
+                logger.warning(
+                    "Ball lost during %s — detection returned None "
+                    "(frame: %dx%d, zone: x=%d-%d y=%d-%d)",
+                    prev_state.value,
+                    display_frame.shape[1], display_frame.shape[0],
+                    detect_x1, detect_x2, zone.y1, zone.y2,
+                )
 
             # Signal GSPro when ball is detected and ready
             self._gspro.ball_detected = self._tracker.state not in (
@@ -684,10 +697,10 @@ class PuttingApp:
                 and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
             ):
                 detect_x1 = 0
-                detect_x2 = 640
+                detect_x2 = display_frame.shape[1]
             else:
                 detect_x1 = zone.start_x1
-                detect_x2 = 640
+                detect_x2 = display_frame.shape[1]
 
             detection = self._detector.detect(
                 frame=display_frame,
