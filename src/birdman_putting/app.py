@@ -375,12 +375,14 @@ class PuttingApp:
             # Process completed shot
             if shot_result is not None:
                 self._handle_shot(shot_result)
-                # Begin post-shot tracking to extend the trail
-                self._post_shot_tracking = True
-                self._post_shot_deadline = (
-                    frame_time + self.config.overlay.trail_duration
-                )
-                self._post_shot_radius = shot_result.start_radius
+                # Begin post-shot tracking to extend the trail (only if
+                # positions were stored — _handle_shot may return early)
+                if self._tracker.last_shot_positions:
+                    self._post_shot_tracking = True
+                    self._post_shot_deadline = (
+                        frame_time + self.config.overlay.trail_duration
+                    )
+                    self._post_shot_radius = shot_result.start_radius
 
             # Post-shot trail extension: keep detecting ball across full frame
             if self._post_shot_tracking:
@@ -470,6 +472,13 @@ class PuttingApp:
         if not isinstance(shot_result, ShotResult):
             return
 
+        # Always store trail positions for the tracer (even if physics fails)
+        self._tracker.last_shot_start = shot_result.start_position
+        self._tracker.last_shot_end = shot_result.end_position
+        self._tracker.last_shot_positions = [
+            (x, y) for x, y, _t in shot_result.positions
+        ]
+
         positions = list(shot_result.positions)
         is_rtl = self.config.detection_zone.direction == "right_to_left"
         shot_data = calculate_shot(
@@ -484,6 +493,7 @@ class PuttingApp:
         )
 
         if not shot_data:
+            logger.warning("Shot physics calculation failed — trail shown but no data")
             return
 
         s = self.config.shot
@@ -503,14 +513,9 @@ class PuttingApp:
             "" if in_range else " (OUT OF RANGE)",
         )
 
-        # Store for overlay display
+        # Store speed/HLA for overlay display
         self._tracker.last_shot_speed = shot_data.speed_mph
         self._tracker.last_shot_hla = shot_data.hla_degrees
-        self._tracker.last_shot_start = shot_result.start_position
-        self._tracker.last_shot_end = shot_result.end_position
-        self._tracker.last_shot_positions = [
-            (x, y) for x, y, _t in shot_result.positions
-        ]
 
         # Only send valid shots to GSPro and OBS
         if in_range:
@@ -690,11 +695,12 @@ class PuttingApp:
 
             if shot_result is not None:
                 self._handle_shot(shot_result)
-                self._post_shot_tracking = True
-                self._post_shot_deadline = (
-                    frame_time + self.config.overlay.trail_duration
-                )
-                self._post_shot_radius = shot_result.start_radius
+                if self._tracker.last_shot_positions:
+                    self._post_shot_tracking = True
+                    self._post_shot_deadline = (
+                        frame_time + self.config.overlay.trail_duration
+                    )
+                    self._post_shot_radius = shot_result.start_radius
 
             # Post-shot trail extension
             if self._post_shot_tracking:
