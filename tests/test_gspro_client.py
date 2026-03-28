@@ -26,15 +26,15 @@ class TestShotMessageFormat:
         assert ball["VLA"] == 0.0
         assert ball["TotalSpin"] == 0.0
         assert ball["SpinAxis"] == 0.0
-        # BackSpin/SideSpin removed to match R10 connector format
-        assert "BackSpin" not in ball
-        assert "SideSpin" not in ball
+        assert ball["Backspin"] == 0.0
+        assert ball["SideSpin"] == 0.0
 
         opts = msg["ShotDataOptions"]
         assert opts["ContainsBallData"] is True
         assert opts["ContainsClubData"] is False
-        # Shot messages only have ContainsBallData/ContainsClubData
-        assert "IsHeartBeat" not in opts
+        assert opts["LaunchMonitorIsReady"] is True
+        assert opts["LaunchMonitorBallDetected"] is True
+        assert opts["IsHeartBeat"] is False
 
     def test_heartbeat_message_format(self):
         """Verify heartbeat has IsHeartBeat=True."""
@@ -93,20 +93,20 @@ class TestFullShotMessageFormat:
         assert ball["HLA"] == -1.5
         assert ball["TotalSpin"] == 3000.0
         assert ball["SpinAxis"] == 15.0
-        # BackSpin/SideSpin removed to match R10 connector format
-        assert "BackSpin" not in ball
-        assert "SideSpin" not in ball
+        assert ball["Backspin"] == 2898.0
+        assert ball["SideSpin"] == 776.0
 
         opts = msg["ShotDataOptions"]
         assert opts["ContainsBallData"] is True
-        assert opts["ContainsClubData"] is True  # club_speed > 0
-        assert "IsHeartBeat" not in opts
+        assert opts["ContainsClubData"] is True
+        assert opts["LaunchMonitorIsReady"] is True
+        assert opts["IsHeartBeat"] is False
 
         club = msg["ClubData"]
         assert club["Speed"] == 95.0
 
     def test_full_shot_no_club_speed(self):
-        """ContainsClubData should be False when club_speed is 0."""
+        """ClubData always present (MLM2PRO format), Speed=0 when unknown."""
         settings = ConnectionSettings()
         client = GSProClient(settings)
         client._shot_number = 1
@@ -117,8 +117,9 @@ class TestFullShotMessageFormat:
             back_spin=2500.0, side_spin=0.0,
             club_speed=0.0,
         )
-        assert msg["ShotDataOptions"]["ContainsClubData"] is False
-        assert "ClubData" not in msg
+        # MLM2PRO format always includes ClubData
+        assert msg["ShotDataOptions"]["ContainsClubData"] is True
+        assert msg["ClubData"]["Speed"] == 0.0
 
     def test_full_shot_values_rounded(self):
         """Values should be rounded to 2 decimal places."""

@@ -299,10 +299,16 @@ class GSProClient:
                 "TotalSpin": 0.0,
                 "HLA": round(hla_degrees, 2),
                 "VLA": 0.0,
+                "Backspin": 0.0,
+                "SideSpin": 0.0,
+                "CarryDistance": 0,
             },
             "ShotDataOptions": {
                 "ContainsBallData": True,
                 "ContainsClubData": False,
+                "LaunchMonitorIsReady": True,
+                "LaunchMonitorBallDetected": True,
+                "IsHeartBeat": False,
             },
         }
 
@@ -326,48 +332,44 @@ class GSProClient:
     ) -> dict[str, object]:
         """Build GSPro Open Connect v1 message with full ball + club data.
 
-        Format matches the R10/MLM2PRO connector's launchBall() format —
-        only ContainsBallData/ContainsClubData in ShotDataOptions (no
-        IsHeartBeat/LaunchMonitorIsReady in shot messages).
+        Format matches the MLM2PRO-GSPro-Connector's to_gspro() format
+        (springbok/MLM2PRO-GSPro-Connector ball_data.py).
         """
-        has_club = club_speed > 0 or aoa != 0 or club_path != 0
-        ball_data: dict[str, object] = {
-            "Speed": round(ball_speed, 2),
-            "SpinAxis": round(spin_axis, 2),
-            "TotalSpin": round(total_spin, 2),
-            "HLA": round(hla, 2),
-            "VLA": round(vla, 2),
-        }
-
-        club_data: dict[str, object] = {}
-        if club_speed > 0:
-            club_data["Speed"] = round(club_speed, 2)
-        if aoa != 0:
-            club_data["AngleOfAttack"] = round(aoa, 2)
-        if club_path != 0:
-            club_data["Path"] = round(club_path, 2)
-        if dynamic_loft != 0:
-            club_data["Loft"] = round(dynamic_loft, 2)
-        if face_to_target != 0:
-            club_data["FaceToTarget"] = round(face_to_target, 2)
-        if lateral_impact != 0:
-            club_data["HorizontalFaceImpact"] = round(lateral_impact, 2)
-        if vertical_impact != 0:
-            club_data["VerticalFaceImpact"] = round(vertical_impact, 2)
-
         msg: dict[str, object] = {
             "DeviceID": self._settings.device_id,
             "Units": "Yards",
             "ShotNumber": self._shot_number,
             "APIversion": "1",
-            "BallData": ball_data,
+            "BallData": {
+                "Speed": round(ball_speed, 2),
+                "SpinAxis": round(spin_axis, 2),
+                "TotalSpin": round(total_spin, 2),
+                "HLA": round(hla, 2),
+                "VLA": round(vla, 2),
+                "Backspin": round(back_spin, 2),
+                "SideSpin": round(side_spin, 2),
+                "CarryDistance": round(carry_distance, 1),
+            },
+            "ClubData": {
+                "Speed": round(club_speed, 2),
+                "AngleOfAttack": round(aoa, 2),
+                "FaceToTarget": round(face_to_target, 2),
+                "Lie": 0,
+                "Loft": round(dynamic_loft, 2),
+                "Path": round(club_path, 2),
+                "SpeedAtImpact": round(club_speed, 2),
+                "VerticalFaceImpact": round(vertical_impact, 2),
+                "HorizontalFaceImpact": round(lateral_impact, 2),
+                "ClosureRate": 0,
+            },
             "ShotDataOptions": {
                 "ContainsBallData": True,
-                "ContainsClubData": has_club,
+                "ContainsClubData": True,
+                "LaunchMonitorIsReady": True,
+                "LaunchMonitorBallDetected": True,
+                "IsHeartBeat": False,
             },
         }
-        if club_data:
-            msg["ClubData"] = club_data
         return msg
 
     def _build_heartbeat_message(self) -> dict[str, object]:
