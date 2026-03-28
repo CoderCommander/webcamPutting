@@ -209,7 +209,12 @@ class GSProClient:
         return self._send_json(message)
 
     def _send_json(self, message: dict[str, object]) -> GSProResponse:
-        """Send a JSON message over the socket and wait for response."""
+        """Send a JSON message over the socket and wait briefly for response.
+
+        Uses a short recv timeout (2s) since GSPro sometimes processes
+        shots without responding. A recv timeout is treated as likely
+        success — the connection is NOT killed.
+        """
         with self._lock:
             if self._socket is None:
                 return GSProResponse(success=False, message="Socket not connected")
@@ -217,9 +222,17 @@ class GSProClient:
             try:
                 data = json.dumps(message).encode("utf-8")
                 self._socket.sendall(data)
+            except OSError as e:
+                logger.error("Failed to send to GSPro: %s", e)
+                self._connected.clear()
+                return GSProResponse(success=False, message=str(e))
 
-                # Read response
+            # Try to read response with a short timeout
+            try:
+                self._socket.settimeout(2.0)
                 response_data = self._socket.recv(4096)
+                self._socket.settimeout(10.0)
+
                 if response_data:
                     response = json.loads(response_data.decode("utf-8"))
                     code = response.get("Code", -1)
@@ -227,14 +240,18 @@ class GSProClient:
                     if code == 200:
                         logger.info("GSPro accepted shot: %s", msg)
                         return GSProResponse(success=True, message=msg)
-                    else:
-                        logger.warning("GSPro rejected shot (code %d): %s", code, msg)
-                        return GSProResponse(success=False, message=msg)
+                    logger.warning("GSPro rejected shot (code %d): %s", code, msg)
+                    return GSProResponse(success=False, message=msg)
 
                 return GSProResponse(success=True)
 
+            except TimeoutError:
+                # GSPro often processes shots without responding — treat as OK
+                self._socket.settimeout(10.0)
+                logger.debug("GSPro recv timeout (shot likely accepted)")
+                return GSProResponse(success=True, message="sent (no response)")
             except (OSError, json.JSONDecodeError) as e:
-                logger.error("Failed to send to GSPro: %s", e)
+                logger.error("Failed to read GSPro response: %s", e)
                 self._connected.clear()
                 return GSProResponse(success=False, message=str(e))
 
