@@ -234,22 +234,36 @@ class VideoPanel(ctk.CTkLabel):
         self.configure(image=self._ctk_image)
 
     # ---- Coordinate mapping (display ↔ frame space) ----
+    # The CTkLabel widget may be larger than the rendered image (grid stretch).
+    # The image is centered, so we compute the offset to map correctly.
+
+    def _image_offset(self) -> tuple[int, int]:
+        """Compute (ox, oy) offset of the image within the widget."""
+        w = self.winfo_width()
+        h = self.winfo_height()
+        ox = max(0, (w - self._display_width) // 2)
+        oy = max(0, (h - self._display_height) // 2)
+        return ox, oy
 
     def _display_x_to_frame(self, dx: int) -> int:
-        """Convert display-space X to frame-space X."""
-        return int(dx * self._frame_width / self._display_width)
+        """Convert widget-space X to frame-space X."""
+        ox, _ = self._image_offset()
+        return int((dx - ox) * self._frame_width / self._display_width)
 
     def _display_y_to_frame(self, dy: int) -> int:
-        """Convert display-space Y to frame-space Y."""
-        return int(dy * self._frame_height / self._display_height)
+        """Convert widget-space Y to frame-space Y."""
+        _, oy = self._image_offset()
+        return int((dy - oy) * self._frame_height / self._display_height)
 
     def _frame_x_to_display(self, fx: int) -> int:
-        """Convert frame-space X to display-space X."""
-        return int(fx * self._display_width / self._frame_width)
+        """Convert frame-space X to widget-space X."""
+        ox, _ = self._image_offset()
+        return int(fx * self._display_width / self._frame_width) + ox
 
     def _frame_y_to_display(self, fy: int) -> int:
-        """Convert frame-space Y to display-space Y."""
-        return int(fy * self._display_height / self._frame_height)
+        """Convert frame-space Y to widget-space Y."""
+        _, oy = self._image_offset()
+        return int(fy * self._display_height / self._frame_height) + oy
 
     # ---- Hit testing ----
 
