@@ -334,6 +334,9 @@ def run_calibration(config: AppConfig) -> None:
         roi_dict[name] = list(rect)
 
     config.mevo.rois = roi_dict
+    # Store capture dimensions so ROIs can be scaled at runtime if resolution changes
+    config.mevo.cal_width = screenshot.shape[1]
+    config.mevo.cal_height = screenshot.shape[0]
     save_config(config)
 
     # Restore FS Golf window to original size

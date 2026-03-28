@@ -1081,9 +1081,35 @@ class PuttingApp:
             return
 
         capture = WindowCapture(self.config.mevo.window_title)
+
+        # Widen FS Golf window so all columns (including right-side metrics) are visible
+        if capture.find_window():
+            capture.widen()
+
+            # Scale ROIs if the current capture size differs from calibration
+            cal_w = self.config.mevo.cal_width
+            cal_h = self.config.mevo.cal_height
+            if cal_w > 0 and cal_h > 0:
+                test_frame = capture.capture()
+                if test_frame is not None:
+                    cur_h, cur_w = test_frame.shape[:2]
+                    if cur_w != cal_w or cur_h != cal_h:
+                        sx = cur_w / cal_w
+                        sy = cur_h / cal_h
+                        for roi in rois:
+                            roi.x = int(roi.x * sx)
+                            roi.y = int(roi.y * sy)
+                            roi.width = int(roi.width * sx)
+                            roi.height = int(roi.height * sy)
+                        logger.info(
+                            "Scaled %d ROIs: cal %dx%d → current %dx%d (%.2fx, %.2fy)",
+                            len(rois), cal_w, cal_h, cur_w, cur_h, sx, sy,
+                        )
+
         tessdata = self.config.mevo.tessdata_dir or None
         ocr = MevoOCR(rois=rois, tessdata_dir=tessdata)
         self._mevo_detector = MevoDetector(self.config.mevo, ocr, capture)
+        self._mevo_capture = capture  # Keep reference for cleanup
 
         self._mevo_thread = threading.Thread(
             target=self._mevo_loop, daemon=True, name="mevo",
@@ -1150,11 +1176,16 @@ class PuttingApp:
                 )
 
     def _stop_mevo(self) -> None:
-        """Stop the Mevo thread."""
+        """Stop the Mevo thread and restore FS Golf window."""
         if self._mevo_thread is not None:
             self._mevo_thread.join(timeout=5)
             self._mevo_thread = None
         self._mevo_detector = None
+        # Restore FS Golf window to original size
+        capture = getattr(self, "_mevo_capture", None)
+        if capture is not None:
+            capture.restore()
+            self._mevo_capture = None
 
     # ---- Shared ----
 

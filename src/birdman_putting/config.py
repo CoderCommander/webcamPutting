@@ -133,6 +133,8 @@ class MevoSettings:
     tessdata_dir: str = ""  # Path to tessdata directory (empty = system default)
     rois: dict[str, list[int]] = field(default_factory=dict)
     # ROI format: {"ball_speed": [x, y, w, h], "launch_angle": [x, y, w, h], ...}
+    cal_width: int = 0  # Capture width when ROIs were calibrated (0 = unknown)
+    cal_height: int = 0  # Capture height when ROIs were calibrated (0 = unknown)
 
 
 @dataclass
