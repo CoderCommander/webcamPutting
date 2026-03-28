@@ -1147,6 +1147,9 @@ class PuttingApp:
         if not isinstance(shot, MevoShotData):
             return
 
+        # Suppress heartbeats before sending so they don't interfere
+        self._gspro._shot_cooldown = 3
+
         # Send to GSPro in background thread to avoid blocking Mevo polling
         def _send_mevo() -> None:
             response = self._gspro.send_full_shot(

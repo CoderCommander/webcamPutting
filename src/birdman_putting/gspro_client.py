@@ -173,7 +173,7 @@ class GSProClient:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
             sock.connect((host, port))
-            sock.settimeout(10.0)
+            sock.settimeout(2.0)  # Match MLM2PRO connector timeout
 
             with self._lock:
                 self._socket = sock
@@ -212,48 +212,70 @@ class GSProClient:
         return self._send_json(message)
 
     def _send_json(self, message: dict[str, object]) -> GSProResponse:
-        """Send a JSON message over the socket (fire and forget).
+        """Send a JSON message and wait for response (2s timeout, 2 attempts).
 
-        Matches the R10/MLM2PRO connector behavior: socket.write() with
-        no blocking recv(). GSPro responses are handled asynchronously
-        via the socket's data event in the heartbeat loop.
+        Matches the MLM2PRO-GSPro-Connector send_msg() behavior:
+        sendall + recv(2048) with socket timeout of 2s, retry once.
         """
         with self._lock:
             if self._socket is None:
                 return GSProResponse(success=False, message="Socket not connected")
 
-            try:
-                data = json.dumps(message).encode("utf-8")
-                self._socket.sendall(data)
-                logger.info("Shot sent to GSPro (shot #%d)", self._shot_number)
+            data = json.dumps(message).encode("utf-8")
+            attempts = 2
 
-                # Non-blocking drain of any pending response data
-                self._socket.setblocking(False)
+            for attempt in range(attempts):
                 try:
-                    resp = self._socket.recv(4096)
-                    if resp:
-                        try:
-                            parsed = json.loads(resp.decode("utf-8"))
+                    self._socket.settimeout(2.0)
+                    self._socket.sendall(data)
+                    resp = self._socket.recv(2048)
+
+                    if len(resp) == 0:
+                        logger.warning("GSPro closed the connection")
+                        self._connected.clear()
+                        return GSProResponse(success=False, message="Connection closed")
+
+                    # Parse response
+                    try:
+                        # Handle multiple JSON objects concatenated
+                        resp_str = resp.decode("utf-8")
+                        for part in resp_str.replace("}{", "}|{").split("|"):
+                            parsed = json.loads(part)
                             code = parsed.get("Code", -1)
-                            msg = parsed.get("Message", "")
+                            msg_text = parsed.get("Message", "")
                             if code == 200:
-                                logger.info("GSPro accepted: %s", msg)
+                                logger.info("GSPro accepted shot: %s", msg_text)
+                            elif code == 201:
+                                # Club selection message from GSPro
+                                club = parsed.get("Player", {}).get("Club", "")
+                                logger.info("GSPro club selected: %s", club)
                             elif code > 0:
-                                logger.warning("GSPro response (code %d): %s", code, msg)
-                        except json.JSONDecodeError:
-                            pass
-                except BlockingIOError:
-                    pass  # No response yet — expected
+                                logger.warning(
+                                    "GSPro response (code %d): %s", code, msg_text,
+                                )
+                    except json.JSONDecodeError:
+                        logger.debug("GSPro response (raw): %s", resp)
+
+                    return GSProResponse(success=True, message="sent")
+
+                except TimeoutError:
+                    logger.info(
+                        "GSPro send timeout (attempt %d/%d)", attempt + 1, attempts,
+                    )
+                    if attempt < attempts - 1:
+                        time.sleep(0.5)
+                    continue
+                except OSError as e:
+                    logger.error("Failed to send to GSPro: %s", e)
+                    self._connected.clear()
+                    return GSProResponse(success=False, message=str(e))
                 finally:
-                    self._socket.setblocking(True)
-                    self._socket.settimeout(10.0)
+                    if self._socket:
+                        self._socket.settimeout(2.0)
 
-                return GSProResponse(success=True, message="sent")
-
-            except OSError as e:
-                logger.error("Failed to send to GSPro: %s", e)
-                self._connected.clear()
-                return GSProResponse(success=False, message=str(e))
+            # All attempts failed
+            logger.warning("GSPro send failed after %d attempts", attempts)
+            return GSProResponse(success=False, message="timeout")
 
     def _send_heartbeat_json(self, message: dict[str, object]) -> GSProResponse:
         """Send a heartbeat message without waiting for a response.
@@ -277,7 +299,7 @@ class GSProClient:
                     pass  # No data available — expected for heartbeats
                 finally:
                     self._socket.setblocking(True)
-                    self._socket.settimeout(10.0)
+                    self._socket.settimeout(2.0)
 
                 return GSProResponse(success=True)
 
