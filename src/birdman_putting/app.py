@@ -110,6 +110,11 @@ class PuttingApp:
         # OBS controller
         self._obs: OBSController | None = None
 
+        # Post-shot trail tracking: continue detecting ball after shot for trail
+        self._post_shot_tracking = False
+        self._post_shot_deadline: float = 0.0
+        self._post_shot_radius: int = 0
+
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
 
@@ -370,6 +375,33 @@ class PuttingApp:
             # Process completed shot
             if shot_result is not None:
                 self._handle_shot(shot_result)
+                # Begin post-shot tracking to extend the trail
+                self._post_shot_tracking = True
+                self._post_shot_deadline = (
+                    frame_time + self.config.overlay.trail_duration
+                )
+                self._post_shot_radius = shot_result.start_radius
+
+            # Post-shot trail extension: keep detecting ball across full frame
+            if self._post_shot_tracking:
+                if frame_time < self._post_shot_deadline and detection is None:
+                    # Try full-frame detection to find ball beyond zone
+                    detection = self._detector.detect(
+                        frame=display_frame,
+                        zone_x1=0,
+                        zone_x2_limit=display_frame.shape[1],
+                        zone_y1=0,
+                        zone_y2=display_frame.shape[0],
+                        timestamp=frame_time,
+                        expected_radius=self._post_shot_radius,
+                    )
+                if detection is not None and frame_time < self._post_shot_deadline:
+                    self._tracker.last_shot_positions.append(
+                        (detection.x, detection.y),
+                    )
+                else:
+                    # Ball lost or timeout — stop post-shot tracking
+                    self._post_shot_tracking = False
 
             # Build trail data for overlay
             active_trail: list[tuple[int, int]] = []
@@ -649,6 +681,30 @@ class PuttingApp:
 
             if shot_result is not None:
                 self._handle_shot(shot_result)
+                self._post_shot_tracking = True
+                self._post_shot_deadline = (
+                    frame_time + self.config.overlay.trail_duration
+                )
+                self._post_shot_radius = shot_result.start_radius
+
+            # Post-shot trail extension
+            if self._post_shot_tracking:
+                if frame_time < self._post_shot_deadline and detection is None:
+                    detection = self._detector.detect(
+                        frame=display_frame,
+                        zone_x1=0,
+                        zone_x2_limit=display_frame.shape[1],
+                        zone_y1=0,
+                        zone_y2=display_frame.shape[0],
+                        timestamp=frame_time,
+                        expected_radius=self._post_shot_radius,
+                    )
+                if detection is not None and frame_time < self._post_shot_deadline:
+                    self._tracker.last_shot_positions.append(
+                        (detection.x, detection.y),
+                    )
+                else:
+                    self._post_shot_tracking = False
 
             # Build trail data for overlay
             active_trail: list[tuple[int, int]] = []
