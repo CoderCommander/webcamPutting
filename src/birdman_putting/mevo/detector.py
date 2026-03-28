@@ -163,6 +163,8 @@ class MevoDetector:
         total_pixels = 0
         for roi in self._ocr._rois:
             crop = MevoOCR._crop_roi(frame, roi)
+            if crop is None:
+                continue
             prev = self._prev_crops.get(roi.name)
             if prev is None or crop.shape != prev.shape:
                 return float("inf")
@@ -173,10 +175,12 @@ class MevoDetector:
 
     def _store_crops(self, frame: np.ndarray) -> None:
         """Store cropped ROI regions for next comparison."""
-        self._prev_crops = {
-            roi.name: MevoOCR._crop_roi(frame, roi).copy()
-            for roi in self._ocr._rois
-        }
+        crops: dict[str, np.ndarray] = {}
+        for roi in self._ocr._rois:
+            crop = MevoOCR._crop_roi(frame, roi)
+            if crop is not None:
+                crops[roi.name] = crop.copy()
+        self._prev_crops = crops
 
     def poll(self) -> MevoShotData | None:
         """Check for a new shot.
