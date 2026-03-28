@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import queue
 import threading
 import time
@@ -281,40 +282,117 @@ class PuttingApp:
             self._tracker.reset()
             if self._window:
                 self._window.set_angle_cal_state(True)
+                with contextlib.suppress(RuntimeError):
+                    self._window.after(
+                        0, self._window.update_camera_status,
+                        "Project a straight line...", "watching",
+                    )
             logger.info(
-                "Angle calibration started — putt a straight ball "
-                "(up to 3 samples, press again to apply)"
+                "Angle calibration started — project a straight white line "
+                "from putting position through the gateway"
             )
 
-    def _handle_angle_cal_shot(self, hla: float) -> None:
-        """Process a calibration putt — accumulate HLA samples."""
-        self._angle_cal_samples.append(hla)
-        n = len(self._angle_cal_samples)
-        avg = sum(self._angle_cal_samples) / n
-        logger.info(
-            "Angle cal sample #%d: %.2f° (avg: %.2f°)", n, hla, avg,
+    @staticmethod
+    def _detect_line_angle(frame: np.ndarray) -> float | None:
+        """Detect the dominant straight line in the frame and return its angle.
+
+        Uses brightness thresholding (for a white projected line on a dark
+        floor) followed by Hough line detection. Returns the angle in degrees
+        of the longest detected line, or None if no line found.
+        """
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Threshold for bright pixels (projected white line)
+        _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+
+        # Clean up noise
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        # Detect edges
+        edges = cv2.Canny(mask, 50, 150)
+
+        # Hough line detection
+        lines = cv2.HoughLinesP(
+            edges, rho=1, theta=np.pi / 180, threshold=50,
+            minLineLength=80, maxLineGap=20,
         )
 
-        if n >= 3:
-            # Auto-apply after 3 samples
-            self._apply_angle_cal()
-        elif self._window:
-            with contextlib.suppress(RuntimeError):
-                self._window.after(
-                    0, self._window.update_camera_status,
-                    f"Cal: {n}/3 (avg {avg:+.1f}°)", "watching",
-                )
+        if lines is None or len(lines) == 0:
+            return None
+
+        # Find the longest line
+        best_len = 0.0
+        best_angle = 0.0
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+            if length > best_len:
+                best_len = length
+                # atan2(-dy, dx) with inverted Y for screen coords
+                best_angle = math.degrees(math.atan2(-(y2 - y1), x2 - x1))
+
+        logger.info(
+            "Line detected: angle=%.2f°, length=%.0fpx", best_angle, best_len,
+        )
+        return best_angle
+
+    def _process_angle_cal_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Process a frame during angle calibration — detect line, draw overlay.
+
+        Accumulates angle samples over multiple frames and auto-applies
+        when enough consistent readings are collected.
+        """
+        display = frame.copy()
+        angle = self._detect_line_angle(frame)
+
+        h, w = display.shape[:2]
+        if angle is not None:
+            self._angle_cal_samples.append(angle)
+
+            # Draw the detected line direction on the frame
+            cx, cy = w // 2, h // 2
+            length = min(w, h) // 3
+            rad = math.radians(angle)
+            x2 = int(cx + length * math.cos(rad))
+            y2 = int(cy - length * math.sin(rad))  # invert Y
+            cv2.line(display, (cx, cy), (x2, y2), (0, 255, 0), 2, cv2.LINE_AA)
+
+            n = len(self._angle_cal_samples)
+            avg = sum(self._angle_cal_samples) / n
+            status = f"ANGLE CAL: {angle:+.1f}° (avg {avg:+.1f}°, {n} samples)"
+            cv2.putText(
+                display, status, (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1, cv2.LINE_AA,
+            )
+
+            # Apply after 30 consistent frames (~0.5s at 60fps)
+            if n >= 30:
+                self._apply_angle_cal()
+        else:
+            cv2.putText(
+                display, "ANGLE CAL: No line detected — project a white line",
+                (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1,
+                cv2.LINE_AA,
+            )
+            # Clear stale samples if line is lost
+            self._angle_cal_samples.clear()
+
+        # Green border to indicate calibration mode
+        cv2.rectangle(display, (0, 0), (w - 1, h - 1), (0, 255, 0), 2)
+        return display
 
     def _apply_angle_cal(self) -> None:
-        """Apply angle calibration: adjust camera rotation to zero out HLA offset."""
+        """Apply angle calibration: adjust camera rotation to zero out line angle."""
         if not self._angle_cal_samples:
             return
 
-        avg_hla = sum(self._angle_cal_samples) / len(self._angle_cal_samples)
-        # The measured HLA from a "straight" putt IS the angular error.
-        # Adjust camera rotation to compensate.
+        avg_angle = sum(self._angle_cal_samples) / len(self._angle_cal_samples)
+        # A perfectly horizontal line should be 0°. The deviation IS the
+        # camera rotation error.
         old_rotation = self.config.camera.rotation
-        new_rotation = old_rotation + avg_hla
+        new_rotation = old_rotation - avg_angle
         new_rotation = max(-45.0, min(45.0, new_rotation))
 
         self.config.camera.rotation = new_rotation
@@ -324,8 +402,8 @@ class PuttingApp:
         save_config(self.config)
         logger.info(
             "Angle calibration applied: rotation %.1f° → %.1f° "
-            "(corrected %.2f° HLA offset)",
-            old_rotation, new_rotation, avg_hla,
+            "(line angle was %.2f°)",
+            old_rotation, new_rotation, avg_angle,
         )
 
         if self._window:
@@ -365,6 +443,18 @@ class PuttingApp:
 
             # Resize for processing
             display_frame = resize_with_aspect_ratio(frame, width=640)
+
+            # --- Angle calibration mode (line detection) ---
+            if self._angle_cal_active:
+                display_frame = self._process_angle_cal_frame(display_frame)
+                try:
+                    self._frame_queue.put_nowait(display_frame)
+                except queue.Full:
+                    with contextlib.suppress(queue.Empty):
+                        self._frame_queue.get_nowait()
+                    with contextlib.suppress(queue.Full):
+                        self._frame_queue.put_nowait(display_frame)
+                continue
 
             # --- Calibration mode ---
             if self._calibrating and self._calibrator:
@@ -623,21 +713,6 @@ class PuttingApp:
 
         if not shot_data:
             logger.warning("Shot physics calculation failed — trail shown but no data")
-            return
-
-        # Angle calibration: capture HLA and skip normal shot processing
-        if self._angle_cal_active:
-            self._handle_angle_cal_shot(shot_data.hla_degrees)
-            # Still update UI with the measured data
-            self._tracker.last_shot_speed = shot_data.speed_mph
-            self._tracker.last_shot_hla = shot_data.hla_degrees
-            if self._window:
-                with contextlib.suppress(RuntimeError):
-                    self._window.after(
-                        0, self._window.update_shot,
-                        shot_data.speed_mph, shot_data.hla_degrees,
-                        self._tracker.shot_count,
-                    )
             return
 
         s = self.config.shot
