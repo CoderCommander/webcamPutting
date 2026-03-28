@@ -30,6 +30,12 @@ _METRICS: list[tuple[str, bool]] = [
     ("descent_angle", False),
     ("curve", False),
     ("roll_distance", False),
+    ("aoa", False),
+    ("club_path", False),
+    ("dynamic_loft", False),
+    ("face_to_target", False),
+    ("lateral_impact", False),
+    ("vertical_impact", False),
 ]
 
 _WINDOW_NAME = "Mevo ROI Calibration"

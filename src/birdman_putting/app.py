@@ -1158,6 +1158,13 @@ class PuttingApp:
                 back_spin=shot.back_spin,
                 side_spin=shot.side_spin,
                 club_speed=shot.club_speed,
+                carry_distance=shot.carry_distance,
+                aoa=shot.aoa,
+                club_path=shot.club_path,
+                dynamic_loft=shot.dynamic_loft,
+                face_to_target=shot.face_to_target,
+                lateral_impact=shot.lateral_impact,
+                vertical_impact=shot.vertical_impact,
             )
             logger.info(
                 "Mevo shot: %.1f mph, VLA=%.1f, HLA=%.1f, Spin=%d → %s",

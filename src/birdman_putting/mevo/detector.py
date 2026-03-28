@@ -30,6 +30,12 @@ _VALID_RANGES: dict[str, tuple[float, float]] = {
     "descent_angle": (0.0, 90.0),      # degrees
     "curve": (-100.0, 100.0),          # yards
     "roll_distance": (0.0, 100.0),     # yards
+    "aoa": (-20.0, 20.0),             # degrees (angle of attack)
+    "club_path": (-30.0, 30.0),       # degrees
+    "dynamic_loft": (0.0, 70.0),      # degrees
+    "face_to_target": (-30.0, 30.0),  # degrees
+    "lateral_impact": (-2.0, 2.0),    # inches
+    "vertical_impact": (-2.0, 2.0),   # inches
 }
 
 
@@ -51,11 +57,19 @@ class MevoShotData:
     smash_factor: float = 0.0
     carry_distance: float = 0.0  # yards
     total_distance: float = 0.0  # yards
-    apex_height: float = 0.0     # yards
+    apex_height: float = 0.0     # yards (or feet, depending on FS Golf setting)
     flight_time: float = 0.0     # seconds
     descent_angle: float = 0.0   # degrees
     curve: float = 0.0           # yards
     roll_distance: float = 0.0   # yards
+
+    # Club data metrics
+    aoa: float = 0.0             # degrees (angle of attack)
+    club_path: float = 0.0       # degrees
+    dynamic_loft: float = 0.0    # degrees
+    face_to_target: float = 0.0  # degrees
+    lateral_impact: float = 0.0  # inches
+    vertical_impact: float = 0.0  # inches
 
     @property
     def back_spin(self) -> float:
@@ -246,6 +260,12 @@ class MevoDetector:
             descent_angle=metrics.get("descent_angle") or 0.0,
             curve=metrics.get("curve") or 0.0,
             roll_distance=metrics.get("roll_distance") or 0.0,
+            aoa=metrics.get("aoa") or 0.0,
+            club_path=metrics.get("club_path") or 0.0,
+            dynamic_loft=metrics.get("dynamic_loft") or 0.0,
+            face_to_target=metrics.get("face_to_target") or 0.0,
+            lateral_impact=metrics.get("lateral_impact") or 0.0,
+            vertical_impact=metrics.get("vertical_impact") or 0.0,
         )
         logger.info(
             "New Mevo shot: %.1f mph, VLA=%.1f, HLA=%.1f, Spin=%d",

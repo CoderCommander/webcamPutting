@@ -123,18 +123,15 @@ class GSProClient:
         back_spin: float,
         side_spin: float,
         club_speed: float = 0.0,
+        carry_distance: float = 0.0,
+        aoa: float = 0.0,
+        club_path: float = 0.0,
+        dynamic_loft: float = 0.0,
+        face_to_target: float = 0.0,
+        lateral_impact: float = 0.0,
+        vertical_impact: float = 0.0,
     ) -> GSProResponse:
         """Send full shot data from a launch monitor to GSPro.
-
-        Args:
-            ball_speed: Ball speed in MPH.
-            vla: Vertical launch angle in degrees.
-            hla: Horizontal launch angle in degrees.
-            total_spin: Total spin in RPM.
-            spin_axis: Spin axis in degrees.
-            back_spin: Back spin in RPM.
-            side_spin: Side spin in RPM.
-            club_speed: Club head speed in MPH (0 if unavailable).
 
         Returns:
             GSProResponse indicating success or failure.
@@ -146,6 +143,10 @@ class GSProClient:
         message = self._build_full_shot_message(
             ball_speed, vla, hla, total_spin, spin_axis,
             back_spin, side_spin, club_speed,
+            carry_distance=carry_distance,
+            aoa=aoa, club_path=club_path, dynamic_loft=dynamic_loft,
+            face_to_target=face_to_target,
+            lateral_impact=lateral_impact, vertical_impact=vertical_impact,
         )
         return self._send_json(message)
 
@@ -303,23 +304,50 @@ class GSProClient:
         back_spin: float,
         side_spin: float,
         club_speed: float,
+        carry_distance: float = 0.0,
+        aoa: float = 0.0,
+        club_path: float = 0.0,
+        dynamic_loft: float = 0.0,
+        face_to_target: float = 0.0,
+        lateral_impact: float = 0.0,
+        vertical_impact: float = 0.0,
     ) -> dict[str, object]:
-        """Build GSPro Open Connect v1 message with full ball data."""
-        has_club = club_speed > 0
+        """Build GSPro Open Connect v1 message with full ball + club data."""
+        has_club = club_speed > 0 or aoa != 0 or club_path != 0
+        ball_data: dict[str, object] = {
+            "Speed": round(ball_speed, 2),
+            "SpinAxis": round(spin_axis, 2),
+            "TotalSpin": round(total_spin, 2),
+            "BackSpin": round(back_spin, 2),
+            "SideSpin": round(side_spin, 2),
+            "HLA": round(hla, 2),
+            "VLA": round(vla, 2),
+        }
+        if carry_distance > 0:
+            ball_data["CarryDistance"] = round(carry_distance, 1)
+
+        club_data: dict[str, object] = {}
+        if club_speed > 0:
+            club_data["Speed"] = round(club_speed, 2)
+        if aoa != 0:
+            club_data["AngleOfAttack"] = round(aoa, 2)
+        if club_path != 0:
+            club_data["Path"] = round(club_path, 2)
+        if dynamic_loft != 0:
+            club_data["Loft"] = round(dynamic_loft, 2)
+        if face_to_target != 0:
+            club_data["FaceToTarget"] = round(face_to_target, 2)
+        if lateral_impact != 0:
+            club_data["HorizontalFaceImpact"] = round(lateral_impact, 2)
+        if vertical_impact != 0:
+            club_data["VerticalFaceImpact"] = round(vertical_impact, 2)
+
         msg: dict[str, object] = {
             "DeviceID": self._settings.device_id,
             "Units": "Yards",
             "ShotNumber": self._shot_number,
             "APIversion": "1",
-            "BallData": {
-                "Speed": round(ball_speed, 2),
-                "SpinAxis": round(spin_axis, 2),
-                "TotalSpin": round(total_spin, 2),
-                "BackSpin": round(back_spin, 2),
-                "SideSpin": round(side_spin, 2),
-                "HLA": round(hla, 2),
-                "VLA": round(vla, 2),
-            },
+            "BallData": ball_data,
             "ShotDataOptions": {
                 "ContainsBallData": True,
                 "ContainsClubData": has_club,
@@ -328,10 +356,8 @@ class GSProClient:
                 "IsHeartBeat": False,
             },
         }
-        if has_club:
-            msg["ClubData"] = {
-                "Speed": round(club_speed, 2),
-            }
+        if club_data:
+            msg["ClubData"] = club_data
         return msg
 
     def _build_heartbeat_message(self) -> dict[str, object]:

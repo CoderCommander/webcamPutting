@@ -40,7 +40,10 @@ _CHAR_FIXES: dict[str, str] = {
 }
 
 # Metrics where R/L suffix indicates direction (R=positive, L=negative)
-_SIGNED_METRICS: set[str] = {"launch_direction", "spin_axis"}
+_SIGNED_METRICS: set[str] = {
+    "launch_direction", "spin_axis", "club_path", "face_to_target",
+    "curve",
+}
 
 # Expected maximum values for each metric — values above these likely have
 # a missing decimal point from OCR (e.g. "85R" should be "8.5R")
@@ -49,6 +52,12 @@ _MAX_SANE_VALUES: dict[str, float] = {
     "launch_angle": 50.0,
     "spin_axis": 60.0,
     "smash_factor": 2.0,
+    "club_path": 30.0,
+    "face_to_target": 30.0,
+    "aoa": 20.0,
+    "dynamic_loft": 70.0,
+    "lateral_impact": 2.0,
+    "vertical_impact": 2.0,
 }
 
 
