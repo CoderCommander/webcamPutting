@@ -509,10 +509,16 @@ class PuttingApp:
             (x, y) for x, y, _t in shot_result.positions
         ]
 
-        # Send to GSPro
-        response = self._gspro.send_shot(shot_data.speed_mph, shot_data.hla_degrees)
-        if not response.success:
-            logger.warning("GSPro rejected shot: %s", response.message)
+        # Send to GSPro in a background thread to avoid blocking video
+        speed = shot_data.speed_mph
+        hla = shot_data.hla_degrees
+
+        def _send() -> None:
+            response = self._gspro.send_shot(speed, hla)
+            if not response.success:
+                logger.warning("GSPro rejected shot: %s", response.message)
+
+        threading.Thread(target=_send, daemon=True).start()
 
         # Show putt data on OBS overlay
         if self._obs:
