@@ -48,6 +48,7 @@ class GSProClient:
         self._heartbeat_thread: threading.Thread | None = None
         self._running = False
         self._ball_detected = False  # Set True when ball is ready for shot
+        self._shot_cooldown: int = 0  # Heartbeat cycles to skip after a shot
 
     @property
     def is_connected(self) -> bool:
@@ -140,6 +141,7 @@ class GSProClient:
             return GSProResponse(success=False, message="Not connected to GSPro")
 
         self._shot_number += 1
+        self._shot_cooldown = 3  # Skip 3 heartbeat cycles (~15s) after shot
         message = self._build_full_shot_message(
             ball_speed, vla, hla, total_spin, spin_axis,
             back_spin, side_spin, club_speed,
@@ -205,6 +207,7 @@ class GSProClient:
             return GSProResponse(success=False, message="Not connected to GSPro")
 
         self._shot_number += 1
+        self._shot_cooldown = 3  # Skip 3 heartbeat cycles (~15s) after shot
         message = self._build_shot_message(speed_mph, hla_degrees)
         return self._send_json(message)
 
@@ -410,6 +413,12 @@ class GSProClient:
 
             if not self._running:
                 break
+
+            # Skip heartbeat briefly after a shot so GSPro can process it
+            # without a zero-data heartbeat arriving immediately after
+            if self._shot_cooldown > 0:
+                self._shot_cooldown -= 1
+                continue
 
             if self._connected.is_set():
                 message = self._build_heartbeat_message()
