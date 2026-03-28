@@ -212,11 +212,11 @@ class GSProClient:
         return self._send_json(message)
 
     def _send_json(self, message: dict[str, object]) -> GSProResponse:
-        """Send a JSON message over the socket and wait briefly for response.
+        """Send a JSON message over the socket (fire and forget).
 
-        Uses a short recv timeout (2s) since GSPro sometimes processes
-        shots without responding. A recv timeout is treated as likely
-        success — the connection is NOT killed.
+        Matches the R10/MLM2PRO connector behavior: socket.write() with
+        no blocking recv(). GSPro responses are handled asynchronously
+        via the socket's data event in the heartbeat loop.
         """
         with self._lock:
             if self._socket is None:
@@ -225,36 +225,33 @@ class GSProClient:
             try:
                 data = json.dumps(message).encode("utf-8")
                 self._socket.sendall(data)
+                logger.info("Shot sent to GSPro (shot #%d)", self._shot_number)
+
+                # Non-blocking drain of any pending response data
+                self._socket.setblocking(False)
+                try:
+                    resp = self._socket.recv(4096)
+                    if resp:
+                        try:
+                            parsed = json.loads(resp.decode("utf-8"))
+                            code = parsed.get("Code", -1)
+                            msg = parsed.get("Message", "")
+                            if code == 200:
+                                logger.info("GSPro accepted: %s", msg)
+                            elif code > 0:
+                                logger.warning("GSPro response (code %d): %s", code, msg)
+                        except json.JSONDecodeError:
+                            pass
+                except BlockingIOError:
+                    pass  # No response yet — expected
+                finally:
+                    self._socket.setblocking(True)
+                    self._socket.settimeout(10.0)
+
+                return GSProResponse(success=True, message="sent")
+
             except OSError as e:
                 logger.error("Failed to send to GSPro: %s", e)
-                self._connected.clear()
-                return GSProResponse(success=False, message=str(e))
-
-            # Try to read response with a short timeout
-            try:
-                self._socket.settimeout(2.0)
-                response_data = self._socket.recv(4096)
-                self._socket.settimeout(10.0)
-
-                if response_data:
-                    response = json.loads(response_data.decode("utf-8"))
-                    code = response.get("Code", -1)
-                    msg = response.get("Message", "")
-                    if code == 200:
-                        logger.info("GSPro accepted shot: %s", msg)
-                        return GSProResponse(success=True, message=msg)
-                    logger.warning("GSPro rejected shot (code %d): %s", code, msg)
-                    return GSProResponse(success=False, message=msg)
-
-                return GSProResponse(success=True)
-
-            except TimeoutError:
-                # GSPro often processes shots without responding — treat as OK
-                self._socket.settimeout(10.0)
-                logger.debug("GSPro recv timeout (shot likely accepted)")
-                return GSProResponse(success=True, message="sent (no response)")
-            except (OSError, json.JSONDecodeError) as e:
-                logger.error("Failed to read GSPro response: %s", e)
                 self._connected.clear()
                 return GSProResponse(success=False, message=str(e))
 
@@ -300,17 +297,12 @@ class GSProClient:
                 "Speed": round(speed_mph, 2),
                 "SpinAxis": 0.0,
                 "TotalSpin": 0.0,
-                "BackSpin": 0.0,
-                "SideSpin": 0.0,
                 "HLA": round(hla_degrees, 2),
                 "VLA": 0.0,
             },
             "ShotDataOptions": {
                 "ContainsBallData": True,
                 "ContainsClubData": False,
-                "LaunchMonitorIsReady": True,
-                "LaunchMonitorBallDetected": True,
-                "IsHeartBeat": False,
             },
         }
 
@@ -332,19 +324,20 @@ class GSProClient:
         lateral_impact: float = 0.0,
         vertical_impact: float = 0.0,
     ) -> dict[str, object]:
-        """Build GSPro Open Connect v1 message with full ball + club data."""
+        """Build GSPro Open Connect v1 message with full ball + club data.
+
+        Format matches the R10/MLM2PRO connector's launchBall() format —
+        only ContainsBallData/ContainsClubData in ShotDataOptions (no
+        IsHeartBeat/LaunchMonitorIsReady in shot messages).
+        """
         has_club = club_speed > 0 or aoa != 0 or club_path != 0
         ball_data: dict[str, object] = {
             "Speed": round(ball_speed, 2),
             "SpinAxis": round(spin_axis, 2),
             "TotalSpin": round(total_spin, 2),
-            "BackSpin": round(back_spin, 2),
-            "SideSpin": round(side_spin, 2),
             "HLA": round(hla, 2),
             "VLA": round(vla, 2),
         }
-        if carry_distance > 0:
-            ball_data["CarryDistance"] = round(carry_distance, 1)
 
         club_data: dict[str, object] = {}
         if club_speed > 0:
@@ -371,9 +364,6 @@ class GSProClient:
             "ShotDataOptions": {
                 "ContainsBallData": True,
                 "ContainsClubData": has_club,
-                "LaunchMonitorIsReady": True,
-                "LaunchMonitorBallDetected": True,
-                "IsHeartBeat": False,
             },
         }
         if club_data:

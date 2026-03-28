@@ -26,15 +26,15 @@ class TestShotMessageFormat:
         assert ball["VLA"] == 0.0
         assert ball["TotalSpin"] == 0.0
         assert ball["SpinAxis"] == 0.0
-        assert ball["BackSpin"] == 0.0
-        assert ball["SideSpin"] == 0.0
+        # BackSpin/SideSpin removed to match R10 connector format
+        assert "BackSpin" not in ball
+        assert "SideSpin" not in ball
 
         opts = msg["ShotDataOptions"]
         assert opts["ContainsBallData"] is True
         assert opts["ContainsClubData"] is False
-        assert opts["LaunchMonitorIsReady"] is True
-        assert opts["LaunchMonitorBallDetected"] is True
-        assert opts["IsHeartBeat"] is False
+        # Shot messages only have ContainsBallData/ContainsClubData
+        assert "IsHeartBeat" not in opts
 
     def test_heartbeat_message_format(self):
         """Verify heartbeat has IsHeartBeat=True."""
@@ -93,13 +93,14 @@ class TestFullShotMessageFormat:
         assert ball["HLA"] == -1.5
         assert ball["TotalSpin"] == 3000.0
         assert ball["SpinAxis"] == 15.0
-        assert ball["BackSpin"] == 2898.0
-        assert ball["SideSpin"] == 776.0
+        # BackSpin/SideSpin removed to match R10 connector format
+        assert "BackSpin" not in ball
+        assert "SideSpin" not in ball
 
         opts = msg["ShotDataOptions"]
         assert opts["ContainsBallData"] is True
         assert opts["ContainsClubData"] is True  # club_speed > 0
-        assert opts["IsHeartBeat"] is False
+        assert "IsHeartBeat" not in opts
 
         club = msg["ClubData"]
         assert club["Speed"] == 95.0
