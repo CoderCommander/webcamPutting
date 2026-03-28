@@ -137,6 +137,44 @@ def draw_ball_marker(
     cv2.circle(frame, (detection.x, detection.y), 2, COLOR_GREEN, -1)
 
 
+def project_trail(
+    start: tuple[int, int],
+    end: tuple[int, int],
+    frame_width: int,
+    num_points: int = 100,
+) -> list[tuple[int, int]]:
+    """Calculate a projected straight-line trajectory from start through end.
+
+    Extends the line from start→end across the frame, producing evenly
+    spaced points for trail rendering. This allows a clean tracer without
+    needing the camera to track the ball past the detection zone.
+    """
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    if dx == 0 and dy == 0:
+        return [start, end]
+
+    # Determine how far to extend: project to frame edge
+    if dx != 0:
+        # Extend to right edge (LTR) or left edge (RTL)
+        target_x = frame_width if dx > 0 else 0
+        scale = (target_x - start[0]) / dx
+    else:
+        scale = 5.0  # Straight vertical — just extend a bit
+
+    points: list[tuple[int, int]] = []
+    for i in range(num_points + 1):
+        t = i / num_points * scale
+        px = int(start[0] + dx * t)
+        py = int(start[1] + dy * t)
+        # Stop if we've left the frame
+        if px < 0 or px > frame_width:
+            break
+        points.append((px, py))
+
+    return points
+
+
 def draw_ball_trail(
     frame: np.ndarray,
     positions: list[tuple[int, int]],
@@ -202,6 +240,7 @@ def draw_overlay(
     active_trail: list[tuple[int, int]] | None = None,
     last_shot_trail: list[tuple[int, int]] | None = None,
     obs_overlay_mode: bool = False,
+    obs_show_zones: bool = False,
     trail_color_name: str = "cyan",
     active_trail_color_name: str = "green",
     headless: bool = False,
@@ -218,13 +257,15 @@ def draw_overlay(
     active_c = _resolve_zone_color(active_trail_color_name, COLOR_GREEN)
 
     if obs_overlay_mode:
-        # Black background — only render trails and ball marker
+        # Black background — tracer only (no ball circle)
         frame[:] = 0
+        if obs_show_zones:
+            draw_detection_zones(frame, zone, state)
         if last_shot_trail:
             draw_ball_trail(frame, last_shot_trail, color=trail_c)
         if active_trail:
             draw_ball_trail(frame, active_trail, color=active_c)
-        draw_ball_marker(frame, detection)
+        # No ball detection circle in OBS mode
 
         # Minimal last-shot readout at bottom
         if last_speed > 0:

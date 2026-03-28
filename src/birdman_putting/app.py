@@ -30,7 +30,11 @@ from birdman_putting.detection import (
 from birdman_putting.gspro_client import GSProClient
 from birdman_putting.physics import calculate_shot
 from birdman_putting.tracking import BallTracker, ShotState
-from birdman_putting.ui.overlay import draw_calibration_overlay, draw_overlay
+from birdman_putting.ui.overlay import (
+    draw_calibration_overlay,
+    draw_overlay,
+    project_trail,
+)
 
 if TYPE_CHECKING:
     from birdman_putting.mevo.detector import MevoDetector
@@ -462,6 +466,7 @@ class PuttingApp:
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
                 obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                obs_show_zones=self.config.overlay.obs_show_zones,
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
             )
@@ -508,9 +513,18 @@ class PuttingApp:
         # Always store trail positions for the tracer (even if physics fails)
         self._tracker.last_shot_start = shot_result.start_position
         self._tracker.last_shot_end = shot_result.end_position
-        self._tracker.last_shot_positions = [
-            (x, y) for x, y, _t in shot_result.positions
-        ]
+
+        if self.config.overlay.projected_trail:
+            # Calculate trajectory mathematically from start→end direction
+            self._tracker.last_shot_positions = project_trail(
+                start=shot_result.start_position,
+                end=shot_result.end_position,
+                frame_width=640,  # display_frame is always resized to 640
+            )
+        else:
+            self._tracker.last_shot_positions = [
+                (x, y) for x, y, _t in shot_result.positions
+            ]
         logger.info(
             "Shot captured: %d trail points, start=(%d,%d), end=(%d,%d), "
             "px_mm=%.4f, elapsed=%.4fs",
@@ -805,6 +819,7 @@ class PuttingApp:
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
                 obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                obs_show_zones=self.config.overlay.obs_show_zones,
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
                 headless=True,

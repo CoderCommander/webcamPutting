@@ -526,6 +526,18 @@ class MainWindow(ctk.CTk):
             lambda v: setattr(self._config.overlay, "obs_overlay_mode", v),
         )
 
+        self._obs_show_zones_var = self._add_live_checkbox(
+            scroll, "Show Zones in OBS Mode",
+            ov.obs_show_zones,
+            lambda v: setattr(self._config.overlay, "obs_show_zones", v),
+        )
+
+        self._projected_trail_var = self._add_live_checkbox(
+            scroll, "Projected Trail (calculated trajectory)",
+            ov.projected_trail,
+            lambda v: setattr(self._config.overlay, "projected_trail", v),
+        )
+
         self._trail_points_slider = self._add_live_slider(
             scroll, "Trail Length", 50, 500, ov.max_trail_points,
             self._on_trail_length_changed,
