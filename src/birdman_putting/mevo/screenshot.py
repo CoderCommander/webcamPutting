@@ -229,13 +229,12 @@ else:
                 rect.bottom - rect.top,
             )
             # Use full screen width so the web-based FS Golf layout reflows
-            # all columns on-screen.  Position at x=0 to prevent the widened
-            # window from extending past the right screen edge (off-screen
-            # content won't render in web-based apps).
+            # all columns on-screen.  Position at x=0 and cap at screen width
+            # — off-screen content won't render in web-based apps.
             screen_w = user32.GetSystemMetrics(0)
-            wider_w = max(
-                int(self._orig_rect[2] * (1.0 + extra_pct)),
-                screen_w,
+            wider_w = min(
+                max(int(self._orig_rect[2] * (1.0 + extra_pct)), screen_w),
+                screen_w,  # Never exceed screen width
             )
             user32.SetWindowPos(
                 self._hwnd, 0,

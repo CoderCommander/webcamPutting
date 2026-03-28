@@ -1147,21 +1147,26 @@ class PuttingApp:
         if not isinstance(shot, MevoShotData):
             return
 
-        response = self._gspro.send_full_shot(
-            ball_speed=shot.ball_speed,
-            vla=shot.launch_angle,
-            hla=shot.launch_direction,
-            total_spin=shot.spin_rate,
-            spin_axis=shot.spin_axis,
-            back_spin=shot.back_spin,
-            side_spin=shot.side_spin,
-            club_speed=shot.club_speed,
-        )
-        logger.info(
-            "Mevo shot: %.1f mph, VLA=%.1f, HLA=%.1f, Spin=%d → %s",
-            shot.ball_speed, shot.launch_angle, shot.launch_direction,
-            int(shot.spin_rate), "OK" if response.success else response.message,
-        )
+        # Send to GSPro in background thread to avoid blocking Mevo polling
+        def _send_mevo() -> None:
+            response = self._gspro.send_full_shot(
+                ball_speed=shot.ball_speed,
+                vla=shot.launch_angle,
+                hla=shot.launch_direction,
+                total_spin=shot.spin_rate,
+                spin_axis=shot.spin_axis,
+                back_spin=shot.back_spin,
+                side_spin=shot.side_spin,
+                club_speed=shot.club_speed,
+            )
+            logger.info(
+                "Mevo shot: %.1f mph, VLA=%.1f, HLA=%.1f, Spin=%d → %s",
+                shot.ball_speed, shot.launch_angle, shot.launch_direction,
+                int(shot.spin_rate),
+                "OK" if response.success else response.message,
+            )
+
+        threading.Thread(target=_send_mevo, daemon=True).start()
 
         # Show Mevo shot data on OBS overlay
         if self._obs:

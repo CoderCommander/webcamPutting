@@ -192,19 +192,38 @@ class OBSController:
     def _create_text_source(
         self, client: object, source_name: str, text: str, scene_name: str,
     ) -> None:
-        """Create a GDI+ (Windows) or FreeType2 (macOS/Linux) text source."""
-        import sys
-
+        """Create a text source in OBS, trying all available text input kinds."""
         settings = {
             "text": text,
             "font": {"face": "Arial", "size": 36, "style": "Bold"},
         }
 
-        # Windows uses GDI+, macOS/Linux use FreeType2
-        if sys.platform == "win32":
-            input_kinds = ["text_gdiplus_v2", "text_gdiplus"]
-        else:
-            input_kinds = ["text_ft2_source_v2", "text_ft2_source"]
+        # Query OBS for available input kinds and find text-related ones
+        input_kinds: list[str] = []
+        try:
+            resp = client.get_input_kind_list()  # type: ignore[union-attr]
+            all_kinds = resp.input_kinds  # type: ignore[union-attr]
+            # Look for text-related kinds (gdiplus, freetype, etc.)
+            input_kinds = [
+                k for k in all_kinds
+                if "text" in k.lower() or "gdi" in k.lower() or "ft2" in k.lower()
+            ]
+            if input_kinds:
+                logger.debug("OBS text input kinds available: %s", input_kinds)
+        except Exception:
+            pass  # Fall back to hardcoded list
+
+        # Fall back to common names if query returned nothing
+        if not input_kinds:
+            import sys
+            if sys.platform == "win32":
+                input_kinds = [
+                    "text_gdiplus_v3", "text_gdiplus_v2", "text_gdiplus",
+                ]
+            else:
+                input_kinds = [
+                    "text_ft2_source_v2", "text_ft2_source",
+                ]
 
         for kind in input_kinds:
             try:
@@ -222,7 +241,11 @@ class OBSController:
 
         # All kinds failed
         self._created_sources.add(source_name)  # Don't retry
-        logger.warning("OBS: Could not create text source '%s' in '%s'", source_name, scene_name)
+        logger.warning(
+            "OBS: Could not create text source '%s' in '%s' "
+            "(tried: %s)",
+            source_name, scene_name, input_kinds,
+        )
 
     def _schedule_idle(self) -> None:
         """Schedule a return to idle scene after display_duration."""
