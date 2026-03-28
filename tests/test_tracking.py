@@ -121,11 +121,11 @@ class TestGradualMovement:
             tracker.update(_det(50, 300, t + i * 0.016))
         assert tracker.state == ShotState.STARTED
 
-        # Roll gradually from x=50 toward gateway (start_x2=180, gateway_x1=190)
+        # Roll gradually from x=50 toward gateway (start_x2=180, gateway_x1=195)
         # This crosses >10px from start_pos, which used to reset to BALL_DETECTED
         x = 50
         frame = 10
-        while x < 190:
+        while x < 200:
             x += 5
             tracker.update(_det(x, 300, t + frame * 0.016))
             frame += 1
@@ -137,7 +137,7 @@ class TestGradualMovement:
         # Should have entered gateway
         assert tracker.state == ShotState.ENTERED
 
-        # Exit past gateway (gateway_x2=200, need 50px travel past entry)
+        # Exit past gateway (gateway_x2=210, need 50px travel past entry)
         result = tracker.update(_det(300, 298, t + frame * 0.016))
         assert result is not None
         assert result.end_position[0] == 300
@@ -160,10 +160,10 @@ class TestGradualMovement:
             tracker.update(_det(500, 300, t + i * 0.016))
         assert tracker.state == ShotState.STARTED
 
-        # Roll gradually left: gateway_x2 = 400 - 10 = 390
+        # Roll gradually left: gateway_x2 = 400 - 15 = 385
         x = 500
         frame = 10
-        while x > 390:
+        while x > 380:
             x -= 5
             tracker.update(_det(x, 300, t + frame * 0.016))
             frame += 1
@@ -173,7 +173,7 @@ class TestGradualMovement:
 
         assert tracker.state == ShotState.ENTERED
 
-        # Exit well past gateway (gateway_x1 = 390 - 10 = 380)
+        # Exit well past gateway (gateway_x1 = 385 - 15 = 370)
         result = tracker.update(_det(200, 298, t + frame * 0.016))
         assert result is not None
 

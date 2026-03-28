@@ -33,7 +33,7 @@ class DetectionZone:
     start_x2: int = 180
     y1: int = 180
     y2: int = 450
-    gateway_width: int = 10  # Width of the detection gateway past start_x2
+    gateway_width: int = 15  # Width of the detection gateway past start_x2
     direction: str = "left_to_right"  # "left_to_right" or "right_to_left"
     zone_color: str = "yellow"  # Start zone outline/fill color name
     gateway_color: str = "red"  # Gateway outline color name (when idle)
