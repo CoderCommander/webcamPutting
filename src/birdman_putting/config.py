@@ -131,6 +131,7 @@ class MevoSettings:
     poll_interval: float = 0.2  # Seconds between screenshot captures
     mse_threshold: float = 100.0  # Pixel-change threshold for new-shot detection
     tessdata_dir: str = ""  # Path to tessdata directory (empty = system default)
+    send_to_gspro: bool = False  # Send Mevo shots to GSPro (disable if LM connects directly)
     rois: dict[str, list[int]] = field(default_factory=dict)
     # ROI format: {"ball_speed": [x, y, w, h], "launch_angle": [x, y, w, h], ...}
     cal_width: int = 0  # Capture width when ROIs were calibrated (0 = unknown)

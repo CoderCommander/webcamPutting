@@ -493,10 +493,21 @@ class MainWindow(ctk.CTk):
         self._section_label(scroll, "MEVO (LAUNCH MONITOR)")
 
         self._mevo_enabled_var = self._add_live_checkbox(
-            scroll, "Enable Mevo OCR", self._config.mevo.enabled,
+            scroll, "Enable Mevo OCR (display + OBS)", self._config.mevo.enabled,
             lambda v: setattr(self._config.mevo, "enabled", v),
             live=False,
         )
+
+        self._mevo_send_var = self._add_live_checkbox(
+            scroll, "Send Mevo data to GSPro",
+            self._config.mevo.send_to_gspro,
+            lambda v: setattr(self._config.mevo, "send_to_gspro", v),
+            live=False,
+        )
+        ctk.CTkLabel(
+            scroll, text="Disable if LM connects to GSPro directly",
+            font=theme.font(9), text_color=theme.TEXT_MUTED,
+        ).pack(anchor="w", pady=(0, 2))
 
         self._mevo_window_entry = self._add_entry(
             scroll, "Window:", self._config.mevo.window_title, width=140,

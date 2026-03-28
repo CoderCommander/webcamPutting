@@ -1147,36 +1147,37 @@ class PuttingApp:
         if not isinstance(shot, MevoShotData):
             return
 
-        # Suppress heartbeats before sending so they don't interfere
-        self._gspro._shot_cooldown = 3
+        logger.info(
+            "Mevo shot: %.1f mph, VLA=%.1f, HLA=%.1f, Spin=%d",
+            shot.ball_speed, shot.launch_angle, shot.launch_direction,
+            int(shot.spin_rate),
+        )
 
-        # Send to GSPro in background thread to avoid blocking Mevo polling
-        def _send_mevo() -> None:
-            response = self._gspro.send_full_shot(
-                ball_speed=shot.ball_speed,
-                vla=shot.launch_angle,
-                hla=shot.launch_direction,
-                total_spin=shot.spin_rate,
-                spin_axis=shot.spin_axis,
-                back_spin=shot.back_spin,
-                side_spin=shot.side_spin,
-                club_speed=shot.club_speed,
-                carry_distance=shot.carry_distance,
-                aoa=shot.aoa,
-                club_path=shot.club_path,
-                dynamic_loft=shot.dynamic_loft,
-                face_to_target=shot.face_to_target,
-                lateral_impact=shot.lateral_impact,
-                vertical_impact=shot.vertical_impact,
-            )
-            logger.info(
-                "Mevo shot: %.1f mph, VLA=%.1f, HLA=%.1f, Spin=%d → %s",
-                shot.ball_speed, shot.launch_angle, shot.launch_direction,
-                int(shot.spin_rate),
-                "OK" if response.success else response.message,
-            )
+        # Only relay to GSPro if configured (disable when LM connects directly)
+        if self.config.mevo.send_to_gspro:
+            self._gspro._shot_cooldown = 3
 
-        threading.Thread(target=_send_mevo, daemon=True).start()
+            def _send_mevo() -> None:
+                response = self._gspro.send_full_shot(
+                    ball_speed=shot.ball_speed,
+                    vla=shot.launch_angle,
+                    hla=shot.launch_direction,
+                    total_spin=shot.spin_rate,
+                    spin_axis=shot.spin_axis,
+                    back_spin=shot.back_spin,
+                    side_spin=shot.side_spin,
+                    club_speed=shot.club_speed,
+                    carry_distance=shot.carry_distance,
+                    aoa=shot.aoa,
+                    club_path=shot.club_path,
+                    dynamic_loft=shot.dynamic_loft,
+                    face_to_target=shot.face_to_target,
+                    lateral_impact=shot.lateral_impact,
+                    vertical_impact=shot.vertical_impact,
+                )
+                logger.info("Mevo → GSPro: %s", "OK" if response.success else response.message)
+
+            threading.Thread(target=_send_mevo, daemon=True).start()
 
         # Show Mevo shot data on OBS overlay
         if self._obs:
