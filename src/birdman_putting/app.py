@@ -119,6 +119,10 @@ class PuttingApp:
         self._post_shot_deadline: float = 0.0
         self._post_shot_radius: int = 0
 
+        # Angle calibration: measure HLA of a "straight" putt to auto-set rotation
+        self._angle_cal_active = False
+        self._angle_cal_samples: list[float] = []
+
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
 
@@ -144,6 +148,7 @@ class PuttingApp:
             on_settings_changed=self._on_settings_changed,
             on_auto_zone=self._on_auto_zone,
             on_reset_putt=self.reset_putt,
+            on_angle_cal=self._on_angle_cal,
         )
 
         # Auto-start if camera/video is available
@@ -261,6 +266,75 @@ class PuttingApp:
             if self._window:
                 self._window.set_auto_zone_state(True)
             logger.info("Auto-calibration started (direction=%s)", direction)
+
+    def _on_angle_cal(self) -> None:
+        """Handle Angle Cal button — toggle angle calibration mode."""
+        if self._angle_cal_active:
+            self._angle_cal_active = False
+            self._angle_cal_samples.clear()
+            if self._window:
+                self._window.set_angle_cal_state(False)
+            logger.info("Angle calibration cancelled")
+        else:
+            self._angle_cal_active = True
+            self._angle_cal_samples.clear()
+            self._tracker.reset()
+            if self._window:
+                self._window.set_angle_cal_state(True)
+            logger.info(
+                "Angle calibration started — putt a straight ball "
+                "(up to 3 samples, press again to apply)"
+            )
+
+    def _handle_angle_cal_shot(self, hla: float) -> None:
+        """Process a calibration putt — accumulate HLA samples."""
+        self._angle_cal_samples.append(hla)
+        n = len(self._angle_cal_samples)
+        avg = sum(self._angle_cal_samples) / n
+        logger.info(
+            "Angle cal sample #%d: %.2f° (avg: %.2f°)", n, hla, avg,
+        )
+
+        if n >= 3:
+            # Auto-apply after 3 samples
+            self._apply_angle_cal()
+        elif self._window:
+            with contextlib.suppress(RuntimeError):
+                self._window.after(
+                    0, self._window.update_camera_status,
+                    f"Cal: {n}/3 (avg {avg:+.1f}°)", "watching",
+                )
+
+    def _apply_angle_cal(self) -> None:
+        """Apply angle calibration: adjust camera rotation to zero out HLA offset."""
+        if not self._angle_cal_samples:
+            return
+
+        avg_hla = sum(self._angle_cal_samples) / len(self._angle_cal_samples)
+        # The measured HLA from a "straight" putt IS the angular error.
+        # Adjust camera rotation to compensate.
+        old_rotation = self.config.camera.rotation
+        new_rotation = old_rotation + avg_hla
+        new_rotation = max(-45.0, min(45.0, new_rotation))
+
+        self.config.camera.rotation = new_rotation
+        self._angle_cal_active = False
+        self._angle_cal_samples.clear()
+
+        save_config(self.config)
+        logger.info(
+            "Angle calibration applied: rotation %.1f° → %.1f° "
+            "(corrected %.2f° HLA offset)",
+            old_rotation, new_rotation, avg_hla,
+        )
+
+        if self._window:
+            with contextlib.suppress(RuntimeError):
+                self._window.set_angle_cal_state(False)
+                self._window.after(
+                    0, self._window.update_camera_status,
+                    f"Cal done: rot={new_rotation:.1f}°", "ok",
+                )
 
     def _processing_loop(self) -> None:
         """Background thread: capture → detect → track → annotate → queue."""
@@ -549,6 +623,21 @@ class PuttingApp:
 
         if not shot_data:
             logger.warning("Shot physics calculation failed — trail shown but no data")
+            return
+
+        # Angle calibration: capture HLA and skip normal shot processing
+        if self._angle_cal_active:
+            self._handle_angle_cal_shot(shot_data.hla_degrees)
+            # Still update UI with the measured data
+            self._tracker.last_shot_speed = shot_data.speed_mph
+            self._tracker.last_shot_hla = shot_data.hla_degrees
+            if self._window:
+                with contextlib.suppress(RuntimeError):
+                    self._window.after(
+                        0, self._window.update_shot,
+                        shot_data.speed_mph, shot_data.hla_degrees,
+                        self._tracker.shot_count,
+                    )
             return
 
         s = self.config.shot

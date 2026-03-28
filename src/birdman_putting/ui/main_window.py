@@ -54,6 +54,7 @@ class MainWindow(ctk.CTk):
         on_settings_changed: Callable[[], None] | None = None,
         on_auto_zone: Callable[[], None] | None = None,
         on_reset_putt: Callable[[], None] | None = None,
+        on_angle_cal: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -77,9 +78,11 @@ class MainWindow(ctk.CTk):
         self._on_settings_changed = on_settings_changed
         self._on_auto_zone = on_auto_zone
         self._on_reset_putt = on_reset_putt
+        self._on_angle_cal = on_angle_cal
         self._is_running = False
         self._edit_zone_active = False
         self._auto_zone_active = False
+        self._angle_cal_active = False
         self._shot_history: list[ShotHistoryEntry] = []
         self._save_after_id: str | None = None
 
@@ -672,6 +675,15 @@ class MainWindow(ctk.CTk):
         )
         self._edit_config_btn.pack(side="left", padx=(8, 0))
 
+        # Angle Cal button
+        self._angle_cal_btn = ctk.CTkButton(
+            parent, text="Angle Cal", command=self._on_angle_cal_clicked,
+            width=90, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
+        )
+        self._angle_cal_btn.pack(side="left", padx=(8, 0))
+
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
         self._mode_label = ctk.CTkLabel(
@@ -1048,6 +1060,25 @@ class MainWindow(ctk.CTk):
         else:
             self._auto_zone_btn.configure(
                 text="Auto Zone",
+                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            )
+
+    def _on_angle_cal_clicked(self) -> None:
+        """Handle Angle Cal button click."""
+        if self._on_angle_cal:
+            self._on_angle_cal()
+
+    def set_angle_cal_state(self, active: bool) -> None:
+        """Update Angle Cal button appearance."""
+        self._angle_cal_active = active
+        if active:
+            self._angle_cal_btn.configure(
+                text="Cancel Cal.",
+                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
+            )
+        else:
+            self._angle_cal_btn.configure(
+                text="Angle Cal",
                 fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
 
