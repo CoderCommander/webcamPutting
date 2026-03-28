@@ -500,6 +500,25 @@ class MainWindow(ctk.CTk):
             font=theme.font(9), text_color=theme.TEXT_MUTED,
         ).pack(anchor="w", pady=(2, 0))
 
+        # --- OVERLAY / OBS ---
+        self._section_label(scroll, "OVERLAY (OBS)")
+
+        ov = self._config.overlay
+        self._obs_overlay_var = self._add_live_checkbox(
+            scroll, "OBS Overlay Mode (black bg, tracer only)",
+            ov.obs_overlay_mode,
+            lambda v: setattr(self._config.overlay, "obs_overlay_mode", v),
+        )
+
+        self._trail_points_slider = self._add_live_slider(
+            scroll, "Trail Length", 50, 500, ov.max_trail_points,
+            self._on_trail_length_changed,
+        )
+
+    def _on_trail_length_changed(self, val: int) -> None:
+        """Update trail length in config and resize tracker deque."""
+        self._config.overlay.max_trail_points = val
+
     def _build_control_bar(self, parent: ctk.CTkFrame) -> None:
         """Build the bottom control bar."""
         # Ball color dropdown

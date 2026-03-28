@@ -150,6 +150,15 @@ class OBSSettings:
 
 
 @dataclass
+class OverlaySettings:
+    """Overlay / broadcast display settings."""
+
+    obs_overlay_mode: bool = False  # Black bg, no zones/status, tracer only
+    max_trail_points: int = 150  # Max ball positions stored for trail rendering
+    trail_duration: float = 5.0  # Seconds to keep the last-shot trail visible
+
+
+@dataclass
 class AppConfig:
     """Top-level application configuration."""
 
@@ -161,6 +170,7 @@ class AppConfig:
     replay: ReplaySettings = field(default_factory=ReplaySettings)
     mevo: MevoSettings = field(default_factory=MevoSettings)
     obs: OBSSettings = field(default_factory=OBSSettings)
+    overlay: OverlaySettings = field(default_factory=OverlaySettings)
 
 
 def _dataclass_to_dict(obj: Any) -> dict[str, Any]:

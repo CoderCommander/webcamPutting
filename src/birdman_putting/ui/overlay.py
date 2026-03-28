@@ -141,7 +141,7 @@ def draw_ball_trail(
     frame: np.ndarray,
     positions: list[tuple[int, int]],
     color: tuple[int, int, int] = COLOR_CYAN,
-    max_points: int = 50,
+    max_points: int = 150,
 ) -> None:
     """Draw a smooth streaking trail with taper and fade.
 
@@ -201,12 +201,36 @@ def draw_overlay(
     edit_mode: bool = False,
     active_trail: list[tuple[int, int]] | None = None,
     last_shot_trail: list[tuple[int, int]] | None = None,
+    obs_overlay_mode: bool = False,
 ) -> None:
     """Draw the complete HUD overlay onto a frame.
 
     This is the single entry point — call this from the processing loop
     after detection/tracking but before handing the frame to the UI.
+
+    When obs_overlay_mode is True, the frame is blacked out and only
+    the ball tracer is rendered — ideal for OBS browser/window capture.
     """
+    if obs_overlay_mode:
+        # Black background — only render trails and ball marker
+        frame[:] = 0
+        if last_shot_trail:
+            draw_ball_trail(frame, last_shot_trail, color=COLOR_CYAN)
+        if active_trail:
+            draw_ball_trail(frame, active_trail, color=COLOR_GREEN)
+        draw_ball_marker(frame, detection)
+
+        # Minimal last-shot readout at bottom
+        if last_speed > 0:
+            h = frame.shape[0]
+            cv2.putText(
+                frame,
+                f"{last_speed:.1f} MPH  |  {last_hla:+.1f} HLA",
+                (8, h - 10),
+                FONT, 0.55, COLOR_GREEN, FONT_THICKNESS, cv2.LINE_AA,
+            )
+        return
+
     draw_detection_zones(frame, zone, state, edit_mode=edit_mode)
     draw_ball_marker(frame, detection)
 

@@ -55,6 +55,7 @@ class BallTracker:
         zone: DetectionZone,
         ball_settings: BallSettings,
         shot_settings: ShotSettings,
+        max_trail_points: int = 150,
     ):
         self.zone = zone
         self.ball_settings = ball_settings
@@ -67,7 +68,7 @@ class BallTracker:
         self._entry_pos: tuple[int, int] = (0, 0)
         self._entry_time: float = 0.0
         self._px_mm_ratio: float = 0.0
-        self._positions: deque[tuple[int, int, float]] = deque(maxlen=64)
+        self._positions: deque[tuple[int, int, float]] = deque(maxlen=max_trail_points)
         self._shot_count: int = 0
 
         # Last shot data for UI display

@@ -78,6 +78,7 @@ class PuttingApp:
             zone=config.detection_zone,
             ball_settings=config.ball,
             shot_settings=config.shot,
+            max_trail_points=config.overlay.max_trail_points,
         )
         self._gspro = GSProClient(config.connection)
 
@@ -393,6 +394,7 @@ class PuttingApp:
                 edit_mode=edit_mode,
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
+                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
             )
 
             # Put frame into queue (drop old frames if queue is full)
@@ -668,6 +670,7 @@ class PuttingApp:
                 shot_count=self._tracker.shot_count,
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
+                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
             )
 
             if self._pick_mode:
