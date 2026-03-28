@@ -47,17 +47,21 @@ _SIGNED_METRICS: set[str] = {
 
 # Expected maximum values for each metric — values above these likely have
 # a missing decimal point from OCR (e.g. "85R" should be "8.5R")
+# Thresholds tuned per-metric: if OCR drops the decimal point in "1.1L",
+# it reads "11L" = 11.0.  For metrics where typical values are small
+# (face_to_target, club_path, lateral/vertical impact), a lower threshold
+# catches these common misreads.
 _MAX_SANE_VALUES: dict[str, float] = {
     "launch_direction": 45.0,
     "launch_angle": 50.0,
     "spin_axis": 60.0,
     "smash_factor": 2.0,
-    "club_path": 30.0,
-    "face_to_target": 30.0,
-    "aoa": 20.0,
+    "club_path": 10.0,         # typical range 0-8°, >10 likely missing decimal
+    "face_to_target": 10.0,    # typical range 0-8°, >10 likely missing decimal
+    "aoa": 10.0,               # typical range -5 to +5°
     "dynamic_loft": 70.0,
-    "lateral_impact": 2.0,
-    "vertical_impact": 2.0,
+    "lateral_impact": 1.0,     # inches, typically < 1"
+    "vertical_impact": 1.0,    # inches, typically < 1"
 }
 
 
