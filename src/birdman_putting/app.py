@@ -569,9 +569,11 @@ class PuttingApp:
                 )
 
             # Signal GSPro when ball is detected and ready
-            self._gspro.ball_detected = self._tracker.state not in (
-                ShotState.IDLE,
-            )
+            # When Mevo is active, always report ball detected (Mevo handles it)
+            if not self._mevo_detector:
+                self._gspro.ball_detected = self._tracker.state not in (
+                    ShotState.IDLE,
+                )
 
             # Process completed shot
             if shot_result is not None:
@@ -930,9 +932,10 @@ class PuttingApp:
             shot_result = self._tracker.update(detection)
 
             # Signal GSPro when ball is detected and ready
-            self._gspro.ball_detected = self._tracker.state not in (
-                ShotState.IDLE,
-            )
+            if not self._mevo_detector:
+                self._gspro.ball_detected = self._tracker.state not in (
+                    ShotState.IDLE,
+                )
 
             if shot_result is not None:
                 self._handle_shot(shot_result)
