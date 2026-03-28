@@ -363,9 +363,11 @@ class PuttingApp:
             prev_state = self._tracker.state
             shot_result = self._tracker.update(detection)
             if self._tracker.state != prev_state:
-                logger.debug(
+                logger.info(
                     "Tracker: %s → %s", prev_state.value, self._tracker.state.value,
                 )
+            if shot_result is not None:
+                logger.info("Shot result received from tracker")
 
             # Signal GSPro when ball is detected and ready
             self._gspro.ball_detected = self._tracker.state not in (
@@ -478,6 +480,14 @@ class PuttingApp:
         self._tracker.last_shot_positions = [
             (x, y) for x, y, _t in shot_result.positions
         ]
+        logger.info(
+            "Shot captured: %d trail points, start=(%d,%d), end=(%d,%d), "
+            "px_mm=%.4f, elapsed=%.4fs",
+            len(self._tracker.last_shot_positions),
+            *shot_result.start_position, *shot_result.end_position,
+            shot_result.px_mm_ratio,
+            shot_result.exit_time - shot_result.entry_time,
+        )
 
         positions = list(shot_result.positions)
         is_rtl = self.config.detection_zone.direction == "right_to_left"
@@ -534,7 +544,12 @@ class PuttingApp:
 
         # Always update GUI shot display (even for out-of-range shots)
         if self._window:
-            with contextlib.suppress(RuntimeError):
+            logger.info(
+                "Scheduling GUI update: %.1f MPH, %.1f HLA, shot #%d",
+                shot_data.speed_mph, shot_data.hla_degrees,
+                self._tracker.shot_count,
+            )
+            try:
                 self._window.after(
                     0,
                     self._window.update_shot,
@@ -542,6 +557,8 @@ class PuttingApp:
                     shot_data.hla_degrees,
                     self._tracker.shot_count,
                 )
+            except RuntimeError as e:
+                logger.error("Failed to schedule GUI update: %s", e)
 
     # ---- Headless Mode (OpenCV windows) ----
 
