@@ -95,15 +95,46 @@ else:
             self._hwnd: int = 0
 
         def find_window(self) -> bool:
-            """Locate the target window by title.
+            """Locate the target window by title (exact or partial match).
+
+            Tries exact match first via FindWindowW, then falls back to
+            EnumWindows with case-insensitive substring match.
 
             Returns True if the window was found.
             """
+            # Try exact match first
             hwnd = user32.FindWindowW(None, self._title)
             if hwnd:
                 self._hwnd = hwnd
                 logger.info("Found window '%s' (hwnd=%d)", self._title, hwnd)
                 return True
+
+            # Fall back to partial title match via EnumWindows
+            target = self._title.lower()
+            found_hwnd = ctypes.c_int(0)
+
+            @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+            def _enum_callback(hwnd: int, _lparam: int) -> bool:
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    title = buf.value
+                    if target in title.lower():
+                        found_hwnd.value = hwnd
+                        logger.info(
+                            "Found window by partial match: '%s' (hwnd=%d)",
+                            title, hwnd,
+                        )
+                        return False  # Stop enumerating
+                return True  # Continue
+
+            user32.EnumWindows(_enum_callback, 0)
+
+            if found_hwnd.value:
+                self._hwnd = found_hwnd.value
+                return True
+
             logger.warning("Window '%s' not found", self._title)
             return False
 
