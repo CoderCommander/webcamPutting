@@ -345,12 +345,21 @@ class PuttingApp:
                 detect_x2 = display_frame.shape[1]
 
             # Detect ball
+            # When ball is in motion (STARTED/ENTERED), widen Y range to
+            # full frame height so slight vertical drift doesn't lose the ball
+            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+                det_y1 = max(0, zone.y1 - 50)
+                det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+            else:
+                det_y1 = zone.y1
+                det_y2 = zone.y2
+
             detection = self._detector.detect(
                 frame=display_frame,
                 zone_x1=detect_x1,
                 zone_x2_limit=detect_x2,
-                zone_y1=zone.y1,
-                zone_y2=zone.y2,
+                zone_y1=det_y1,
+                zone_y2=det_y2,
                 timestamp=frame_time,
                 expected_radius=(
                     self._tracker.start_circle[2]
@@ -702,12 +711,19 @@ class PuttingApp:
                 detect_x1 = zone.start_x1
                 detect_x2 = display_frame.shape[1]
 
+            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+                det_y1 = max(0, zone.y1 - 50)
+                det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+            else:
+                det_y1 = zone.y1
+                det_y2 = zone.y2
+
             detection = self._detector.detect(
                 frame=display_frame,
                 zone_x1=detect_x1,
                 zone_x2_limit=detect_x2,
-                zone_y1=zone.y1,
-                zone_y2=zone.y2,
+                zone_y1=det_y1,
+                zone_y2=det_y2,
                 timestamp=frame_time,
                 expected_radius=(
                     self._tracker.start_circle[2]
