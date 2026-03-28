@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import select
 import socket
 import threading
 import time
@@ -187,15 +188,21 @@ class GSProClient:
             return False
 
     def _connect_socket(self) -> bool:
-        """Connect to GSPro and start the heartbeat thread."""
+        """Connect to GSPro.
+
+        No heartbeat thread — the springbok MLM2PRO connector (defacto
+        standard) does not send heartbeats. The socket stays alive from
+        the TCP connection alone. Heartbeats with zero-data BallData
+        were interfering with GSPro's shot processing.
+        """
         if not self._open_socket():
             return False
+        self._running = True
 
-        # Only start heartbeat if not already running
+        # Start a listener thread for incoming GSPro messages (club selection etc.)
         if self._heartbeat_thread is None or not self._heartbeat_thread.is_alive():
-            self._running = True
             self._heartbeat_thread = threading.Thread(
-                target=self._heartbeat_loop, daemon=True
+                target=self._message_listener, daemon=True,
             )
             self._heartbeat_thread.start()
 
@@ -419,37 +426,55 @@ class GSProClient:
             },
         }
 
-    def _heartbeat_loop(self) -> None:
-        """Send periodic heartbeats to maintain GSPro connection."""
+    def _message_listener(self) -> None:
+        """Listen for incoming GSPro messages (club selection, etc.).
+
+        Matches the springbok connector's check_for_message() pattern:
+        non-blocking select() to read incoming data without sending
+        heartbeats. The connection stays alive via TCP keepalive.
+        """
         backoff = 1.0
         while self._running:
-            time.sleep(self._settings.heartbeat_interval)
-
-            if not self._running:
-                break
-
-            # Skip heartbeat briefly after a shot so GSPro can process it
-            # without a zero-data heartbeat arriving immediately after
-            if self._shot_cooldown > 0:
-                self._shot_cooldown -= 1
-                continue
-
-            if self._connected.is_set():
-                message = self._build_heartbeat_message()
-                result = self._send_heartbeat_json(message)
-                if not result.success:
-                    logger.warning("Heartbeat failed, will attempt reconnect")
-                    self._connected.clear()
-                    backoff = 1.0
-            else:
-                # Reconnect using _open_socket (not _connect_socket which
-                # would spawn another heartbeat thread)
+            if not self._connected.is_set():
+                # Reconnect
                 logger.info("Attempting reconnect (backoff=%.1fs)", backoff)
                 if self._open_socket():
                     backoff = 1.0
                 else:
                     time.sleep(backoff)
                     backoff = min(backoff * 2, 30.0)
+                continue
+
+            # Check for incoming messages from GSPro (non-blocking)
+            with self._lock:
+                sock = self._socket
+            if sock is None:
+                time.sleep(1)
+                continue
+
+            try:
+                readable, _, _ = select.select([sock], [], [], 1.0)
+                if readable:
+                    data = sock.recv(2048)
+                    if len(data) == 0:
+                        logger.warning("GSPro closed the connection")
+                        self._connected.clear()
+                        continue
+                    # Parse messages (may be concatenated)
+                    for part in data.decode("utf-8").replace("}{", "}|{").split("|"):
+                        try:
+                            msg = json.loads(part)
+                            code = msg.get("Code", -1)
+                            if code == 201:
+                                club = msg.get("Player", {}).get("Club", "")
+                                logger.info("GSPro club selected: %s", club)
+                            else:
+                                logger.debug("GSPro message (code %d): %s", code, msg)
+                        except json.JSONDecodeError:
+                            pass
+            except OSError as e:
+                logger.error("GSPro listener error: %s", e)
+                self._connected.clear()
 
     # --- HTTP Middleware (Legacy) ---
 
