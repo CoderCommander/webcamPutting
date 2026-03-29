@@ -1158,7 +1158,7 @@ class PuttingApp:
             self._obs = None
 
     # GSPro club codes that should use FS Golf PC chipping mode
-    _CHIPPING_CLUBS = {"SW", "LW", "AW", "GW", "PW", "9I", "8I"}
+    _CHIPPING_CLUBS = {"SW", "LW", "AW", "GW", "PW"}
 
     def _on_club_change(self, club: str) -> None:
         """Called when GSPro sends a club selection (code 201).
