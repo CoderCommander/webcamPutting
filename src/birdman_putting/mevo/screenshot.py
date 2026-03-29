@@ -272,24 +272,37 @@ else:
                 logger.info("Restored window '%s' to original size", self._title)
 
         def _find_renderer_child(self) -> int:
-            """Find the Chromium renderer child window inside an Electron app.
+            """Find a keyboard-accepting child window inside an Electron/CEF app.
 
-            Electron apps have a Chrome_RenderWidgetHostHWND child that
-            actually processes keyboard input.
+            Searches for known Chromium/CEF child window class names that
+            process keyboard input directly via PostMessage.
             """
+            _RENDERER_CLASSES = {
+                "Chrome_RenderWidgetHostHWND",
+                "CefBrowserWindow",
+                "Chrome_WidgetWin_0",
+                "Intermediate D3D Window",
+            }
             found = ctypes.c_int(0)
+            child_classes: list[str] = []
 
             @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
             def _enum_cb(hwnd: int, _lparam: int) -> bool:
                 buf = ctypes.create_unicode_buffer(256)
                 user32.GetClassNameW(hwnd, buf, 256)
                 class_name = buf.value
-                if "Chrome_RenderWidgetHostHWND" in class_name:
+                child_classes.append(class_name)
+                if class_name in _RENDERER_CLASSES:
                     found.value = hwnd
                     return False  # Stop
                 return True
 
             user32.EnumChildWindows(self._hwnd, _enum_cb, 0)
+            if not found.value:
+                logger.debug(
+                    "No renderer child found in '%s'. Child classes: %s",
+                    self._title, child_classes,
+                )
             return found.value
 
         def send_key(self, char: str) -> bool:
