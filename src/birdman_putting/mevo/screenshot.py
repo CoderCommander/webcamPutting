@@ -272,37 +272,75 @@ else:
                 logger.info("Restored window '%s' to original size", self._title)
 
         def send_key(self, char: str) -> bool:
-            """Send a single key press to the window without changing focus.
+            """Send a single key press to the window.
 
-            Uses WM_KEYDOWN/WM_KEYUP which works for most apps (including
-            Electron/web-based) without needing to bring the window to the
-            foreground.
+            FS Golf PC (Electron-based) only processes keyboard input when
+            focused. This briefly activates the window using
+            AttachThreadInput + SetForegroundWindow, sends the keystroke via
+            SendInput (hardware-level), then restores the previous window.
 
             Args:
                 char: Single character to send (e.g. 'c' for chipping, 'f' for full swing).
 
-            Returns True if the messages were posted.
+            Returns True if the key was sent.
             """
             if not self._hwnd:
                 return False
 
-            WM_KEYDOWN = 0x0100
-            WM_KEYUP = 0x0101
-            # VkKeyScanW returns the virtual key code for a character
-            vk = user32.VkKeyScanW(ord(char)) & 0xFF
-            # lParam: repeat=1, scancode, extended=0, context=0
-            scan = user32.MapVirtualKeyW(vk, 0)
-            lparam_down = (scan << 16) | 1
-            lparam_up = (scan << 16) | 1 | (1 << 30) | (1 << 31)
+            import time
 
-            r1 = user32.PostMessageW(self._hwnd, WM_KEYDOWN, vk, lparam_down)
-            r2 = user32.PostMessageW(self._hwnd, WM_KEYUP, vk, lparam_up)
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
 
-            if r1 and r2:
-                logger.info("Sent key '%s' to window '%s'", char, self._title)
-            else:
-                logger.warning("Failed to send key '%s' to window '%s'", char, self._title)
-            return bool(r1 and r2)
+            # Remember current foreground window
+            prev_hwnd = user32.GetForegroundWindow()
+            prev_tid = user32.GetWindowThreadProcessId(prev_hwnd, None)
+            our_tid = kernel32.GetCurrentThreadId()
+
+            # Attach our thread to the target to allow SetForegroundWindow
+            user32.AttachThreadInput(our_tid, prev_tid, True)
+            try:
+                user32.SetForegroundWindow(self._hwnd)
+                time.sleep(0.03)
+
+                # SendInput for a hardware-level keypress
+                vk = user32.VkKeyScanW(ord(char)) & 0xFF
+                scan = user32.MapVirtualKeyW(vk, 0)
+
+                class KEYBDINPUT(ctypes.Structure):
+                    _fields_ = [
+                        ("wVk", wt.WORD), ("wScan", wt.WORD),
+                        ("dwFlags", wt.DWORD), ("time", wt.DWORD),
+                        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+                    ]
+
+                class INPUT(ctypes.Structure):
+                    class _U(ctypes.Union):
+                        _fields_ = [("ki", KEYBDINPUT)]
+                    _fields_ = [("type", wt.DWORD), ("u", _U)]
+
+                KEYEVENTF_KEYUP = 0x0002
+                inputs = (INPUT * 2)()
+                # Key down
+                inputs[0].type = 1  # INPUT_KEYBOARD
+                inputs[0].u.ki.wVk = vk
+                inputs[0].u.ki.wScan = scan
+                # Key up
+                inputs[1].type = 1
+                inputs[1].u.ki.wVk = vk
+                inputs[1].u.ki.wScan = scan
+                inputs[1].u.ki.dwFlags = KEYEVENTF_KEYUP
+
+                user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+                time.sleep(0.03)
+            finally:
+                user32.AttachThreadInput(our_tid, prev_tid, False)
+
+            # Restore previous window
+            if prev_hwnd and prev_hwnd != self._hwnd:
+                user32.SetForegroundWindow(prev_hwnd)
+
+            logger.info("Sent key '%s' to window '%s'", char, self._title)
+            return True
 
         def close(self) -> None:
             """Release any held resources."""
