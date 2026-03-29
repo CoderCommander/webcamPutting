@@ -69,6 +69,7 @@ class MainWindow(ctk.CTk):
         self.geometry("940x480")
         self.minsize(700, 400)
         self.resizable(True, True)
+        self.after(100, lambda: self.state("zoomed"))  # Start maximized
         self.configure(fg_color=theme.BG_ROOT)
 
         self._config = config
