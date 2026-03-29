@@ -138,8 +138,16 @@ class OBSController:
         self._schedule_idle()
 
     def show_putt(self, speed: float, hla: float) -> None:
-        """Switch to putt scene and populate text sources."""
+        """Switch to putt scene and populate text sources.
+
+        When auto_scene_switch is on, the scene is already switched by the
+        club change callback — skip text updates and idle timer entirely.
+        """
         if self._client is None:
+            return
+
+        if self._settings.auto_scene_switch:
+            # Scene already switched by club change — no text overlay needed
             return
 
         self._cancel_idle_timer()
@@ -158,10 +166,7 @@ class OBSController:
         except Exception as e:
             logger.error("OBS: Failed to show putt: %s", e)
 
-        # When auto_scene_switch is on, stay on putt scene until GSPro
-        # selects a non-putter club. Only use the idle timer in manual mode.
-        if not self._settings.auto_scene_switch:
-            self._schedule_idle()
+        self._schedule_idle()
 
     def show_idle(self) -> None:
         """Switch back to idle/default scene and clear trail."""
