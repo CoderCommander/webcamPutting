@@ -113,46 +113,52 @@ class TestSignedDirection:
 
 
 class TestMissingDecimalCorrection:
-    """Verify sanity check catches missing decimal points from OCR."""
+    """Verify missing decimal correction for always-decimal metrics.
 
-    def test_launch_direction_85_corrected_to_8_5(self) -> None:
-        """85R → 85.0 exceeds max 45 → corrected to 8.5."""
-        from birdman_putting.mevo.ocr import _MAX_SANE_VALUES
+    FS Golf PC always displays these metrics with one decimal place
+    (e.g. "8.5 R"). If OCR misses the dot, the text has no "." and
+    the value is divided by 10.
+    """
 
+    def test_no_decimal_corrected(self) -> None:
+        """'85R' has no decimal → 85 / 10 = 8.5."""
         value = _parse_float("85R", signed=True)
         assert value == 85.0  # raw parse gives 85
-        # Sanity correction happens in read_metrics, not _parse_float
-        max_val = _MAX_SANE_VALUES["launch_direction"]
-        assert abs(value) > max_val
-        assert abs(value / 10) <= max_val  # 8.5 is in range
+        # Correction (÷10) happens in _read_single_roi, not _parse_float
+        assert value / 10 == 8.5
 
-    def test_launch_direction_negative_corrected(self) -> None:
+    def test_no_decimal_negative(self) -> None:
+        """'85L' has no decimal → -85 / 10 = -8.5."""
         value = _parse_float("85L", signed=True)
         assert value == -85.0
-        corrected = value / 10
-        assert corrected == -8.5
+        assert value / 10 == -8.5
 
-    def test_normal_value_not_corrected(self) -> None:
-        """8.5R should NOT be corrected — it's already in range."""
+    def test_decimal_present_not_corrected(self) -> None:
+        """'8.5R' has a decimal → trust as-is (8.5)."""
         value = _parse_float("8.5R", signed=True)
-        assert value == 8.5  # already fine, no correction needed
+        assert value == 8.5
 
-    def test_spin_axis_missing_decimal(self) -> None:
-        """125L → -125.0 exceeds max 60 → should be -12.5."""
+    def test_decimal_present_large_value_trusted(self) -> None:
+        """'13.1L' has a decimal → trust as-is (-13.1), don't correct."""
+        value = _parse_float("13.1L", signed=True)
+        assert value == -13.1  # NOT corrected to -1.3
+
+    def test_spin_axis_no_decimal(self) -> None:
+        """'125L' → -125 / 10 = -12.5."""
         value = _parse_float("125L", signed=True)
         assert value == -125.0
-        corrected = value / 10
-        assert corrected == -12.5
+        assert value / 10 == -12.5
 
-    def test_smash_factor_missing_decimal(self) -> None:
-        """15 → 15.0 exceeds max 2.0 → should be 1.5."""
-        from birdman_putting.mevo.ocr import _MAX_SANE_VALUES
-
+    def test_smash_factor_no_decimal(self) -> None:
+        """'15' → 15 / 10 = 1.5."""
         value = _parse_float("15")
         assert value == 15.0
-        max_val = _MAX_SANE_VALUES["smash_factor"]
-        assert abs(value) > max_val
-        assert abs(value / 10) <= max_val
+        assert value / 10 == 1.5
+
+    def test_fix_ocr_text_preserves_decimal(self) -> None:
+        """Verify _fix_ocr_text keeps '.' so decimal detection works."""
+        assert "." in _fix_ocr_text("13.1 L")
+        assert "." not in _fix_ocr_text("131 L")
 
 
 try:
