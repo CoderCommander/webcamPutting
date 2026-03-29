@@ -271,6 +271,24 @@ else:
                     user32.ShowWindow(self._hwnd, SW_MAXIMIZE)
                 logger.info("Restored window '%s' to original size", self._title)
 
+        def send_key(self, char: str) -> bool:
+            """Send a single key press to the window.
+
+            Args:
+                char: Single character to send (e.g. 'c' for chipping, 'f' for full swing).
+
+            Returns True if the message was posted.
+            """
+            if not self._hwnd:
+                return False
+            WM_CHAR = 0x0102
+            result = user32.PostMessageW(self._hwnd, WM_CHAR, ord(char), 0)
+            if result:
+                logger.info("Sent key '%s' to window '%s'", char, self._title)
+            else:
+                logger.warning("Failed to send key '%s' to window '%s'", char, self._title)
+            return bool(result)
+
         def close(self) -> None:
             """Release any held resources."""
             self._hwnd = 0

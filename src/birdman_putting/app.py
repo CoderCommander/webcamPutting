@@ -1157,20 +1157,33 @@ class PuttingApp:
             logger.warning("OBS connection failed — overlay disabled")
             self._obs = None
 
+    # GSPro club codes that should use FS Golf PC chipping mode
+    _CHIPPING_CLUBS = {"SW", "LW", "AW", "GW", "PW", "9I", "8I"}
+
     def _on_club_change(self, club: str) -> None:
         """Called when GSPro sends a club selection (code 201).
 
-        Automatically switches OBS scenes: putter → putt scene, other → main.
+        Automatically switches OBS scenes and FS Golf PC swing mode.
         """
-        if self._obs is None or not self.config.obs.auto_scene_switch:
-            return
+        club_upper = club.upper()
+        is_putter = club_upper in ("PT", "PUTTER")
 
-        # GSPro sends "PT" for putter
-        is_putter = club.upper() in ("PT", "PUTTER")
-        if is_putter:
-            self._obs.switch_to_putt()
-        else:
-            self._obs.switch_to_main()
+        # OBS scene switching
+        if self._obs is not None and self.config.obs.auto_scene_switch:
+            if is_putter:
+                self._obs.switch_to_putt()
+            else:
+                self._obs.switch_to_main()
+
+        # FS Golf PC chipping/full swing mode
+        capture = getattr(self, "_mevo_capture", None)
+        if capture is not None and not is_putter:
+            if club_upper in self._CHIPPING_CLUBS:
+                capture.send_key("c")
+                logger.info("FS Golf PC → Chipping mode (%s)", club)
+            else:
+                capture.send_key("f")
+                logger.info("FS Golf PC → Full Swing mode (%s)", club)
 
     def _on_obs_idle(self) -> None:
         """Called when OBS transitions back to idle scene — clear trail."""
