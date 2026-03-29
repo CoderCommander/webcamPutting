@@ -45,14 +45,17 @@ _SIGNED_METRICS: set[str] = {
     "curve",
 }
 
-# Expected maximum values for each metric — values above these likely have
-# a missing decimal point from OCR (e.g. "85R" should be "8.5R")
-# Metrics where FS Golf PC always displays one decimal place (e.g. "13.7 L").
-# If OCR reads these without a decimal point, the dot was missed and the
-# value should be divided by 10 (e.g. "137 L" → 137 → 13.7).
+# Metrics where FS Golf PC always displays with a decimal point.
+# If OCR reads these without a ".", the dot was missed and the value
+# should be divided by 10 (e.g. "137 L" → 137 → 13.7).
+#
+# NOT included (displayed as integers in FS Golf PC):
+#   spin_rate (7453), carry_distance (160), total_distance (161),
+#   apex_height (103), roll_distance (1)
 _ALWAYS_DECIMAL_METRICS: set[str] = {
-    "launch_direction", "launch_angle", "spin_axis", "club_path",
-    "face_to_target", "aoa", "dynamic_loft", "smash_factor",
+    "ball_speed", "launch_direction", "launch_angle", "spin_axis",
+    "club_speed", "club_path", "face_to_target", "aoa", "dynamic_loft",
+    "smash_factor", "descent_angle", "flight_time",
     "lateral_impact", "vertical_impact",
 }
 
