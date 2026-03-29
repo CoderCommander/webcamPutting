@@ -587,26 +587,43 @@ class PuttingApp:
                     )
                     self._post_shot_radius = shot_result.start_radius
 
-            # Post-shot trail extension: keep detecting ball across full frame
+            # Post-shot trail extension
             if self._post_shot_tracking:
-                if frame_time < self._post_shot_deadline and detection is None:
-                    # Try full-frame detection to find ball beyond zone
-                    detection = self._detector.detect(
-                        frame=display_frame,
-                        zone_x1=0,
-                        zone_x2_limit=display_frame.shape[1],
-                        zone_y1=0,
-                        zone_y2=display_frame.shape[0],
-                        timestamp=frame_time,
-                        expected_radius=self._post_shot_radius,
-                    )
-                if detection is not None and frame_time < self._post_shot_deadline:
+                if (frame_time >= self._post_shot_deadline
+                        or self.config.overlay.projected_trail):
+                    # Projected trail already calculated — no camera tracking needed
+                    self._post_shot_tracking = False
+                elif detection is None:
+                    # Try to find ball near its last known position (not full frame)
+                    last_positions = self._tracker.last_shot_positions
+                    if len(last_positions) >= 2:
+                        lx, ly = last_positions[-1]
+                        # Search in a box around the last known position
+                        margin = 80
+                        search_y1 = max(0, ly - margin)
+                        search_y2 = min(display_frame.shape[0], ly + margin)
+                        search_x1 = max(0, lx - margin)
+                        search_x2 = min(display_frame.shape[1], lx + margin)
+                        detection = self._detector.detect(
+                            frame=display_frame,
+                            zone_x1=search_x1,
+                            zone_x2_limit=search_x2,
+                            zone_y1=search_y1,
+                            zone_y2=search_y2,
+                            timestamp=frame_time,
+                            expected_radius=self._post_shot_radius,
+                            radius_tolerance=20,
+                        )
+                    if detection is not None:
+                        self._tracker.last_shot_positions.append(
+                            (detection.x, detection.y),
+                        )
+                    else:
+                        self._post_shot_tracking = False
+                elif detection is not None:
                     self._tracker.last_shot_positions.append(
                         (detection.x, detection.y),
                     )
-                else:
-                    # Ball lost or timeout — stop post-shot tracking
-                    self._post_shot_tracking = False
 
             # Build trail data for overlay
             active_trail: list[tuple[int, int]] = []
@@ -948,22 +965,38 @@ class PuttingApp:
 
             # Post-shot trail extension
             if self._post_shot_tracking:
-                if frame_time < self._post_shot_deadline and detection is None:
-                    detection = self._detector.detect(
-                        frame=display_frame,
-                        zone_x1=0,
-                        zone_x2_limit=display_frame.shape[1],
-                        zone_y1=0,
-                        zone_y2=display_frame.shape[0],
-                        timestamp=frame_time,
-                        expected_radius=self._post_shot_radius,
-                    )
-                if detection is not None and frame_time < self._post_shot_deadline:
+                if (frame_time >= self._post_shot_deadline
+                        or self.config.overlay.projected_trail):
+                    self._post_shot_tracking = False
+                elif detection is None:
+                    last_positions = self._tracker.last_shot_positions
+                    if len(last_positions) >= 2:
+                        lx, ly = last_positions[-1]
+                        margin = 80
+                        search_y1 = max(0, ly - margin)
+                        search_y2 = min(display_frame.shape[0], ly + margin)
+                        search_x1 = max(0, lx - margin)
+                        search_x2 = min(display_frame.shape[1], lx + margin)
+                        detection = self._detector.detect(
+                            frame=display_frame,
+                            zone_x1=search_x1,
+                            zone_x2_limit=search_x2,
+                            zone_y1=search_y1,
+                            zone_y2=search_y2,
+                            timestamp=frame_time,
+                            expected_radius=self._post_shot_radius,
+                            radius_tolerance=20,
+                        )
+                    if detection is not None:
+                        self._tracker.last_shot_positions.append(
+                            (detection.x, detection.y),
+                        )
+                    else:
+                        self._post_shot_tracking = False
+                elif detection is not None:
                     self._tracker.last_shot_positions.append(
                         (detection.x, detection.y),
                     )
-                else:
-                    self._post_shot_tracking = False
 
             # Build trail data for overlay
             active_trail: list[tuple[int, int]] = []
