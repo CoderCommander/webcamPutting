@@ -142,6 +142,17 @@ class MevoOCR:
         signed = roi.name in _SIGNED_METRICS
         value = _parse_float(text, signed=signed)
 
+        # Warn if a signed metric (R/L direction) doesn't have a suffix —
+        # the ROI may be too narrow to capture the R/L character
+        if value is not None and roi.name in _SIGNED_METRICS:
+            cleaned = _fix_ocr_text(text)
+            if cleaned and cleaned[-1] not in "RL":
+                logger.warning(
+                    "ROI '%s': no R/L suffix in '%s' — value %.1f assumed "
+                    "positive. Widen the ROI to capture the direction.",
+                    roi.name, text.strip(), value,
+                )
+
         # Missing decimal correction: FS Golf PC always displays these metrics
         # with one decimal place (e.g. "13.7 L"). If OCR missed the dot,
         # the text will have no "." and the value needs dividing by 10.
