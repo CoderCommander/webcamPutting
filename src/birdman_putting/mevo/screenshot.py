@@ -274,15 +274,35 @@ else:
         def send_key(self, char: str) -> bool:
             """Send a single key press to the window.
 
+            Briefly brings the window to the foreground, sends the keystroke,
+            then restores the previously active window.
+
             Args:
                 char: Single character to send (e.g. 'c' for chipping, 'f' for full swing).
 
-            Returns True if the message was posted.
+            Returns True if the key was sent.
             """
             if not self._hwnd:
                 return False
+
+            import time
+
+            # Remember the currently active window so we can restore it
+            prev_hwnd = user32.GetForegroundWindow()
+
+            # Bring FS Golf PC to front
+            user32.SetForegroundWindow(self._hwnd)
+            time.sleep(0.05)
+
+            # Send key via WM_CHAR
             WM_CHAR = 0x0102
             result = user32.PostMessageW(self._hwnd, WM_CHAR, ord(char), 0)
+            time.sleep(0.05)
+
+            # Restore the previous window
+            if prev_hwnd and prev_hwnd != self._hwnd:
+                user32.SetForegroundWindow(prev_hwnd)
+
             if result:
                 logger.info("Sent key '%s' to window '%s'", char, self._title)
             else:
