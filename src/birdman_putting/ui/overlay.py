@@ -185,7 +185,8 @@ def draw_ball_trail(
     """Draw a smooth streaking trail with taper and fade.
 
     Renders connected line segments that taper from thin (oldest) to thick
-    (newest) with brightness fade and a subtle glow effect.
+    (newest) with brightness fade. Uses a two-pass approach (wide dim + narrow
+    bright) drawn directly on the frame — no frame.copy() needed.
     """
     if len(positions) < 2:
         return
@@ -204,16 +205,13 @@ def draw_ball_trail(
     if n < 2:
         return
 
-    # Glow pass: wider, semi-transparent lines on an overlay
-    glow = frame.copy()
+    # Glow pass: wider, dim lines drawn directly (no frame copy)
     for i in range(1, n):
         t = i / (n - 1)  # 0.0 (oldest) → 1.0 (newest)
-        alpha = 0.2 + 0.8 * t
-        thickness = max(1, int(2 + 10 * t))
-        c = (int(color[0] * alpha * 0.4), int(color[1] * alpha * 0.4),
-             int(color[2] * alpha * 0.4))
-        cv2.line(glow, sampled[i - 1], sampled[i], c, thickness, cv2.LINE_AA)
-    cv2.addWeighted(glow, 0.6, frame, 0.4, 0, frame)
+        alpha = 0.1 + 0.3 * t
+        thickness = max(2, int(3 + 8 * t))
+        c = (int(color[0] * alpha), int(color[1] * alpha), int(color[2] * alpha))
+        cv2.line(frame, sampled[i - 1], sampled[i], c, thickness, cv2.LINE_AA)
 
     # Main trail: tapering, bright line segments
     for i in range(1, n):
