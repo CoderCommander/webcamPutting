@@ -85,7 +85,7 @@ class PuttingApp:
             shot_settings=config.shot,
             max_trail_points=config.overlay.max_trail_points,
         )
-        self._gspro = GSProClient(config.connection)
+        self._gspro = GSProClient(config.connection, on_club_change=self._on_club_change)
 
         # FPS tracking
         self._fps_queue: deque[float] = deque(maxlen=30)
@@ -1076,6 +1076,21 @@ class PuttingApp:
         if not self._obs.connect():
             logger.warning("OBS connection failed — overlay disabled")
             self._obs = None
+
+    def _on_club_change(self, club: str) -> None:
+        """Called when GSPro sends a club selection (code 201).
+
+        Automatically switches OBS scenes: putter → putt scene, other → main.
+        """
+        if self._obs is None or not self.config.obs.auto_scene_switch:
+            return
+
+        # GSPro sends "PT" for putter
+        is_putter = club.upper() in ("PT", "PUTTER")
+        if is_putter:
+            self._obs.switch_to_putt()
+        else:
+            self._obs.switch_to_main()
 
     def _on_obs_idle(self) -> None:
         """Called when OBS transitions back to idle scene — clear trail."""

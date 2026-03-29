@@ -150,6 +150,7 @@ class OBSSettings:
     putt_scene: str = "Putt Data"
     idle_scene: str = "Main"
     display_duration: float = 18.0  # Seconds to show shot data before returning to idle
+    auto_scene_switch: bool = True  # Auto-switch scenes on GSPro club change (putter ↔ other)
 
 
 @dataclass

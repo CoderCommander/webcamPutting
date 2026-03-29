@@ -158,7 +158,10 @@ class OBSController:
         except Exception as e:
             logger.error("OBS: Failed to show putt: %s", e)
 
-        self._schedule_idle()
+        # When auto_scene_switch is on, stay on putt scene until GSPro
+        # selects a non-putter club. Only use the idle timer in manual mode.
+        if not self._settings.auto_scene_switch:
+            self._schedule_idle()
 
     def show_idle(self) -> None:
         """Switch back to idle/default scene and clear trail."""
@@ -173,6 +176,41 @@ class OBSController:
             logger.info("OBS: Switched to idle scene")
         except Exception as e:
             logger.error("OBS: Failed to switch to idle scene: %s", e)
+
+        if self._on_idle:
+            self._on_idle()
+
+    def switch_to_putt(self) -> None:
+        """Switch to putt scene (no idle timer — stays until club changes)."""
+        if self._client is None:
+            return
+
+        self._cancel_idle_timer()
+
+        try:
+            import obsws_python as obs  # noqa: F811
+
+            cl: obs.ReqClient = self._client  # type: ignore[assignment]
+            cl.set_current_program_scene(self._settings.putt_scene)
+            logger.info("OBS: Switched to putt scene (putter selected)")
+        except Exception as e:
+            logger.error("OBS: Failed to switch to putt scene: %s", e)
+
+    def switch_to_main(self) -> None:
+        """Switch to main/idle scene (non-putter club selected)."""
+        if self._client is None:
+            return
+
+        self._cancel_idle_timer()
+
+        try:
+            import obsws_python as obs  # noqa: F811
+
+            cl: obs.ReqClient = self._client  # type: ignore[assignment]
+            cl.set_current_program_scene(self._settings.idle_scene)
+            logger.info("OBS: Switched to main scene (non-putter selected)")
+        except Exception as e:
+            logger.error("OBS: Failed to switch to main scene: %s", e)
 
         if self._on_idle:
             self._on_idle()

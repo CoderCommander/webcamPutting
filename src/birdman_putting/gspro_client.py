@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -40,7 +41,11 @@ class GSProClient:
     - http_middleware: HTTP POST to legacy middleware connector (port 8888)
     """
 
-    def __init__(self, settings: ConnectionSettings):
+    def __init__(
+        self,
+        settings: ConnectionSettings,
+        on_club_change: Callable[[str], None] | None = None,
+    ):
         self._settings = settings
         self._socket: socket.socket | None = None
         self._shot_number: int = 0
@@ -50,6 +55,7 @@ class GSProClient:
         self._running = False
         self._ball_detected = False  # Set True when ball is ready for shot
         self._shot_cooldown: int = 0  # Heartbeat cycles to skip after a shot
+        self._on_club_change = on_club_change  # Called with club name on GSPro code 201
 
     @property
     def is_connected(self) -> bool:
@@ -452,6 +458,8 @@ class GSProClient:
                             if code == 201:
                                 club = msg.get("Player", {}).get("Club", "")
                                 logger.info("GSPro club selected: %s", club)
+                                if self._on_club_change and club:
+                                    self._on_club_change(club)
                             else:
                                 logger.debug("GSPro message (code %d): %s", code, msg)
                         except json.JSONDecodeError:
