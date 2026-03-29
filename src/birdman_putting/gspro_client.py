@@ -259,7 +259,8 @@ class GSProClient:
             try:
                 data = json.dumps(message).encode("utf-8")
                 self._socket.sendall(data)
-                logger.info("Shot sent to GSPro (shot #%d)", self._shot_number)
+                logger.info("Shot sent to GSPro (shot #%d, %d bytes)", self._shot_number, len(data))
+                logger.debug("GSPro payload: %s", data.decode("utf-8"))
                 return GSProResponse(success=True, message="sent")
 
             except OSError as e:
