@@ -1159,13 +1159,19 @@ class PuttingApp:
 
     # GSPro club codes that should use FS Golf PC chipping mode
     _CHIPPING_CLUBS = {"SW", "LW", "AW", "GW", "PW"}
+    _last_club: str = ""  # Debounce duplicate club change messages
 
     def _on_club_change(self, club: str) -> None:
         """Called when GSPro sends a club selection (code 201).
 
         Automatically switches OBS scenes and FS Golf PC swing mode.
+        Debounces duplicate messages (GSPro often sends the same club twice).
         """
         club_upper = club.upper()
+        if club_upper == self._last_club:
+            return  # Duplicate — skip
+        self._last_club = club_upper
+
         is_putter = club_upper in ("PT", "PUTTER")
 
         # OBS scene switching

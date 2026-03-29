@@ -345,13 +345,13 @@ else:
 
             prev_hwnd = user32.GetForegroundWindow()
             user32.SetForegroundWindow(self._hwnd)
-            time.sleep(0.05)
+            time.sleep(0.02)
             user32.PostMessageW(self._hwnd, WM_CHAR, ord(char), 0)
-            time.sleep(0.05)
+            time.sleep(0.02)
             if prev_hwnd and prev_hwnd != self._hwnd:
                 user32.SetForegroundWindow(prev_hwnd)
 
-            logger.info("Sent key '%s' to window '%s' (focus fallback)", char, self._title)
+            logger.info("Sent key '%s' to window '%s' (focus)", char, self._title)
             return True
 
         def close(self) -> None:
