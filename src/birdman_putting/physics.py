@@ -22,6 +22,28 @@ class ShotData:
     elapsed_seconds: float
 
 
+# Stimpmeter ramp launch speed in ft/s (USGA standard)
+_STIMP_RAMP_SPEED_FPS = 6.08
+_MPH_TO_FPS = 5280.0 / 3600.0  # 1.4667
+
+
+def estimate_putt_distance_feet(speed_mph: float, stimpmeter: float = 10.0) -> float:
+    """Estimate putt distance from ball speed using stimpmeter-based deceleration.
+
+    Physics: deceleration a = v_ramp² / (2 × stimp), then d = v² / (2a).
+    Simplifies to: d = v² × stimp / v_ramp².
+
+    Args:
+        speed_mph: Ball speed in MPH.
+        stimpmeter: Green speed rating (typical range 7-13).
+
+    Returns:
+        Estimated roll distance in feet.
+    """
+    v_fps = speed_mph * _MPH_TO_FPS
+    return v_fps ** 2 * stimpmeter / _STIMP_RAMP_SPEED_FPS ** 2
+
+
 def pixel_to_mm_ratio(ball_radius_px: int) -> float:
     """Calculate pixels-per-mm ratio from detected ball radius.
 

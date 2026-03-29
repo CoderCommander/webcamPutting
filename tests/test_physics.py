@@ -6,6 +6,7 @@ from birdman_putting.physics import (
     GOLF_BALL_RADIUS_MM,
     calculate_angle,
     calculate_shot,
+    estimate_putt_distance_feet,
     fit_trajectory,
     pixel_to_mm_ratio,
 )
@@ -208,3 +209,23 @@ class TestCalculateShot:
 
         assert result is not None
         assert abs(result.hla_degrees - 45.0) < 2.0
+
+
+class TestEstimatePuttDistance:
+    def test_stimp_10_moderate_putt(self) -> None:
+        """5 MPH on stimp 10 should be roughly 14-15 feet."""
+        dist = estimate_putt_distance_feet(5.0, stimpmeter=10.0)
+        assert 14.0 < dist < 16.0
+
+    def test_stimp_10_short_putt(self) -> None:
+        """3 MPH on stimp 10 should be roughly 5 feet."""
+        dist = estimate_putt_distance_feet(3.0, stimpmeter=10.0)
+        assert 4.5 < dist < 6.0
+
+    def test_higher_stimp_rolls_farther(self) -> None:
+        dist_10 = estimate_putt_distance_feet(5.0, stimpmeter=10.0)
+        dist_13 = estimate_putt_distance_feet(5.0, stimpmeter=13.0)
+        assert dist_13 > dist_10
+
+    def test_zero_speed(self) -> None:
+        assert estimate_putt_distance_feet(0.0) == 0.0

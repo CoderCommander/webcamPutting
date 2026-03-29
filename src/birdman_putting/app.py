@@ -29,7 +29,7 @@ from birdman_putting.detection import (
     resize_with_aspect_ratio,
 )
 from birdman_putting.gspro_client import GSProClient
-from birdman_putting.physics import calculate_shot
+from birdman_putting.physics import calculate_shot, estimate_putt_distance_feet
 from birdman_putting.tracking import BallTracker, ShotState
 from birdman_putting.ui.overlay import (
     draw_calibration_overlay,
@@ -119,10 +119,12 @@ class PuttingApp:
         self._post_shot_tracking = False
         self._post_shot_deadline: float = 0.0
         self._post_shot_radius: int = 0
+        self._trail_clear_time: float = 0.0  # When to auto-clear the last-shot trail
 
         # Angle calibration: measure HLA of a "straight" putt to auto-set rotation
         self._angle_cal_active = False
         self._angle_cal_samples: list[float] = []
+        self._angle_cal_bg: np.ndarray | None = None  # Background frame for subtraction
 
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
@@ -243,8 +245,10 @@ class PuttingApp:
         logger.info("Settings reloaded")
 
     def reset_putt(self) -> None:
-        """Force-reset the putt tracker to IDLE state."""
+        """Force-reset the putt tracker to IDLE state and clear trail."""
         self._tracker.reset()
+        self._tracker.last_shot_positions.clear()
+        self._post_shot_tracking = False
         logger.info("Putt tracker manually reset")
 
     def _on_auto_zone(self) -> None:
@@ -269,14 +273,28 @@ class PuttingApp:
             logger.info("Auto-calibration started (direction=%s)", direction)
 
     def _on_angle_cal(self) -> None:
-        """Handle Angle Cal button — toggle angle calibration mode."""
+        """Handle Angle Cal button — toggle angle calibration mode.
+
+        Captures a background frame (without the projected line) so that
+        background subtraction can isolate the line from carpet/ambient light.
+        """
         if self._angle_cal_active:
             self._angle_cal_active = False
             self._angle_cal_samples.clear()
+            self._angle_cal_bg = None
             if self._window:
                 self._window.set_angle_cal_state(False)
             logger.info("Angle calibration cancelled")
         else:
+            # Capture current frame as background (line should NOT be projected yet)
+            frame = self._camera.read()
+            if frame is not None:
+                bg = resize_with_aspect_ratio(frame, width=640)
+                self._angle_cal_bg = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
+                logger.info("Angle cal: background frame captured")
+            else:
+                self._angle_cal_bg = None
+
             self._angle_cal_active = True
             self._angle_cal_samples.clear()
             self._tracker.reset()
@@ -285,30 +303,42 @@ class PuttingApp:
                 with contextlib.suppress(RuntimeError):
                     self._window.after(
                         0, self._window.update_camera_status,
-                        "Project a straight line...", "watching",
+                        "Now project a straight line...", "watching",
                     )
             logger.info(
-                "Angle calibration started — project a straight white line "
+                "Angle calibration started — now project a straight white line "
                 "from putting position through the gateway"
             )
 
     @staticmethod
-    def _detect_line_angle(frame: np.ndarray) -> float | None:
+    def _detect_line_angle(
+        frame: np.ndarray,
+        bg_gray: np.ndarray | None = None,
+    ) -> float | None:
         """Detect the dominant straight line in the frame and return its angle.
 
-        Uses brightness thresholding (for a white projected line on a dark
-        floor) followed by Hough line detection. Returns the angle in degrees
-        of the longest detected line, or None if no line found.
+        When bg_gray is provided, uses background subtraction to isolate the
+        projected line from carpet, ambient light, and other bright surfaces.
+        Falls back to absolute brightness thresholding when no background
+        frame is available.
+
+        Returns the angle in degrees of the longest detected line, or None.
         """
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Threshold for bright pixels (projected white line)
-        _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+        if bg_gray is not None and bg_gray.shape == gray.shape:
+            # Background subtraction: only pixels brighter than the background
+            diff = cv2.subtract(gray, bg_gray)
+            # Threshold the difference — the projected line adds ~50+ brightness
+            _, mask = cv2.threshold(diff, 40, 255, cv2.THRESH_BINARY)
+        else:
+            # Fallback: absolute brightness threshold
+            _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
 
         # Clean up noise
         kernel = np.ones((3, 3), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
 
         # Detect edges
         edges = cv2.Canny(mask, 50, 150)
@@ -333,7 +363,7 @@ class PuttingApp:
                 # atan2(-dy, dx) with inverted Y for screen coords
                 best_angle = math.degrees(math.atan2(-(y2 - y1), x2 - x1))
 
-        logger.info(
+        logger.debug(
             "Line detected: angle=%.2f°, length=%.0fpx", best_angle, best_len,
         )
         return best_angle
@@ -345,7 +375,7 @@ class PuttingApp:
         when enough consistent readings are collected.
         """
         display = frame.copy()
-        angle = self._detect_line_angle(frame)
+        angle = self._detect_line_angle(frame, bg_gray=self._angle_cal_bg)
 
         h, w = display.shape[:2]
         if angle is not None:
@@ -398,6 +428,7 @@ class PuttingApp:
         self.config.camera.rotation = new_rotation
         self._angle_cal_active = False
         self._angle_cal_samples.clear()
+        self._angle_cal_bg = None
 
         save_config(self.config)
         logger.info(
@@ -586,6 +617,10 @@ class PuttingApp:
                         frame_time + self.config.overlay.trail_duration
                     )
                     self._post_shot_radius = shot_result.start_radius
+                    # Auto-clear trail after duration (even without OBS idle)
+                    self._trail_clear_time = (
+                        frame_time + self.config.overlay.trail_duration
+                    )
 
             # Post-shot trail extension
             if self._post_shot_tracking:
@@ -624,6 +659,15 @@ class PuttingApp:
                     self._tracker.last_shot_positions.append(
                         (detection.x, detection.y),
                     )
+
+            # Auto-clear stale trail to stop expensive glow rendering
+            if (
+                self._trail_clear_time > 0
+                and frame_time >= self._trail_clear_time
+                and self._tracker.state == ShotState.IDLE
+            ):
+                self._tracker.last_shot_positions.clear()
+                self._trail_clear_time = 0.0
 
             # Build trail data for overlay
             active_trail: list[tuple[int, int]] = []
@@ -758,6 +802,11 @@ class PuttingApp:
         self._tracker.last_shot_speed = shot_data.speed_mph
         self._tracker.last_shot_hla = shot_data.hla_degrees
 
+        # Estimate putt distance from speed and stimpmeter
+        distance_ft = estimate_putt_distance_feet(
+            shot_data.speed_mph, self.config.shot.stimpmeter,
+        )
+
         # Only send valid shots to GSPro and OBS
         if in_range:
             speed = shot_data.speed_mph
@@ -776,9 +825,9 @@ class PuttingApp:
         # Always update GUI shot display (even for out-of-range shots)
         if self._window:
             logger.info(
-                "Scheduling GUI update: %.1f MPH, %.1f HLA, shot #%d",
+                "Scheduling GUI update: %.1f MPH, %.1f HLA, ~%.0f ft, shot #%d",
                 shot_data.speed_mph, shot_data.hla_degrees,
-                self._tracker.shot_count,
+                distance_ft, self._tracker.shot_count,
             )
             try:
                 self._window.after(
@@ -787,6 +836,7 @@ class PuttingApp:
                     shot_data.speed_mph,
                     shot_data.hla_degrees,
                     self._tracker.shot_count,
+                    distance_ft,
                 )
             except RuntimeError as e:
                 logger.error("Failed to schedule GUI update: %s", e)
@@ -965,6 +1015,9 @@ class PuttingApp:
                         frame_time + self.config.overlay.trail_duration
                     )
                     self._post_shot_radius = shot_result.start_radius
+                    self._trail_clear_time = (
+                        frame_time + self.config.overlay.trail_duration
+                    )
 
             # Post-shot trail extension
             if self._post_shot_tracking:
@@ -1000,6 +1053,15 @@ class PuttingApp:
                     self._tracker.last_shot_positions.append(
                         (detection.x, detection.y),
                     )
+
+            # Auto-clear stale trail
+            if (
+                self._trail_clear_time > 0
+                and frame_time >= self._trail_clear_time
+                and self._tracker.state == ShotState.IDLE
+            ):
+                self._tracker.last_shot_positions.clear()
+                self._trail_clear_time = 0.0
 
             # Build trail data for overlay
             active_trail: list[tuple[int, int]] = []

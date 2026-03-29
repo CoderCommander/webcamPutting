@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 class ShotHistoryEntry:
     """Single entry in shot history."""
 
-    def __init__(self, number: int, speed: float, hla: float):
+    def __init__(self, number: int, speed: float, hla: float, distance_ft: float = 0.0):
         self.number = number
         self.speed = speed
         self.hla = hla
+        self.distance_ft = distance_ft
 
 
 class MainWindow(ctk.CTk):
@@ -222,7 +223,13 @@ class MainWindow(ctk.CTk):
             shot_frame, text="-- HLA",
             font=theme.font(16), text_color=theme.TEXT_SECONDARY,
         )
-        self._hla_label.pack(anchor="w", padx=8, pady=(0, 6))
+        self._hla_label.pack(anchor="w", padx=8)
+
+        self._dist_label = ctk.CTkLabel(
+            shot_frame, text="-- ft",
+            font=theme.font(16), text_color=theme.TEXT_SECONDARY,
+        )
+        self._dist_label.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Shot history
         history_frame = _card(tab)
@@ -948,7 +955,9 @@ class MainWindow(ctk.CTk):
             text=f"  {text}", text_color=colors.get(state, theme.STATUS_IDLE),
         )
 
-    def update_shot(self, speed: float, hla: float, shot_number: int) -> None:
+    def update_shot(
+        self, speed: float, hla: float, shot_number: int, distance_ft: float = 0.0,
+    ) -> None:
         """Update last shot display and add to history."""
         self._speed_label.configure(text=f"{speed:.1f} MPH")
 
@@ -959,16 +968,19 @@ class MainWindow(ctk.CTk):
         )
         self._hla_label.configure(text=hla_text, text_color=hla_color)
 
-        entry = ShotHistoryEntry(shot_number, speed, hla)
+        self._dist_label.configure(text=f"~{distance_ft:.0f} ft" if distance_ft > 0 else "-- ft")
+
+        entry = ShotHistoryEntry(shot_number, speed, hla, distance_ft)
         self._shot_history.insert(0, entry)
         self._shot_history = self._shot_history[:50]
 
         self._history_text.configure(state="normal")
         self._history_text.delete("1.0", "end")
         for e in self._shot_history:
+            dist_str = f"{e.distance_ft:4.0f}ft" if e.distance_ft > 0 else "   --"
             self._history_text.insert(
                 "end",
-                f"#{e.number:>3d}  {e.speed:5.1f} mph  {e.hla:+6.1f}\u00b0\n",
+                f"#{e.number:>3d}  {e.speed:5.1f} mph  {e.hla:+6.1f}\u00b0  {dist_str}\n",
             )
         self._history_text.configure(state="disabled")
 

@@ -97,6 +97,7 @@ class ShotSettings:
     hla_consistency_threshold: float = 30.0
     min_exit_distance_px: int = 50  # Minimum pixel distance beyond gateway to count as exit
     extended_tracking: bool = False  # Track ball across full frame after start
+    stimpmeter: float = 10.0  # Green speed rating for putt distance estimation
 
 
 @dataclass
