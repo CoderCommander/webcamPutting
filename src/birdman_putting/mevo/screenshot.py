@@ -228,17 +228,20 @@ else:
                 rect.right - rect.left,
                 rect.bottom - rect.top,
             )
-            # Use full screen width so the web-based FS Golf layout reflows
-            # all columns on-screen.  Position at x=0 and cap at screen width
-            # — off-screen content won't render in web-based apps.
-            screen_w = user32.GetSystemMetrics(0)
+            # Use full screen dimensions so the web-based FS Golf layout
+            # reflows all columns on-screen.  Position at (0, 0) and use
+            # full screen size — off-screen content won't render.
+            screen_w = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+            screen_h = user32.GetSystemMetrics(1)  # SM_CYSCREEN
             wider_w = min(
                 max(int(self._orig_rect[2] * (1.0 + extra_pct)), screen_w),
-                screen_w,  # Never exceed screen width
+                screen_w,
             )
+            # Use full screen height to prevent vertical compression
+            taller_h = max(self._orig_rect[3], screen_h)
             user32.SetWindowPos(
                 self._hwnd, 0,
-                0, rect.top, wider_w, self._orig_rect[3],
+                0, 0, wider_w, taller_h,
                 SWP_NOZORDER,
             )
             import time

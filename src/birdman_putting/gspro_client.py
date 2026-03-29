@@ -199,6 +199,33 @@ class GSProClient:
             return False
         self._running = True
 
+        # Send initial ready signal so GSPro shows "Ready" in OpenAPI
+        ready_msg = {
+            "DeviceID": self._settings.device_id,
+            "Units": "Yards",
+            "ShotNumber": self._shot_number,
+            "APIversion": "1",
+            "BallData": {
+                "Speed": 0.0,
+                "SpinAxis": 0.0,
+                "TotalSpin": 0.0,
+                "HLA": 0.0,
+                "VLA": 0.0,
+                "Backspin": 0.0,
+                "SideSpin": 0.0,
+                "CarryDistance": 0,
+            },
+            "ShotDataOptions": {
+                "ContainsBallData": False,
+                "ContainsClubData": False,
+                "LaunchMonitorIsReady": True,
+                "LaunchMonitorBallDetected": True,
+                "IsHeartBeat": True,
+            },
+        }
+        self._send_json(ready_msg)
+        logger.info("Sent ready signal to GSPro")
+
         # Start a listener thread for incoming GSPro messages (club selection etc.)
         if self._heartbeat_thread is None or not self._heartbeat_thread.is_alive():
             self._heartbeat_thread = threading.Thread(
