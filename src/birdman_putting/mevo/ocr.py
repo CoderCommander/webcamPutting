@@ -47,21 +47,21 @@ _SIGNED_METRICS: set[str] = {
 
 # Expected maximum values for each metric — values above these likely have
 # a missing decimal point from OCR (e.g. "85R" should be "8.5R")
-# Thresholds tuned per-metric: if OCR drops the decimal point in "1.1L",
-# it reads "11L" = 11.0.  For metrics where typical values are small
-# (face_to_target, club_path, lateral/vertical impact), a lower threshold
-# catches these common misreads.
+# Max sane values for missing-decimal correction. These are only applied
+# when the OCR text has NO decimal point (e.g. "131L" → 131 → correct to
+# 13.1). Values with a decimal present (e.g. "13.1L" → 13.1) are trusted
+# regardless of magnitude.
 _MAX_SANE_VALUES: dict[str, float] = {
     "launch_direction": 45.0,
-    "launch_angle": 50.0,
-    "spin_axis": 60.0,
+    "launch_angle": 60.0,
+    "spin_axis": 90.0,
     "smash_factor": 2.0,
-    "club_path": 10.0,         # typical range 0-8°, >10 likely missing decimal
-    "face_to_target": 10.0,    # typical range 0-8°, >10 likely missing decimal
-    "aoa": 10.0,               # typical range -5 to +5°
+    "club_path": 30.0,
+    "face_to_target": 30.0,
+    "aoa": 20.0,
     "dynamic_loft": 70.0,
-    "lateral_impact": 1.0,     # inches, typically < 1"
-    "vertical_impact": 1.0,    # inches, typically < 1"
+    "lateral_impact": 3.0,
+    "vertical_impact": 3.0,
 }
 
 
@@ -147,17 +147,22 @@ class MevoOCR:
         signed = roi.name in _SIGNED_METRICS
         value = _parse_float(text, signed=signed)
 
-        # Sanity check: missing decimal correction
+        # Missing decimal correction: only apply when the OCR text does NOT
+        # contain a decimal point. If the text has a ".", the value was read
+        # correctly and should be trusted (e.g. "13.1L" → 13.1 is real).
         if value is not None and roi.name in _MAX_SANE_VALUES:
-            max_val = _MAX_SANE_VALUES[roi.name]
-            if abs(value) > max_val and abs(value / 10) <= max_val:
-                corrected = value / 10
-                logger.info(
-                    "ROI '%s': %.1f exceeds max %.0f — "
-                    "correcting missing decimal to %.1f",
-                    roi.name, value, max_val, corrected,
-                )
-                value = corrected
+            cleaned = _fix_ocr_text(text)
+            has_decimal = "." in cleaned
+            if not has_decimal:
+                max_val = _MAX_SANE_VALUES[roi.name]
+                if abs(value) > max_val and abs(value / 10) <= max_val:
+                    corrected = value / 10
+                    logger.info(
+                        "ROI '%s': %.1f has no decimal and exceeds max %.0f — "
+                        "correcting to %.1f",
+                        roi.name, value, max_val, corrected,
+                    )
+                    value = corrected
 
         if value is not None:
             logger.debug("ROI '%s': raw='%s' → %.2f", roi.name, text.strip(), value)
