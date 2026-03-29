@@ -149,7 +149,7 @@ class OBSSettings:
     mevo_scene: str = "Mevo Shot Data"
     putt_scene: str = "Putt Data"
     idle_scene: str = "Main"
-    display_duration: float = 8.0  # Seconds to show shot data before returning to idle
+    display_duration: float = 18.0  # Seconds to show shot data before returning to idle
 
 
 @dataclass

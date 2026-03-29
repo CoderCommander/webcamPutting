@@ -697,17 +697,20 @@ class PuttingApp:
         self._tracker.last_shot_start = shot_result.start_position
         self._tracker.last_shot_end = shot_result.end_position
 
+        # Build trail starting from the ball's resting position
+        start = shot_result.start_position
         if self.config.overlay.projected_trail:
-            # Calculate trajectory mathematically from start→end direction
             self._tracker.last_shot_positions = project_trail(
-                start=shot_result.start_position,
+                start=start,
                 end=shot_result.end_position,
                 frame_width=640,  # display_frame is always resized to 640
             )
         else:
-            self._tracker.last_shot_positions = [
-                (x, y) for x, y, _t in shot_result.positions
-            ]
+            tracked = [(x, y) for x, y, _t in shot_result.positions]
+            # Prepend the start position so the trail begins where the ball sat
+            if tracked and tracked[0] != start:
+                tracked.insert(0, start)
+            self._tracker.last_shot_positions = tracked
         logger.info(
             "Shot captured: %d trail points, start=(%d,%d), end=(%d,%d), "
             "px_mm=%.4f, elapsed=%.4fs",
