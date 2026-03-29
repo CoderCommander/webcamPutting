@@ -73,33 +73,34 @@ def draw_detection_zones(
         gateway_x1 = zone.start_x2 + zone.gateway_width
         gateway_x2 = gateway_x1 + zone.gateway_width
 
-    # Semi-transparent fill when editing
-    if edit_mode:
-        overlay = frame.copy()
+    # Start zone — skip if color is "none"
+    if zone.zone_color != "none":
+        if edit_mode:
+            overlay = frame.copy()
+            cv2.rectangle(
+                overlay,
+                (zone.start_x1, zone.y1),
+                (zone.start_x2, zone.y2),
+                zone_color, -1,
+            )
+            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
+
         cv2.rectangle(
-            overlay,
+            frame,
             (zone.start_x1, zone.y1),
             (zone.start_x2, zone.y2),
-            zone_color, -1,
+            zone_color, 2,
         )
-        cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
 
-    # Start zone outline
-    cv2.rectangle(
-        frame,
-        (zone.start_x1, zone.y1),
-        (zone.start_x2, zone.y2),
-        zone_color, 2,
-    )
-
-    # Detection gateway — green when ball has crossed, user color otherwise
-    gw_color = COLOR_GREEN if state in (ShotState.ENTERED, ShotState.LEFT) else gw_idle_color
-    cv2.rectangle(
-        frame,
-        (gateway_x1, zone.y1),
-        (gateway_x2, zone.y2),
-        gw_color, 2,
-    )
+    # Detection gateway — skip if color is "none"
+    if zone.gateway_color != "none":
+        gw_color = COLOR_GREEN if state in (ShotState.ENTERED, ShotState.LEFT) else gw_idle_color
+        cv2.rectangle(
+            frame,
+            (gateway_x1, zone.y1),
+            (gateway_x2, zone.y2),
+            gw_color, 2,
+        )
 
     # Draw drag handles when editing
     if edit_mode:

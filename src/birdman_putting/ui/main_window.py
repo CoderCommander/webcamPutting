@@ -359,7 +359,7 @@ class MainWindow(ctk.CTk):
 
         # Zone color dropdowns
         zone_colors = [
-            "Yellow", "Red", "Green", "Cyan", "White",
+            "None", "Yellow", "Red", "Green", "Cyan", "White",
             "Orange", "Magenta", "Blue", "Gray",
         ]
 
