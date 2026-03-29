@@ -272,42 +272,37 @@ else:
                 logger.info("Restored window '%s' to original size", self._title)
 
         def send_key(self, char: str) -> bool:
-            """Send a single key press to the window.
+            """Send a single key press to the window without changing focus.
 
-            Briefly brings the window to the foreground, sends the keystroke,
-            then restores the previously active window.
+            Uses WM_KEYDOWN/WM_KEYUP which works for most apps (including
+            Electron/web-based) without needing to bring the window to the
+            foreground.
 
             Args:
                 char: Single character to send (e.g. 'c' for chipping, 'f' for full swing).
 
-            Returns True if the key was sent.
+            Returns True if the messages were posted.
             """
             if not self._hwnd:
                 return False
 
-            import time
+            WM_KEYDOWN = 0x0100
+            WM_KEYUP = 0x0101
+            # VkKeyScanW returns the virtual key code for a character
+            vk = user32.VkKeyScanW(ord(char)) & 0xFF
+            # lParam: repeat=1, scancode, extended=0, context=0
+            scan = user32.MapVirtualKeyW(vk, 0)
+            lparam_down = (scan << 16) | 1
+            lparam_up = (scan << 16) | 1 | (1 << 30) | (1 << 31)
 
-            # Remember the currently active window so we can restore it
-            prev_hwnd = user32.GetForegroundWindow()
+            r1 = user32.PostMessageW(self._hwnd, WM_KEYDOWN, vk, lparam_down)
+            r2 = user32.PostMessageW(self._hwnd, WM_KEYUP, vk, lparam_up)
 
-            # Bring FS Golf PC to front
-            user32.SetForegroundWindow(self._hwnd)
-            time.sleep(0.05)
-
-            # Send key via WM_CHAR
-            WM_CHAR = 0x0102
-            result = user32.PostMessageW(self._hwnd, WM_CHAR, ord(char), 0)
-            time.sleep(0.05)
-
-            # Restore the previous window
-            if prev_hwnd and prev_hwnd != self._hwnd:
-                user32.SetForegroundWindow(prev_hwnd)
-
-            if result:
+            if r1 and r2:
                 logger.info("Sent key '%s' to window '%s'", char, self._title)
             else:
                 logger.warning("Failed to send key '%s' to window '%s'", char, self._title)
-            return bool(result)
+            return bool(r1 and r2)
 
         def close(self) -> None:
             """Release any held resources."""
