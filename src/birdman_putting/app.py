@@ -491,6 +491,7 @@ class PuttingApp:
                 continue
 
             # Resize for processing
+            t0 = time.perf_counter()
             display_frame = resize_with_aspect_ratio(frame, width=640)
 
             # --- Angle calibration mode (line detection) ---
@@ -693,6 +694,7 @@ class PuttingApp:
                 active_trail = [(x, y) for x, y, _t in self._tracker.positions]
 
             # Draw overlays onto display frame
+            t_overlay = time.perf_counter()
             edit_mode = self._window.edit_zone_mode if self._window else False
             draw_overlay(
                 frame=display_frame,
@@ -715,6 +717,21 @@ class PuttingApp:
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
             )
+
+            # Log slow frames to diagnose FPS drops
+            t_end = time.perf_counter()
+            total_ms = (t_end - t0) * 1000
+            if total_ms > 100:  # >100ms = slower than 10fps
+                overlay_ms = (t_end - t_overlay) * 1000
+                detect_ms = (t_overlay - t0) * 1000
+                trail_len = len(self._tracker.last_shot_positions)
+                logger.warning(
+                    "Slow frame: %.0fms (detect=%.0fms, overlay=%.0fms) "
+                    "state=%s trail=%d post_shot=%s",
+                    total_ms, detect_ms, overlay_ms,
+                    self._tracker.state.value, trail_len,
+                    self._post_shot_tracking,
+                )
 
             # Put frame into queue (drop old frames if queue is full)
             try:
