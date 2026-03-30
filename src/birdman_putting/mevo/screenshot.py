@@ -345,9 +345,9 @@ else:
 
             prev_hwnd = user32.GetForegroundWindow()
             user32.SetForegroundWindow(self._hwnd)
-            time.sleep(0.02)
+            time.sleep(0.05)
             user32.PostMessageW(self._hwnd, WM_CHAR, ord(char), 0)
-            time.sleep(0.02)
+            time.sleep(0.05)
             if prev_hwnd and prev_hwnd != self._hwnd:
                 user32.SetForegroundWindow(prev_hwnd)
 
