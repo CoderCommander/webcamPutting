@@ -468,6 +468,23 @@ class PuttingApp:
                 self._running = False
                 break
 
+            # FPS watchdog: auto-reset if FPS stays critically low
+            if self._actual_fps > 0 and self._actual_fps < 10:
+                if self._fps_drop_start == 0.0:
+                    self._fps_drop_start = frame_time
+                elif frame_time - self._fps_drop_start > 2.0:
+                    logger.warning(
+                        "FPS watchdog: %.1f FPS for >2s — auto-resetting",
+                        self._actual_fps,
+                    )
+                    self._tracker.reset()
+                    self._tracker.last_shot_positions.clear()
+                    self._post_shot_tracking = False
+                    self._trail_clear_time = 0.0
+                    self._fps_drop_start = 0.0
+            else:
+                self._fps_drop_start = 0.0
+
             # Adaptive frame skipping: skip processing but keep capturing
             if self._skip_counter > 0:
                 self._skip_counter -= 1
@@ -713,23 +730,6 @@ class PuttingApp:
             if process_duration > self._target_process_time:
                 frames_behind = int(process_duration / self._target_process_time)
                 self._skip_counter = min(frames_behind, 2)
-
-            # FPS watchdog: auto-reset if FPS stays critically low
-            if self._actual_fps > 0 and self._actual_fps < 10:
-                if self._fps_drop_start == 0.0:
-                    self._fps_drop_start = frame_time
-                elif frame_time - self._fps_drop_start > 2.0:
-                    logger.warning(
-                        "FPS watchdog: %.1f FPS for >2s — auto-resetting",
-                        self._actual_fps,
-                    )
-                    self._tracker.reset()
-                    self._tracker.last_shot_positions.clear()
-                    self._post_shot_tracking = False
-                    self._trail_clear_time = 0.0
-                    self._fps_drop_start = 0.0
-            else:
-                self._fps_drop_start = 0.0
 
             # Periodic UI updates (~4 times per second for labels)
             if self._window and (frame_time - last_ui_update) > 0.25:
