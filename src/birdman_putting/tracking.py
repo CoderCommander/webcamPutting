@@ -62,7 +62,9 @@ class BallTracker:
         self.shot_settings = shot_settings
 
         self._state = ShotState.IDLE
-        self._start_candidates: list[tuple[int, int]] = []
+        self._start_candidates: deque[tuple[int, int]] = deque(
+            maxlen=ball_settings.start_stability_frames * 2,
+        )
         self._start_circle: tuple[int, int, int] = (0, 0, 0)
         self._start_pos: tuple[int, int] = (0, 0)
         self._entry_pos: tuple[int, int] = (0, 0)
@@ -91,9 +93,9 @@ class BallTracker:
         return self._start_circle
 
     @property
-    def positions(self) -> list[tuple[int, int, float]]:
+    def positions(self) -> deque[tuple[int, int, float]]:
         """Current tracked positions (for real-time trail display)."""
-        return list(self._positions)
+        return self._positions
 
     @property
     def px_mm_ratio(self) -> float:
@@ -152,10 +154,7 @@ class BallTracker:
                 self._state = ShotState.BALL_DETECTED
                 self._start_candidates.append((x, y))
 
-                # Keep buffer at max size
-                max_candidates = self.ball_settings.start_stability_frames * 2
-                if len(self._start_candidates) > max_candidates:
-                    self._start_candidates.pop(0)
+                # deque maxlen handles size cap automatically
 
                 # Check for stable position using clustering
                 if len(self._start_candidates) >= self.ball_settings.start_stability_frames:

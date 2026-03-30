@@ -217,7 +217,11 @@ class MevoDetector:
                 return None  # No change
             logger.debug("Display change detected (MSE=%.1f)", mse)
 
-        self._prev_frame = frame.copy()
+        # Only keep full-frame copy until ROI crops are populated
+        if self._prev_crops is None:
+            self._prev_frame = frame.copy()
+        else:
+            self._prev_frame = None  # Free memory — ROI crops are sufficient
         self._store_crops(frame)
 
         # Run OCR

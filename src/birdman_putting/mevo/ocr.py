@@ -118,6 +118,8 @@ class MevoOCR:
         rois: list[ROI],
         tessdata_dir: str | None = None,
     ) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
         import pytesseract  # noqa: F811  # lazy import
 
         self._pytesseract = pytesseract
@@ -129,6 +131,12 @@ class MevoOCR:
         if tessdata_dir:
             parts.append(f"--tessdata-dir {tessdata_dir}")
         self._tess_config = " ".join(parts)
+
+        # Persistent thread pool (avoid create/destroy overhead per poll)
+        self._pool = ThreadPoolExecutor(max_workers=min(len(rois), 4))
+
+        # Pre-allocate reusable kernel for dilation
+        self._dilate_kernel = np.ones((2, 2), np.uint8)
 
     def _read_single_roi(
         self, frame: np.ndarray, roi: ROI,
@@ -186,17 +194,14 @@ class MevoOCR:
         Returns:
             Dict mapping ROI name to parsed float (or None if unreadable).
         """
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=min(len(self._rois), 6)) as pool:
-            futures = [
-                pool.submit(self._read_single_roi, frame, roi)
-                for roi in self._rois
-            ]
-            results: dict[str, float | None] = {}
-            for future in futures:
-                name, value = future.result()
-                results[name] = value
+        futures = [
+            self._pool.submit(self._read_single_roi, frame, roi)
+            for roi in self._rois
+        ]
+        results: dict[str, float | None] = {}
+        for future in futures:
+            name, value = future.result()
+            results[name] = value
         return results
 
     @staticmethod
@@ -218,8 +223,7 @@ class MevoOCR:
             return None
         return frame[y1:y2, x1:x2]
 
-    @staticmethod
-    def _preprocess(crop: np.ndarray) -> np.ndarray:
+    def _preprocess(self, crop: np.ndarray) -> np.ndarray:
         """Preprocess a cropped ROI for better OCR accuracy."""
         # Grayscale
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
@@ -228,7 +232,7 @@ class MevoOCR:
         h, w = gray.shape[:2]
         if h < 60:
             scale = max(2, 60 // h)
-            gray = cv2.resize(gray, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
+            gray = cv2.resize(gray, (w * scale, h * scale), interpolation=cv2.INTER_LINEAR)
 
         # Threshold (white text on dark background → invert)
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -239,8 +243,7 @@ class MevoOCR:
             thresh = cv2.bitwise_not(thresh)
 
         # Light dilation to preserve decimal points that may be thin
-        kernel = np.ones((2, 2), np.uint8)
-        thresh = cv2.dilate(thresh, kernel, iterations=1)
+        thresh = cv2.dilate(thresh, self._dilate_kernel, iterations=1)
 
         return thresh
 

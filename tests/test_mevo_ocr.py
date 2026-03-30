@@ -206,6 +206,8 @@ class TestMevoOCRIntegration:
         img = np.zeros((40, 100, 3), dtype=np.uint8)
         img[10:30, 20:80] = 255  # bright block
 
-        result = MevoOCR._preprocess(img)
+        rois = [ROI(name="test", x=0, y=0, width=100, height=40)]
+        ocr = MevoOCR(rois=rois)
+        result = ocr._preprocess(img)
         # After preprocessing, text should be dark on light (mean > 128)
         assert np.mean(result) > 100

@@ -48,9 +48,19 @@ class BallDetector:
         self.min_circularity = min_circularity
         self.morph_iterations = morph_iterations
 
+        # Pre-allocate reusable objects (avoid per-frame allocation)
+        self._morph_kernel = np.ones((3, 3), np.uint8)
+        self._update_hsv_bounds(hsv_range)
+
+    def _update_hsv_bounds(self, hsv_range: HSVRange) -> None:
+        """Pre-compute cached HSV bound arrays."""
+        self._lower = np.array([hsv_range.hmin, hsv_range.smin, hsv_range.vmin])
+        self._upper = np.array([hsv_range.hmax, hsv_range.smax, hsv_range.vmax])
+
     def update_hsv(self, hsv_range: HSVRange) -> None:
         """Update the HSV range for detection."""
         self.hsv_range = hsv_range
+        self._update_hsv_bounds(hsv_range)
 
     def detect(
         self,
@@ -85,22 +95,15 @@ class BallDetector:
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
 
-        # Create color mask
-        lower = np.array([
-            self.hsv_range.hmin, self.hsv_range.smin, self.hsv_range.vmin
-        ])
-        upper = np.array([
-            self.hsv_range.hmax, self.hsv_range.smax, self.hsv_range.vmax
-        ])
-        mask = cv2.inRange(hsv, lower, upper)
+        # Create color mask (using cached bounds)
+        mask = cv2.inRange(hsv, self._lower, self._upper)
 
         # Morphological close: fill gaps in the ball's mask so fragmented
         # pixels merge into a solid contour. erode(1) removes noise,
         # dilate(5) fills gaps and connects nearby blobs.
         if self.morph_iterations > 0:
-            kernel = np.ones((3, 3), np.uint8)
-            mask = cv2.erode(mask, kernel, iterations=1)
-            mask = cv2.dilate(mask, kernel, iterations=self.morph_iterations)
+            mask = cv2.erode(mask, self._morph_kernel, iterations=1)
+            mask = cv2.dilate(mask, self._morph_kernel, iterations=self.morph_iterations)
 
         # Crop mask to detection zone
         zone_mask = mask[zone_y1:zone_y2, zone_x1:zone_x2_limit]
@@ -127,9 +130,11 @@ class BallDetector:
             if r_int < self.min_radius:
                 continue
 
+            # Compute area once for both circularity check and return value
+            area = cv2.contourArea(contour)
+
             # Filter by circularity: area / (π * r²). A ball ≈ 0.7-0.85; a hand ≈ 0.3-0.5
             if r > 0 and self.min_circularity > 0:
-                area = cv2.contourArea(contour)
                 circularity = area / (np.pi * r * r)
                 if circularity < self.min_circularity:
                     continue
@@ -144,7 +149,7 @@ class BallDetector:
                 x=int(cx),
                 y=int(cy),
                 radius=r_int,
-                contour_area=cv2.contourArea(contour),
+                contour_area=area,
                 timestamp=timestamp,
             )
 
@@ -185,17 +190,10 @@ class BallDetector:
         blurred = cv2.GaussianBlur(frame, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
-        lower = np.array([
-            self.hsv_range.hmin, self.hsv_range.smin, self.hsv_range.vmin
-        ])
-        upper = np.array([
-            self.hsv_range.hmax, self.hsv_range.smax, self.hsv_range.vmax
-        ])
-        mask = cv2.inRange(hsv, lower, upper)
+        mask = cv2.inRange(hsv, self._lower, self._upper)
         if self.morph_iterations > 0:
-            kernel = np.ones((3, 3), np.uint8)
-            mask = cv2.erode(mask, kernel, iterations=1)
-            mask = cv2.dilate(mask, kernel, iterations=self.morph_iterations)
+            mask = cv2.erode(mask, self._morph_kernel, iterations=1)
+            mask = cv2.dilate(mask, self._morph_kernel, iterations=self.morph_iterations)
         return mask[zone_y1:zone_y2, zone_x1:zone_x2_limit]
 
 
