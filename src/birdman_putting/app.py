@@ -112,6 +112,7 @@ class PuttingApp:
         # Mevo thread
         self._mevo_detector: MevoDetector | None = None
         self._mevo_thread: threading.Thread | None = None
+        self._mevo_paused: bool = False  # Pause OCR during putting to free CPU
 
         # OBS controller
         self._obs: OBSController | None = None
@@ -1191,6 +1192,15 @@ class PuttingApp:
 
         is_putter = club_upper in ("PT", "PUTTER")
 
+        # Pause/resume Mevo OCR — no point running Tesseract during putting
+        if self._mevo_detector:
+            if is_putter and not self._mevo_paused:
+                self._mevo_paused = True
+                logger.info("Mevo OCR paused (putter selected)")
+            elif not is_putter and self._mevo_paused:
+                self._mevo_paused = False
+                logger.info("Mevo OCR resumed (%s selected)", club)
+
         # OBS scene switching
         if self._obs is not None and self.config.obs.auto_scene_switch:
             if is_putter:
@@ -1298,6 +1308,9 @@ class PuttingApp:
         """Background thread: poll Mevo display for new shots."""
         interval = self.config.mevo.poll_interval
         while self._running:
+            if self._mevo_paused:
+                time.sleep(0.5)
+                continue
             start = time.perf_counter()
             if self._mevo_detector:
                 shot = self._mevo_detector.poll()
