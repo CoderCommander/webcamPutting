@@ -158,10 +158,8 @@ class PuttingApp:
             kernel32.SetPriorityClass(handle, HIGH_PRIORITY_CLASS)
             logger.info("Process priority set to HIGH")
 
-            # Disable Windows 11 power/efficiency throttling for background apps
+            # Disable Windows 11 EcoQoS / power throttling for this process
             try:
-                ProcessPowerThrottling = 4
-                # PROCESS_POWER_THROTTLING_STATE structure
                 import ctypes.wintypes as wt
 
                 class POWER_THROTTLING_STATE(ctypes.Structure):
@@ -171,15 +169,28 @@ class PuttingApp:
                         ("StateMask", wt.DWORD),
                     ]
 
+                ProcessPowerThrottling = 4
+                PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1
+
                 state = POWER_THROTTLING_STATE()
                 state.Version = 1
-                state.ControlMask = 0x1  # PROCESS_POWER_THROTTLING_EXECUTION_SPEED
-                state.StateMask = 0  # 0 = disable throttling
-                kernel32.SetProcessInformation(
-                    handle, ProcessPowerThrottling,
-                    ctypes.byref(state), ctypes.sizeof(state),
-                )
-                logger.info("Power throttling disabled")
+                state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+                state.StateMask = 0  # 0 = HighQoS (disable throttling)
+
+                # Use OpenProcess with explicit access rights
+                pid = kernel32.GetCurrentProcessId()
+                PROCESS_SET_INFORMATION = 0x0200
+                h = kernel32.OpenProcess(PROCESS_SET_INFORMATION, False, pid)
+                if h:
+                    result = kernel32.SetProcessInformation(
+                        h, ProcessPowerThrottling,
+                        ctypes.byref(state), ctypes.sizeof(state),
+                    )
+                    kernel32.CloseHandle(h)
+                    if result:
+                        logger.info("EcoQoS power throttling disabled")
+                    else:
+                        logger.debug("SetProcessInformation returned False")
             except Exception:
                 pass  # Older Windows versions don't support this
         except Exception as e:

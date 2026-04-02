@@ -242,18 +242,49 @@ With `auto_scene_switch = true`:
 
 ## Windows Display Settings
 
-### Disable Background Power Throttling (Required)
+### Prevent Webcam Throttling When Birdman is in Background (Required)
 
-Windows 11 throttles background applications, which causes the webcam to drop from 60fps to 2fps when you click on GSPro or any other window. **This must be disabled for Birdman to work properly.**
+Windows 11 throttles background applications, which causes the webcam to drop from 60fps to 2fps when you click on GSPro or any other window. Apply **all** of the following steps:
+
+#### Step 1: Set Power Mode to Best Performance
+
+1. Click the **battery/power icon** in the taskbar
+2. Set the power slider to **"Best Performance"**
+
+Or: **Settings > System > Power & battery > Power mode** → **Best Performance**
+
+#### Step 2: Disable Power Throttling (Registry)
 
 1. Press **Win + R**, type `regedit`, press Enter
 2. Navigate to: `HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power`
 3. Right-click the **Power** key → **New > Key** → name it `PowerThrottling`
 4. Right-click the **PowerThrottling** key → **New > DWORD (32-bit) Value** → name it `PowerThrottlingOff`
 5. Double-click `PowerThrottlingOff` and set the value to `1`
-6. **Restart your computer**
 
-This disables power throttling for all background apps, ensuring the webcam maintains full frame rate when Birdman is behind GSPro.
+#### Step 3: Disable USB Selective Suspend
+
+Windows can suspend USB devices (including webcams) to save power when apps are in the background.
+
+1. Press **Win + R**, type `powercfg.cpl`, press Enter
+2. Click **"Change plan settings"** on your active power plan
+3. Click **"Change advanced power settings"**
+4. Expand **USB settings > USB selective suspend setting**
+5. Set to **Disabled** (both on battery and plugged in)
+6. Click OK
+
+#### Step 4: Exempt Python from Power Throttling
+
+Run this in an **Administrator** Command Prompt (adjust the path to match your Python installation):
+
+```cmd
+powercfg /powerthrottling disable /path "C:\Users\YOUR_USERNAME\AppData\Local\Programs\Python\Python312\python.exe"
+```
+
+To find your Python path, run: `where python`
+
+#### Step 5: Restart your computer
+
+All changes require a restart to take effect.
 
 ### Taskbar on Laptop Only
 
