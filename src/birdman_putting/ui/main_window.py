@@ -414,6 +414,25 @@ class MainWindow(ctk.CTk):
             lambda v: setattr(self._config.ball, "fixed_radius", v),
         )
 
+        # --- SHOT ---
+        self._section_label(scroll, "SHOT")
+
+        s = self._config.shot
+        self._stimpmeter_slider = self._add_live_slider(
+            scroll, "Stimpmeter", 5, 20, int(s.stimpmeter),
+            lambda v: setattr(self._config.shot, "stimpmeter", float(v)),
+        )
+
+        self._min_speed_slider = self._add_live_slider(
+            scroll, "Min Speed (MPH)", 0, 5, int(s.min_speed_mph * 10) / 10,
+            lambda v: setattr(self._config.shot, "min_speed_mph", float(v) / 10),
+        )
+
+        self._max_speed_slider = self._add_live_slider(
+            scroll, "Max Speed (MPH)", 5, 50, int(s.max_speed_mph),
+            lambda v: setattr(self._config.shot, "max_speed_mph", float(v)),
+        )
+
         # --- ADVANCED (some require restart) ---
         self._section_label(scroll, "ADVANCED")
 
