@@ -188,18 +188,20 @@ def draw_ball_trail(
     (newest) with brightness fade. Uses a two-pass approach (wide dim + narrow
     bright) drawn directly on the frame — no frame.copy() needed.
     """
-    if len(positions) < 2:
+    # Snapshot to prevent race condition with trail clearing on another thread
+    pts = list(positions)
+    if len(pts) < 2:
         return
 
     # Subsample to max_points evenly-spaced points
-    if len(positions) > max_points:
-        step = len(positions) / max_points
+    if len(pts) > max_points:
+        step = len(pts) / max_points
         indices = [int(i * step) for i in range(max_points)]
-        if indices[-1] != len(positions) - 1:
-            indices.append(len(positions) - 1)
-        sampled = [positions[i] for i in indices]
+        if indices[-1] != len(pts) - 1:
+            indices.append(len(pts) - 1)
+        sampled = [pts[i] for i in indices]
     else:
-        sampled = positions
+        sampled = pts
 
     n = len(sampled)
     if n < 2:
