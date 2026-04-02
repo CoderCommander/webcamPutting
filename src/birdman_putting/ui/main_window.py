@@ -810,15 +810,6 @@ class MainWindow(ctk.CTk):
         )
         self._color_menu.pack(side="left", padx=(8, 8))
 
-        # Start/Stop
-        self._start_btn = ctk.CTkButton(
-            parent, text="Start", command=self._toggle_running,
-            width=100, font=theme.font(12, "bold"),
-            fg_color=theme.BTN_SUCCESS[0], hover_color=theme.BTN_SUCCESS[1],
-            corner_radius=theme.CORNER_RADIUS,
-        )
-        self._start_btn.pack(side="left", padx=(0, 8))
-
         # Edit Zone toggle
         self._edit_zone_btn = ctk.CTkButton(
             parent, text="Edit Zone", command=self._toggle_edit_zone,
@@ -1229,21 +1220,13 @@ class MainWindow(ctk.CTk):
             )
 
     def _toggle_running(self) -> None:
-        """Toggle start/stop."""
+        """Toggle start/stop (auto-started, kept for programmatic use)."""
         if self._is_running:
             self._is_running = False
-            self._start_btn.configure(
-                text="Start",
-                fg_color=theme.BTN_SUCCESS[0], hover_color=theme.BTN_SUCCESS[1],
-            )
             if self._on_stop:
                 self._on_stop()
         else:
             self._is_running = True
-            self._start_btn.configure(
-                text="Stop",
-                fg_color=theme.BTN_DANGER[0], hover_color=theme.BTN_DANGER[1],
-            )
             if self._on_start:
                 self._on_start()
 
