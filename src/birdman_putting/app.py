@@ -157,6 +157,31 @@ class PuttingApp:
             handle = kernel32.GetCurrentProcess()
             kernel32.SetPriorityClass(handle, HIGH_PRIORITY_CLASS)
             logger.info("Process priority set to HIGH")
+
+            # Disable Windows 11 power/efficiency throttling for background apps
+            try:
+                ProcessPowerThrottling = 4
+                # PROCESS_POWER_THROTTLING_STATE structure
+                import ctypes.wintypes as wt
+
+                class POWER_THROTTLING_STATE(ctypes.Structure):
+                    _fields_ = [
+                        ("Version", wt.DWORD),
+                        ("ControlMask", wt.DWORD),
+                        ("StateMask", wt.DWORD),
+                    ]
+
+                state = POWER_THROTTLING_STATE()
+                state.Version = 1
+                state.ControlMask = 0x1  # PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+                state.StateMask = 0  # 0 = disable throttling
+                kernel32.SetProcessInformation(
+                    handle, ProcessPowerThrottling,
+                    ctypes.byref(state), ctypes.sizeof(state),
+                )
+                logger.info("Power throttling disabled")
+            except Exception:
+                pass  # Older Windows versions don't support this
         except Exception as e:
             logger.debug("Could not set process priority: %s", e)
 
