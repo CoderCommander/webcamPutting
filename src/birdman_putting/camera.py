@@ -365,29 +365,35 @@ class Camera:
             except Exception:
                 pass
 
-        # Reopen the camera on this thread
+        # Reopen the camera on this thread using DirectShow.
+        # MSMF (default backend) requires a Windows message pump on the
+        # owning thread; without one it falls back to the main thread's
+        # pump, which tkinter throttles when backgrounded. DirectShow
+        # doesn't have this dependency.
         s = self._settings
         old_cap = self._cap
-        if s.mjpeg:
-            cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-            if cap.isOpened():
-                res_w = s.width if s.width > 0 else 1280
-                res_h = s.height if s.height > 0 else 720
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+        res_w = s.width if s.width > 0 else 1280
+        res_h = s.height if s.height > 0 else 720
+        target_fps = s.fps_override if s.fps_override > 0 else 60
+
+        # Always use DirectShow on the grab thread for background resilience
+        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+            if s.mjpeg:
                 fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
                 cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-                target_fps = s.fps_override if s.fps_override > 0 else 60
-                cap.set(cv2.CAP_PROP_FPS, target_fps)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_FPS, target_fps)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            logger.info("Grab thread using DirectShow backend")
         else:
+            # Fallback to default backend with message pump
+            logger.warning("DirectShow failed on grab thread, trying default backend")
             cap = cv2.VideoCapture(s.webcam_index)
             if cap.isOpened():
-                res_w = s.width if s.width > 0 else 1280
-                res_h = s.height if s.height > 0 else 720
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-                target_fps = s.fps_override if s.fps_override > 0 else 60
                 cap.set(cv2.CAP_PROP_FPS, target_fps)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
@@ -405,9 +411,28 @@ class Camera:
         logger.info("Camera reopened on grab thread")
         self._grab_ready.set()
 
+        # Set up message pump for MSMF fallback (DirectShow doesn't need it)
+        _pump_messages = None
+        if sys.platform == "win32":
+            try:
+                import ctypes.wintypes as wt
+                _msg = wt.MSG()
+                PM_REMOVE = 0x0001
+
+                def _pump_messages() -> None:
+                    while user32.PeekMessageW(ctypes.byref(_msg), 0, 0, 0, PM_REMOVE):
+                        user32.TranslateMessage(ctypes.byref(_msg))
+                        user32.DispatchMessageW(ctypes.byref(_msg))
+
+                user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+            except Exception:
+                _pump_messages = None
+
         grab_count = 0
         grab_start = time.perf_counter()
         while self._grab_running and self._cap is not None:
+            if _pump_messages is not None:
+                _pump_messages()
             ret, frame = self._cap.read()
             if ret and frame is not None:
                 with self._frame_lock:
