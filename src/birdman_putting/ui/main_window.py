@@ -132,14 +132,15 @@ class MainWindow(ctk.CTk):
 
         self._build_status_panel(self._right_frame)
 
-        # Settings overlay (hidden by default, covers 75% from right)
+        # Settings overlay (hidden by default, lazy-built on first open)
         self._settings_visible = False
+        self._settings_built = False
+        self._main_frame = main_frame
         self._settings_frame = ctk.CTkFrame(
             main_frame,
             fg_color=theme.BG_PANEL, corner_radius=theme.CORNER_RADIUS,
             border_width=1, border_color=theme.BORDER_ACTIVE,
         )
-        self._build_settings_panel(self._settings_frame)
 
         # Bottom: control bar (fixed height)
         control_bar = ctk.CTkFrame(
@@ -1316,6 +1317,10 @@ class MainWindow(ctk.CTk):
             except Exception:
                 logger.error("Failed to save config", exc_info=True)
         else:
+            # Lazy-build widgets on first open
+            if not self._settings_built:
+                self._build_settings_panel(self._settings_frame)
+                self._settings_built = True
             # Place settings over the video area (column 0), spanning full height
             self._settings_frame.grid(
                 row=0, column=0, sticky="nsew", padx=(0, 8),
