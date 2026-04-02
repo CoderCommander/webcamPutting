@@ -344,7 +344,7 @@ class MainWindow(ctk.CTk):
         dir_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         dir_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
-            dir_frame, text="Roll Direction", width=110, anchor="w",
+            dir_frame, text="Roll Direction", width=200, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
@@ -382,7 +382,7 @@ class MainWindow(ctk.CTk):
         zone_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         zone_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
-            zone_color_frame, text="Zone Color", width=110, anchor="w",
+            zone_color_frame, text="Zone Color", width=200, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
         self._zone_color_var = ctk.StringVar(value=z.zone_color.capitalize())
@@ -401,7 +401,7 @@ class MainWindow(ctk.CTk):
         gw_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         gw_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
-            gw_color_frame, text="Gateway Color", width=110, anchor="w",
+            gw_color_frame, text="Gateway Color", width=200, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
         self._gw_color_var = ctk.StringVar(value=z.gateway_color.capitalize())
@@ -426,32 +426,80 @@ class MainWindow(ctk.CTk):
         self._section_label(scroll, "SHOT")
 
         s = self._config.shot
-        self._stimpmeter_slider = self._add_live_slider(
-            scroll, "Stimpmeter", 5, 20, int(s.stimpmeter),
-            lambda v: setattr(self._config.shot, "stimpmeter", float(v)),
+        self._add_float_entry(
+            scroll, "Stimpmeter", s.stimpmeter,
+            lambda v: setattr(self._config.shot, "stimpmeter", v),
+        )
+        self._add_float_entry(
+            scroll, "Min Speed (MPH)", s.min_speed_mph,
+            lambda v: setattr(self._config.shot, "min_speed_mph", v),
+        )
+        self._add_float_entry(
+            scroll, "Max Speed (MPH)", s.max_speed_mph,
+            lambda v: setattr(self._config.shot, "max_speed_mph", v),
+        )
+        self._add_float_entry(
+            scroll, "Min Time (seconds)", s.min_time_seconds,
+            lambda v: setattr(self._config.shot, "min_time_seconds", v),
+        )
+        self._add_float_entry(
+            scroll, "Max HLA (degrees)", s.max_hla_degrees,
+            lambda v: setattr(self._config.shot, "max_hla_degrees", v),
+        )
+        self._add_live_slider(
+            scroll, "Min Exit Distance (px)", 10, 200, s.min_exit_distance_px,
+            lambda v: setattr(self._config.shot, "min_exit_distance_px", v),
+        )
+        self._add_live_checkbox(
+            scroll, "Extended Tracking", s.extended_tracking,
+            lambda v: setattr(self._config.shot, "extended_tracking", v),
         )
 
-        self._min_speed_slider = self._add_live_slider(
-            scroll, "Min Speed (MPH)", 0, 5, int(s.min_speed_mph * 10) / 10,
-            lambda v: setattr(self._config.shot, "min_speed_mph", float(v) / 10),
-        )
-
-        self._max_speed_slider = self._add_live_slider(
-            scroll, "Max Speed (MPH)", 5, 50, int(s.max_speed_mph),
-            lambda v: setattr(self._config.shot, "max_speed_mph", float(v)),
-        )
-
-        # --- ADVANCED (some require restart) ---
-        self._section_label(scroll, "ADVANCED")
+        # --- CAMERA (ADVANCED) ---
+        self._section_label(scroll, "CAMERA (ADVANCED)")
 
         self._flip_view_var = self._add_live_checkbox(
             scroll, "Flip View", c.flip_view,
             lambda v: setattr(self._config.camera, "flip_view", v),
         )
 
-        self._darkness_slider = self._add_live_slider(
+        self._add_live_slider(
             scroll, "Darkness", 0, 200, c.darkness,
             lambda v: setattr(self._config.camera, "darkness", v),
+        )
+        self._add_float_entry(
+            scroll, "Brightness", c.brightness,
+            lambda v: setattr(self._config.camera, "brightness", v),
+        )
+        self._add_float_entry(
+            scroll, "Contrast", c.contrast,
+            lambda v: setattr(self._config.camera, "contrast", v),
+        )
+        self._add_float_entry(
+            scroll, "Saturation", c.saturation,
+            lambda v: setattr(self._config.camera, "saturation", v),
+        )
+        self._add_float_entry(
+            scroll, "Gain", c.gain,
+            lambda v: setattr(self._config.camera, "gain", v),
+        )
+        self._add_float_entry(
+            scroll, "Sharpness", c.sharpness,
+            lambda v: setattr(self._config.camera, "sharpness", v),
+        )
+        self._add_float_entry(
+            scroll, "Gamma", c.gamma,
+            lambda v: setattr(self._config.camera, "gamma", v),
+        )
+        self._add_live_slider(
+            scroll, "Width (0=auto)", 0, 1920, c.width,
+            lambda v: setattr(self._config.camera, "width", v),
+            live=False,
+        )
+        self._add_live_slider(
+            scroll, "Height (0=auto)", 0, 1080, c.height,
+            lambda v: setattr(self._config.camera, "height", v),
+            live=False,
         )
 
         ctk.CTkLabel(
@@ -544,10 +592,14 @@ class MainWindow(ctk.CTk):
             lambda v: setattr(self._config.mevo, "tessdata_dir", v.strip()),
         )
 
-        ctk.CTkLabel(
-            scroll, text="Configure ROIs in config.toml",
-            font=theme.font(9), text_color=theme.TEXT_MUTED,
-        ).pack(anchor="w", pady=(2, 0))
+        self._add_float_entry(
+            scroll, "Poll Interval (s)", self._config.mevo.poll_interval,
+            lambda v: setattr(self._config.mevo, "poll_interval", v),
+        )
+        self._add_float_entry(
+            scroll, "MSE Threshold", self._config.mevo.mse_threshold,
+            lambda v: setattr(self._config.mevo, "mse_threshold", v),
+        )
 
         # --- OVERLAY / OBS ---
         self._section_label(scroll, "OVERLAY (OBS)")
@@ -585,7 +637,7 @@ class MainWindow(ctk.CTk):
         trail_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         trail_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
-            trail_color_frame, text="Trail Color", width=110, anchor="w",
+            trail_color_frame, text="Trail Color", width=200, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
         self._trail_color_var = ctk.StringVar(value=ov.trail_color.capitalize())
@@ -604,7 +656,7 @@ class MainWindow(ctk.CTk):
         active_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         active_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
-            active_color_frame, text="Active Color", width=110, anchor="w",
+            active_color_frame, text="Active Color", width=200, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
         self._active_trail_color_var = ctk.StringVar(
@@ -843,7 +895,7 @@ class MainWindow(ctk.CTk):
         frame.pack(anchor="w", pady=1)
 
         ctk.CTkLabel(
-            frame, text=label, width=160, anchor="w",
+            frame, text=label, width=200, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
@@ -871,6 +923,43 @@ class MainWindow(ctk.CTk):
         entry.bind("<Return>", on_apply)
         entry.bind("<FocusOut>", on_apply)
 
+        return entry
+
+    def _add_float_entry(
+        self,
+        parent: Any,
+        label: str,
+        initial: float,
+        setter: Callable[[float], None],
+    ) -> ctk.CTkEntry:
+        """Add a labeled float entry field."""
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(anchor="w", pady=1)
+
+        ctk.CTkLabel(
+            frame, text=label, width=200, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+
+        entry = ctk.CTkEntry(
+            frame, width=70, font=theme.font(11),
+            fg_color=theme.BG_INPUT, text_color=theme.TEXT_PRIMARY,
+            border_color=theme.BORDER_SUBTLE,
+            corner_radius=theme.CORNER_RADIUS_SM,
+        )
+        # Display cleanly: 10.0 → "10.0", 0.5 → "0.5"
+        entry.insert(0, f"{initial:g}")
+        entry.pack(side="left", padx=4)
+
+        def on_apply(_event: Any = None) -> None:
+            try:
+                setter(float(entry.get().strip()))
+                self._schedule_save()
+            except ValueError:
+                pass
+
+        entry.bind("<Return>", on_apply)
+        entry.bind("<FocusOut>", on_apply)
         return entry
 
     def _add_live_checkbox(
@@ -912,7 +1001,7 @@ class MainWindow(ctk.CTk):
         frame.pack(anchor="w", pady=1)
 
         ctk.CTkLabel(
-            frame, text=label, width=100, anchor="w",
+            frame, text=label, width=200, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
@@ -1212,7 +1301,7 @@ class MainWindow(ctk.CTk):
             )
 
     def _toggle_settings(self) -> None:
-        """Toggle the settings overlay panel."""
+        """Toggle the settings overlay panel. Saves config on close."""
         if self._settings_visible:
             self._settings_frame.grid_remove()
             self._settings_visible = False
@@ -1220,6 +1309,12 @@ class MainWindow(ctk.CTk):
                 fg_color=theme.BTN_SECONDARY[0],
                 hover_color=theme.BTN_SECONDARY[1],
             )
+            # Save config when closing settings
+            try:
+                save_config(self._config)
+                logger.info("Config saved on settings close")
+            except Exception:
+                logger.error("Failed to save config", exc_info=True)
         else:
             # Place settings over the video area (column 0), spanning full height
             self._settings_frame.grid(
