@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import platform
 import queue
-import subprocess
 import tkinter as tk
 from collections.abc import Callable
 from typing import Any
@@ -14,7 +12,7 @@ from typing import Any
 import customtkinter as ctk
 
 from birdman_putting.color_presets import PRESET_DESCRIPTIONS
-from birdman_putting.config import CONFIG_FILE, AppConfig, save_config
+from birdman_putting.config import AppConfig, save_config
 from birdman_putting.ui import theme
 from birdman_putting.ui.video_panel import VideoPanel
 
@@ -123,31 +121,25 @@ class MainWindow(ctk.CTk):
         )
         self._video_panel.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
 
-        # Right: tabbed panel (Status + Settings)
-        right_frame = ctk.CTkFrame(
+        # Right: status panel (always visible)
+        self._right_frame = ctk.CTkFrame(
             main_frame, width=270,
             fg_color=theme.BG_PANEL, corner_radius=theme.CORNER_RADIUS,
             border_width=1, border_color=theme.BORDER_SUBTLE,
         )
-        right_frame.grid(row=0, column=1, sticky="nsew")
-        right_frame.grid_propagate(False)
+        self._right_frame.grid(row=0, column=1, sticky="nsew")
+        self._right_frame.grid_propagate(False)
 
-        self._right_tabs = ctk.CTkTabview(
-            right_frame, width=260,
-            fg_color=theme.BG_PANEL,
-            segmented_button_fg_color=theme.BG_CARD,
-            segmented_button_selected_color=theme.ACCENT_BLUE,
-            segmented_button_unselected_color=theme.BG_CARD,
-            segmented_button_selected_hover_color=theme.ACCENT_BLUE_HOVER,
-            segmented_button_unselected_hover_color=theme.BG_CARD_HOVER,
-            corner_radius=theme.CORNER_RADIUS,
+        self._build_status_panel(self._right_frame)
+
+        # Settings overlay (hidden by default, covers 75% from right)
+        self._settings_visible = False
+        self._settings_frame = ctk.CTkFrame(
+            main_frame,
+            fg_color=theme.BG_PANEL, corner_radius=theme.CORNER_RADIUS,
+            border_width=1, border_color=theme.BORDER_ACTIVE,
         )
-        self._right_tabs.pack(fill="both", expand=True, padx=4, pady=4)
-        self._right_tabs.add("Status")
-        self._right_tabs.add("Settings")
-
-        self._build_status_tab()
-        self._build_settings_tab()
+        self._build_settings_panel(self._settings_frame)
 
         # Bottom: control bar (fixed height)
         control_bar = ctk.CTkFrame(
@@ -158,10 +150,8 @@ class MainWindow(ctk.CTk):
         control_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
         self._build_control_bar(control_bar)
 
-    def _build_status_tab(self) -> None:
-        """Build the Status tab content."""
-        tab = self._right_tabs.tab("Status")
-        tab.configure(fg_color=theme.BG_PANEL)
+    def _build_status_panel(self, parent: ctk.CTkFrame) -> None:
+        """Build the status panel content (always visible)."""
 
         def _card(parent: Any, **kw: Any) -> ctk.CTkFrame:
             return ctk.CTkFrame(
@@ -177,7 +167,7 @@ class MainWindow(ctk.CTk):
             )
 
         # Camera
-        cam_frame = _card(tab)
+        cam_frame = _card(parent)
         cam_frame.pack(fill="x", padx=4, pady=(4, 3))
         _header(cam_frame, "CAMERA").pack(anchor="w", padx=8, pady=(6, 1))
 
@@ -188,7 +178,7 @@ class MainWindow(ctk.CTk):
         self._cam_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Connection
-        conn_frame = _card(tab)
+        conn_frame = _card(parent)
         conn_frame.pack(fill="x", padx=4, pady=(0, 3))
         _header(conn_frame, "GSPRO CONNECTION").pack(anchor="w", padx=8, pady=(6, 1))
 
@@ -199,7 +189,7 @@ class MainWindow(ctk.CTk):
         self._conn_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Mevo
-        mevo_frame = _card(tab)
+        mevo_frame = _card(parent)
         mevo_frame.pack(fill="x", padx=4, pady=(0, 3))
         _header(mevo_frame, "MEVO").pack(anchor="w", padx=8, pady=(6, 1))
 
@@ -210,7 +200,7 @@ class MainWindow(ctk.CTk):
         self._mevo_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Last shot
-        shot_frame = _card(tab)
+        shot_frame = _card(parent)
         shot_frame.pack(fill="x", padx=4, pady=3)
         _header(shot_frame, "LAST SHOT").pack(anchor="w", padx=8, pady=(6, 1))
 
@@ -233,7 +223,7 @@ class MainWindow(ctk.CTk):
         self._dist_label.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Shot history
-        history_frame = _card(tab)
+        history_frame = _card(parent)
         history_frame.pack(fill="both", expand=True, padx=4, pady=3)
         _header(history_frame, "SESSION HISTORY").pack(anchor="w", padx=8, pady=(6, 1))
 
@@ -246,7 +236,7 @@ class MainWindow(ctk.CTk):
         self._history_text.pack(fill="both", expand=True, padx=6, pady=(0, 6))
 
         # FPS / state / shot count
-        info_frame = _card(tab)
+        info_frame = _card(parent)
         info_frame.pack(fill="x", padx=4, pady=(3, 4))
 
         # Row 1: FPS + State
@@ -270,21 +260,34 @@ class MainWindow(ctk.CTk):
         )
         self._shot_count_label.pack(anchor="w", padx=8, pady=(0, 6))
 
-    def _build_settings_tab(self) -> None:
-        """Build the Settings tab with real-time controls."""
-        tab = self._right_tabs.tab("Settings")
-        tab.configure(fg_color=theme.BG_PANEL)
+    def _build_settings_panel(self, parent: ctk.CTkFrame) -> None:
+        """Build the settings overlay panel (3/4 width, slides over video)."""
+        # Header with title and close button
+        header = ctk.CTkFrame(parent, fg_color="transparent", height=40)
+        header.pack(fill="x", padx=8, pady=(8, 0))
+        header.pack_propagate(False)
+        ctk.CTkLabel(
+            header, text="SETTINGS", font=theme.font(14, "bold"),
+            text_color=theme.TEXT_HEADER,
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            header, text="Close", width=70, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS_SM,
+            command=self._toggle_settings,
+        ).pack(side="right", padx=4)
+
         c = self._config.camera
         b = self._config.ball
         z = self._config.detection_zone
         conn = self._config.connection
 
         scroll = ctk.CTkScrollableFrame(
-            tab, fg_color="transparent",
+            parent, fg_color="transparent",
             scrollbar_button_color=theme.BG_CARD,
             scrollbar_button_hover_color=theme.BG_CARD_HOVER,
         )
-        scroll.pack(fill="both", expand=True)
+        scroll.pack(fill="both", expand=True, padx=4, pady=4)
 
         # --- CAMERA ---
         self._section_label(scroll, "CAMERA")
@@ -497,24 +500,8 @@ class MainWindow(ctk.CTk):
             lambda v: setattr(self._config.connection, "http_url", v.strip()),
         )
 
-        # Connection mode
-        mode_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        mode_frame.pack(fill="x", pady=3)
+        # Connection mode (simplified — HTTP middleware removed)
         self._mode_var = ctk.StringVar(value=conn.mode)
-        ctk.CTkRadioButton(
-            mode_frame, text="Direct GSPro",
-            variable=self._mode_var, value="gspro_direct",
-            command=self._on_mode_changed, font=theme.font(11),
-            text_color=theme.TEXT_SECONDARY,
-            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
-        ).pack(anchor="w")
-        ctk.CTkRadioButton(
-            mode_frame, text="HTTP Middleware",
-            variable=self._mode_var, value="http_middleware",
-            command=self._on_mode_changed, font=theme.font(11),
-            text_color=theme.TEXT_SECONDARY,
-            fg_color=theme.ACCENT_BLUE, hover_color=theme.ACCENT_BLUE_HOVER,
-        ).pack(anchor="w")
 
         # --- MEVO ---
         self._section_label(scroll, "MEVO (LAUNCH MONITOR)")
@@ -631,6 +618,103 @@ class MainWindow(ctk.CTk):
             corner_radius=theme.CORNER_RADIUS_SM,
         ).pack(side="left", padx=2)
 
+        self._trail_duration_slider = self._add_live_slider(
+            scroll, "Trail Duration (s)", 1, 30, int(ov.trail_duration),
+            lambda v: setattr(self._config.overlay, "trail_duration", float(v)),
+        )
+
+        # --- OBS ---
+        self._section_label(scroll, "OBS")
+
+        obs = self._config.obs
+        self._obs_enabled_var = self._add_live_checkbox(
+            scroll, "Enable OBS Integration", obs.enabled,
+            lambda v: setattr(self._config.obs, "enabled", v),
+            live=False,
+        )
+
+        self._obs_auto_switch_var = self._add_live_checkbox(
+            scroll, "Auto Scene Switch (club change)", obs.auto_scene_switch,
+            lambda v: setattr(self._config.obs, "auto_scene_switch", v),
+            live=False,
+        )
+
+        self._obs_host_entry = self._add_entry(
+            scroll, "OBS Host:", obs.host, width=120,
+        )
+        self._bind_entry_apply(
+            self._obs_host_entry,
+            lambda v: setattr(self._config.obs, "host", v.strip()),
+        )
+
+        self._obs_port_entry = self._add_entry(
+            scroll, "OBS Port:", str(obs.port), width=60,
+        )
+        self._bind_entry_apply(
+            self._obs_port_entry,
+            lambda v: setattr(self._config.obs, "port", int(v.strip())),
+        )
+
+        self._obs_password_entry = self._add_entry(
+            scroll, "Password:", obs.password, width=120,
+        )
+        self._bind_entry_apply(
+            self._obs_password_entry,
+            lambda v: setattr(self._config.obs, "password", v.strip()),
+        )
+
+        self._obs_idle_entry = self._add_entry(
+            scroll, "Idle Scene:", obs.idle_scene, width=140,
+        )
+        self._bind_entry_apply(
+            self._obs_idle_entry,
+            lambda v: setattr(self._config.obs, "idle_scene", v.strip()),
+        )
+
+        self._obs_putt_entry = self._add_entry(
+            scroll, "Putt Scene:", obs.putt_scene, width=140,
+        )
+        self._bind_entry_apply(
+            self._obs_putt_entry,
+            lambda v: setattr(self._config.obs, "putt_scene", v.strip()),
+        )
+
+        self._obs_mevo_entry = self._add_entry(
+            scroll, "Mevo Scene:", obs.mevo_scene, width=140,
+        )
+        self._bind_entry_apply(
+            self._obs_mevo_entry,
+            lambda v: setattr(self._config.obs, "mevo_scene", v.strip()),
+        )
+
+        self._obs_duration_slider = self._add_live_slider(
+            scroll, "Display Duration (s)", 5, 60, int(obs.display_duration),
+            lambda v: setattr(self._config.obs, "display_duration", float(v)),
+        )
+
+        # --- BALL (ADVANCED) ---
+        self._section_label(scroll, "BALL (ADVANCED)")
+
+        self._min_radius_slider = self._add_live_slider(
+            scroll, "Min Radius (px)", 1, 20, b.min_radius,
+            lambda v: setattr(self._config.ball, "min_radius", v),
+        )
+
+        self._circularity_slider = self._add_live_slider(
+            scroll, "Min Circularity", 0, 10, int(b.min_circularity * 10),
+            lambda v: setattr(self._config.ball, "min_circularity", v / 10),
+        )
+
+        self._morph_slider = self._add_live_slider(
+            scroll, "Morph Iterations", 0, 10, b.morph_iterations,
+            lambda v: setattr(self._config.ball, "morph_iterations", v),
+        )
+
+        self._stability_slider = self._add_live_slider(
+            scroll, "Start Stability Frames", 5, 30, b.start_stability_frames,
+            lambda v: setattr(self._config.ball, "start_stability_frames", v),
+        )
+
     def _on_trail_length_changed(self, val: int) -> None:
         """Update trail length in config and resize tracker deque."""
         self._config.overlay.max_trail_points = val
@@ -704,14 +788,14 @@ class MainWindow(ctk.CTk):
         )
         self._reset_putt_btn.pack(side="left", padx=(8, 0))
 
-        # Edit Config button
-        self._edit_config_btn = ctk.CTkButton(
-            parent, text="Edit Config", command=self._on_edit_config,
+        # Settings button
+        self._settings_btn = ctk.CTkButton(
+            parent, text="Settings", command=self._toggle_settings,
             width=100, font=theme.font(11),
             fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             corner_radius=theme.CORNER_RADIUS,
         )
-        self._edit_config_btn.pack(side="left", padx=(8, 0))
+        self._settings_btn.pack(side="left", padx=(8, 0))
 
         # Angle Cal button
         self._angle_cal_btn = ctk.CTkButton(
@@ -1125,24 +1209,25 @@ class MainWindow(ctk.CTk):
                 fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
 
-    def _on_edit_config(self) -> None:
-        """Open config.toml in the system's default text editor."""
-        try:
-            save_config(self._config)
-        except Exception:
-            logger.error("Failed to save config before opening editor", exc_info=True)
-        path = str(CONFIG_FILE)
-        try:
-            system = platform.system()
-            if system == "Windows":
-                import os
-                os.startfile(path)  # type: ignore[attr-defined]  # noqa: S606
-            elif system == "Darwin":
-                subprocess.Popen(["open", path])  # noqa: S603
-            else:
-                subprocess.Popen(["xdg-open", path])  # noqa: S603
-        except Exception:
-            logger.error("Failed to open config file in editor", exc_info=True)
+    def _toggle_settings(self) -> None:
+        """Toggle the settings overlay panel."""
+        if self._settings_visible:
+            self._settings_frame.grid_remove()
+            self._settings_visible = False
+            self._settings_btn.configure(
+                fg_color=theme.BTN_SECONDARY[0],
+                hover_color=theme.BTN_SECONDARY[1],
+            )
+        else:
+            # Place settings over the video area (column 0), spanning full height
+            self._settings_frame.grid(
+                row=0, column=0, sticky="nsew", padx=(0, 8),
+            )
+            self._settings_visible = True
+            self._settings_btn.configure(
+                fg_color=theme.BTN_WARNING[0],
+                hover_color=theme.BTN_WARNING[1],
+            )
 
     def _on_zone_color_changed(self, label: str) -> None:
         """Handle zone color dropdown change."""
