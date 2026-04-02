@@ -37,7 +37,7 @@ class BallDetector:
     def __init__(
         self,
         hsv_range: HSVRange,
-        blur_kernel: tuple[int, int] = (11, 11),
+        blur_kernel: tuple[int, int] = (7, 7),
         min_radius: int = 5,
         min_circularity: float = 0.5,
         morph_iterations: int = 5,
@@ -88,25 +88,36 @@ class BallDetector:
         Returns:
             BallDetection if ball found, None otherwise.
         """
+        # Crop to detection zone + margin BEFORE expensive operations.
+        # This processes ~200x250 pixels instead of ~640x360 (~4x fewer).
+        h, w = frame.shape[:2]
+        margin = 15  # Extra pixels for blur edge effects
+        crop_y1 = max(0, zone_y1 - margin)
+        crop_y2 = min(h, zone_y2 + margin)
+        crop_x1 = max(0, zone_x1 - margin)
+        crop_x2 = min(w, zone_x2_limit + margin)
+        roi = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+
         # Blur and double-convert to match the original calibrated color space.
-        # The presets were tuned against HSV bytes re-interpreted as BGR then
-        # converted a second time, so we replicate that transform here.
-        blurred = cv2.GaussianBlur(frame, self.blur_kernel, 0)
+        blurred = cv2.GaussianBlur(roi, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
 
         # Create color mask (using cached bounds)
         mask = cv2.inRange(hsv, self._lower, self._upper)
 
-        # Morphological close: fill gaps in the ball's mask so fragmented
-        # pixels merge into a solid contour. erode(1) removes noise,
-        # dilate(5) fills gaps and connects nearby blobs.
-        if self.morph_iterations > 0:
+        # Morphological close: fill gaps in the ball's mask
+        if self.morph_iterations > 0 and cv2.countNonZero(mask) > 0:
             mask = cv2.erode(mask, self._morph_kernel, iterations=1)
             mask = cv2.dilate(mask, self._morph_kernel, iterations=self.morph_iterations)
 
-        # Crop mask to detection zone
-        zone_mask = mask[zone_y1:zone_y2, zone_x1:zone_x2_limit]
+        # Extract the detection zone from the cropped mask
+        # (offset by the margin we added)
+        inner_y1 = zone_y1 - crop_y1
+        inner_y2 = inner_y1 + (zone_y2 - zone_y1)
+        inner_x1 = zone_x1 - crop_x1
+        inner_x2 = inner_x1 + (zone_x2_limit - zone_x1)
+        zone_mask = mask[inner_y1:inner_y2, inner_x1:inner_x2]
 
         # Find contours sorted by area (largest first)
         contours, _ = cv2.findContours(
@@ -187,14 +198,23 @@ class BallDetector:
         zone_y2: int,
     ) -> np.ndarray:
         """Get the color detection mask for debug visualization."""
-        blurred = cv2.GaussianBlur(frame, self.blur_kernel, 0)
+        h, w = frame.shape[:2]
+        margin = 15
+        cy1 = max(0, zone_y1 - margin)
+        cy2 = min(h, zone_y2 + margin)
+        cx1 = max(0, zone_x1 - margin)
+        cx2 = min(w, zone_x2_limit + margin)
+        roi = frame[cy1:cy2, cx1:cx2]
+        blurred = cv2.GaussianBlur(roi, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, self._lower, self._upper)
-        if self.morph_iterations > 0:
+        if self.morph_iterations > 0 and cv2.countNonZero(mask) > 0:
             mask = cv2.erode(mask, self._morph_kernel, iterations=1)
             mask = cv2.dilate(mask, self._morph_kernel, iterations=self.morph_iterations)
-        return mask[zone_y1:zone_y2, zone_x1:zone_x2_limit]
+        iy1 = zone_y1 - cy1
+        ix1 = zone_x1 - cx1
+        return mask[iy1:iy1 + (zone_y2 - zone_y1), ix1:ix1 + (zone_x2_limit - zone_x1)]
 
 
 def generate_hsv_from_patch(
