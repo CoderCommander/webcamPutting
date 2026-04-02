@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 
@@ -55,6 +56,13 @@ class Camera:
         self._frame_width: int = 0
         self._frame_height: int = 0
         self._status_message: str = "Not started"
+
+        # Threaded capture: a dedicated thread reads frames continuously
+        # so camera.read() never blocks on the DirectShow/MSMF pipeline
+        self._grab_thread: threading.Thread | None = None
+        self._grab_running = False
+        self._latest_frame: np.ndarray | None = None
+        self._frame_lock = threading.Lock()
 
     @property
     def fps(self) -> float:
@@ -312,8 +320,54 @@ class Camera:
         )
         return True
 
+    def start_grab_thread(self) -> None:
+        """Start a dedicated thread that continuously grabs frames.
+
+        This decouples camera I/O from the processing loop so that
+        Windows DirectShow/MSMF throttling of background apps doesn't
+        block frame delivery.
+        """
+        if self._video_file or self._grab_running:
+            return
+        self._grab_running = True
+        self._grab_thread = threading.Thread(
+            target=self._grab_loop, daemon=True, name="camera-grab",
+        )
+        self._grab_thread.start()
+        logger.info("Camera grab thread started")
+
+    def _grab_loop(self) -> None:
+        """Continuously read frames from the camera into _latest_frame."""
+        import sys
+        # Set this thread to highest priority for uninterrupted capture
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+                kernel32.SetThreadPriority(
+                    kernel32.GetCurrentThread(), 2,  # THREAD_PRIORITY_HIGHEST
+                )
+            except Exception:
+                pass
+
+        while self._grab_running and self._cap is not None:
+            ret, frame = self._cap.read()
+            if ret and frame is not None:
+                with self._frame_lock:
+                    self._latest_frame = frame
+
+    def stop_grab_thread(self) -> None:
+        """Stop the grab thread."""
+        self._grab_running = False
+        if self._grab_thread is not None:
+            self._grab_thread.join(timeout=2)
+            self._grab_thread = None
+
     def read(self) -> np.ndarray | None:
         """Read a single frame from the capture source.
+
+        If the grab thread is running, returns the latest grabbed frame
+        (non-blocking). Otherwise reads directly from the capture device.
 
         Returns:
             BGR frame as numpy array, or None if read failed.
@@ -321,9 +375,16 @@ class Camera:
         if self._cap is None:
             return None
 
-        ret, frame = self._cap.read()
-        if not ret or frame is None:
-            return None
+        # Use threaded grab if available
+        if self._grab_running:
+            with self._frame_lock:
+                frame = self._latest_frame
+            if frame is None:
+                return None
+        else:
+            ret, frame = self._cap.read()
+            if not ret or frame is None:
+                return None
 
         # PS4 Eye frame decoding
         if self._settings.ps4 and not self._video_file:
@@ -348,6 +409,7 @@ class Camera:
 
     def release(self) -> None:
         """Release the video capture."""
+        self.stop_grab_thread()
         if self._cap is not None:
             self._cap.release()
             self._cap = None

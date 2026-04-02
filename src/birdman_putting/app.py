@@ -213,6 +213,9 @@ class PuttingApp:
                     self._camera.status_message, "ok"
                 )
 
+        # Start threaded camera capture (decoupled from tkinter event loop)
+        self._camera.start_grab_thread()
+
         # Connect to GSPro
         connected = self._gspro.connect()
         if self._window:
