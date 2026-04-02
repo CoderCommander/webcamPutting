@@ -250,7 +250,8 @@ class MainWindow(ctk.CTk):
         self._fps_label.pack(side="left")
 
         self._state_label = ctk.CTkLabel(
-            row1, text="idle", font=theme.font(14), text_color=theme.STATUS_IDLE,
+            row1, text="No Ball", font=theme.font(14, "bold"),
+            text_color=theme.STATUS_IDLE,
         )
         self._state_label.pack(side="right")
 
@@ -1176,8 +1177,16 @@ class MainWindow(ctk.CTk):
         self._fps_label.configure(text=f"FPS: {fps:.0f}")
 
     def update_state(self, state_text: str) -> None:
-        """Update state display."""
-        self._state_label.configure(text=state_text)
+        """Update state display with user-friendly label."""
+        _STATE_DISPLAY = {
+            "idle": ("No Ball", theme.STATUS_IDLE),
+            "ball_detected": ("Detecting...", theme.STATUS_WARNING),
+            "started": ("Ball Ready", theme.STATUS_OK),
+            "entered": ("Putting!", theme.ACCENT_GREEN),
+            "left": ("Shot!", theme.ACCENT_GREEN),
+        }
+        label, color = _STATE_DISPLAY.get(state_text, (state_text, theme.STATUS_IDLE))
+        self._state_label.configure(text=label, text_color=color)
 
     def update_shot_count(self, count: int) -> None:
         """Update the shot count display."""
