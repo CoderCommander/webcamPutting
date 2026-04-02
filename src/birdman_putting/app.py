@@ -576,9 +576,10 @@ class PuttingApp:
                 self._skip_counter -= 1
                 continue
 
-            # Resize for processing
+            # Resize for processing, then apply rotation on the smaller frame
             t0 = time.perf_counter()
             display_frame = resize_with_aspect_ratio(frame, width=640)
+            display_frame = self._camera.apply_rotation(display_frame)
 
             # --- Angle calibration mode (line detection) ---
             if self._angle_cal_active:
@@ -1046,6 +1047,7 @@ class PuttingApp:
                 continue
 
             display_frame = resize_with_aspect_ratio(frame, width=640)
+            display_frame = self._camera.apply_rotation(display_frame)
             self._pick_frame = display_frame.copy()
 
             # --- Calibration mode (headless) ---

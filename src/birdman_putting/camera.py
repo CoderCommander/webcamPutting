@@ -494,18 +494,28 @@ class Camera:
         if self._settings.flip_image and not self._video_file:
             frame = cv2.flip(frame, 1)
 
-        # Apply rotation correction (cached matrix to avoid per-frame recompute)
-        if self._settings.rotation != 0.0:
-            if (self._rotation_matrix is None
-                    or self._rotation_cached_for != self._settings.rotation):
-                h, w = frame.shape[:2]
-                self._rotation_matrix = cv2.getRotationMatrix2D(
-                    (w / 2, h / 2), self._settings.rotation, 1.0,
-                )
-                self._rotation_cached_for = self._settings.rotation
-            frame = cv2.warpAffine(frame, self._rotation_matrix, (frame.shape[1], frame.shape[0]))
+        # NOTE: Rotation is applied AFTER resize in the processing loop
+        # to avoid warpAffine on the full 1280x720 frame (~4x slower).
 
         return frame
+
+    def apply_rotation(self, frame: np.ndarray) -> np.ndarray:
+        """Apply rotation correction to a frame (call after resize for speed).
+
+        Returns the rotated frame, or the original if rotation is 0.
+        """
+        if self._settings.rotation == 0.0:
+            return frame
+        if (self._rotation_matrix is None
+                or self._rotation_cached_for != self._settings.rotation):
+            h, w = frame.shape[:2]
+            self._rotation_matrix = cv2.getRotationMatrix2D(
+                (w / 2, h / 2), self._settings.rotation, 1.0,
+            )
+            self._rotation_cached_for = self._settings.rotation
+        return cv2.warpAffine(
+            frame, self._rotation_matrix, (frame.shape[1], frame.shape[0]),
+        )
 
     def release(self) -> None:
         """Release the video capture."""
