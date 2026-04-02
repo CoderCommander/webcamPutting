@@ -122,6 +122,7 @@ class PuttingApp:
         self._post_shot_deadline: float = 0.0
         self._post_shot_radius: int = 0
         self._trail_clear_time: float = 0.0  # When to auto-clear the last-shot trail
+        self._last_state_change: float = 0.0  # For stuck-state auto-reset
 
         # Angle calibration: measure HLA of a "straight" putt to auto-set rotation
         self._angle_cal_active = False
@@ -689,8 +690,25 @@ class PuttingApp:
                 logger.info(
                     "Tracker: %s → %s", prev_state.value, self._tracker.state.value,
                 )
+                self._last_state_change = frame_time
             if shot_result is not None:
                 logger.info("Shot result received from tracker")
+
+            # Auto-reset if stuck in STARTED for >10s (no shot progress)
+            # or stuck in BALL_DETECTED for >10s (can't stabilize)
+            if (
+                self._tracker.state in (ShotState.STARTED, ShotState.BALL_DETECTED)
+                and self._last_state_change > 0
+                and frame_time - self._last_state_change > 10.0
+            ):
+                    logger.warning(
+                        "Auto-reset: stuck in %s for >10s",
+                        self._tracker.state.value,
+                    )
+                    self._tracker.reset()
+                    self._tracker.last_shot_positions.clear()
+                    self._post_shot_tracking = False
+                    self._last_state_change = frame_time
             # Log when ball is lost during active tracking
             if (
                 detection is None
