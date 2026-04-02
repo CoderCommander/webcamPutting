@@ -340,18 +340,25 @@ else:
                 )
                 return True
 
-            # Fallback: focus the window, send WM_CHAR, restore
+            # Fallback: focus the window, simulate keypress via keybd_event, restore
             import time
+
+            KEYEVENTF_KEYUP = 0x0002
 
             prev_hwnd = user32.GetForegroundWindow()
             user32.SetForegroundWindow(self._hwnd)
+            time.sleep(0.1)  # Let Electron fully activate
+
+            # keybd_event goes through the OS input queue — Electron always sees it
+            user32.keybd_event(vk, scan, 0, 0)  # Key down
             time.sleep(0.05)
-            user32.PostMessageW(self._hwnd, WM_CHAR, ord(char), 0)
+            user32.keybd_event(vk, scan, KEYEVENTF_KEYUP, 0)  # Key up
             time.sleep(0.05)
+
             if prev_hwnd and prev_hwnd != self._hwnd:
                 user32.SetForegroundWindow(prev_hwnd)
 
-            logger.info("Sent key '%s' to window '%s' (focus)", char, self._title)
+            logger.info("Sent key '%s' to window '%s' (focus+keybd_event)", char, self._title)
             return True
 
         def close(self) -> None:
