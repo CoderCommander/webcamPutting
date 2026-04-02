@@ -133,10 +133,32 @@ class PuttingApp:
 
     def run(self) -> None:
         """Start the application in the appropriate mode."""
+        self._set_high_priority()
         if self._headless:
             self._run_headless()
         else:
             self._run_gui()
+
+    @staticmethod
+    def _set_high_priority() -> None:
+        """Set process priority to above-normal to prevent Windows throttling.
+
+        When the Birdman window loses focus (e.g. user clicks GSPro),
+        Windows deprioritizes background processes, starving the camera
+        capture and processing threads.
+        """
+        import sys
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+            handle = kernel32.GetCurrentProcess()
+            kernel32.SetPriorityClass(handle, ABOVE_NORMAL_PRIORITY_CLASS)
+            logger.info("Process priority set to ABOVE_NORMAL")
+        except Exception as e:
+            logger.debug("Could not set process priority: %s", e)
 
     # ---- GUI Mode ----
 
