@@ -350,7 +350,7 @@ class Camera:
         """
         import sys
 
-        # Set this thread to highest priority for uninterrupted capture
+        # Set this thread to highest priority and prevent timer throttling
         if sys.platform == "win32":
             try:
                 import ctypes
@@ -359,8 +359,9 @@ class Camera:
                     kernel32.GetCurrentThread(), 2,  # THREAD_PRIORITY_HIGHEST
                 )
                 # Initialize COM on this thread (MTA for DirectShow)
-                import ctypes.wintypes  # noqa: F401
                 ctypes.windll.ole32.CoInitializeEx(None, 0)  # type: ignore[attr-defined]
+                # Set 1ms timer resolution to prevent background throttling
+                ctypes.windll.winmm.timeBeginPeriod(1)  # type: ignore[attr-defined]
             except Exception:
                 pass
 
@@ -404,12 +405,21 @@ class Camera:
         logger.info("Camera reopened on grab thread")
         self._grab_ready.set()
 
+        grab_count = 0
+        grab_start = time.perf_counter()
         while self._grab_running and self._cap is not None:
             ret, frame = self._cap.read()
             if ret and frame is not None:
                 with self._frame_lock:
                     self._latest_frame = frame
                     self._frame_new = True
+                grab_count += 1
+                now = time.perf_counter()
+                if now - grab_start >= 5.0:
+                    grab_fps = grab_count / (now - grab_start)
+                    logger.info("Grab thread FPS: %.1f", grab_fps)
+                    grab_count = 0
+                    grab_start = now
 
     def stop_grab_thread(self) -> None:
         """Stop the grab thread."""
