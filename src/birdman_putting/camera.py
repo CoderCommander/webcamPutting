@@ -378,17 +378,20 @@ class Camera:
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        # Always use DirectShow on the grab thread for background resilience
+        # Always use DirectShow on the grab thread for background resilience.
+        # Always request MJPEG — it's faster to decode than raw YUY2 and
+        # most modern webcams support it (e.g. Logitech C922).
         cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-            if s.mjpeg:
-                fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
-                cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+            fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
+            cap.set(cv2.CAP_PROP_FOURCC, fourcc)
             cap.set(cv2.CAP_PROP_FPS, target_fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            logger.info("Grab thread using DirectShow backend")
+            actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+            codec = "".join(chr((actual_fourcc >> (8 * i)) & 0xFF) for i in range(4))
+            logger.info("Grab thread using DirectShow backend (%s)", codec)
         else:
             # Fallback to default backend with message pump
             logger.warning("DirectShow failed on grab thread, trying default backend")
