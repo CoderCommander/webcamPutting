@@ -70,7 +70,6 @@ class MainWindow(ctk.CTk):
         self.minsize(700, 400)
         self.resizable(True, True)
         self.after(100, lambda: self.state("zoomed"))  # Start maximized
-        self.attributes("-topmost", True)  # Prevent camera throttling when backgrounded
         self.configure(fg_color=theme.BG_ROOT)
 
         self._config = config

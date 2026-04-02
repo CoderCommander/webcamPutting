@@ -56,6 +56,8 @@ class Camera:
         self._frame_width: int = 0
         self._frame_height: int = 0
         self._status_message: str = "Not started"
+        self._rotation_matrix: np.ndarray | None = None  # Cached for per-frame rotation
+        self._rotation_cached_for: float = 0.0  # Track which rotation value is cached
 
         # Threaded capture: a dedicated thread reads frames continuously
         # so camera.read() never blocks on the DirectShow/MSMF pipeline
@@ -440,7 +442,7 @@ class Camera:
                     self._frame_new = True
                 grab_count += 1
                 now = time.perf_counter()
-                if now - grab_start >= 5.0:
+                if now - grab_start >= 30.0:
                     grab_fps = grab_count / (now - grab_start)
                     logger.info("Grab thread FPS: %.1f", grab_fps)
                     grab_count = 0
@@ -492,11 +494,16 @@ class Camera:
         if self._settings.flip_image and not self._video_file:
             frame = cv2.flip(frame, 1)
 
-        # Apply rotation correction
+        # Apply rotation correction (cached matrix to avoid per-frame recompute)
         if self._settings.rotation != 0.0:
-            h, w = frame.shape[:2]
-            M = cv2.getRotationMatrix2D((w / 2, h / 2), self._settings.rotation, 1.0)
-            frame = cv2.warpAffine(frame, M, (w, h))
+            if (self._rotation_matrix is None
+                    or self._rotation_cached_for != self._settings.rotation):
+                h, w = frame.shape[:2]
+                self._rotation_matrix = cv2.getRotationMatrix2D(
+                    (w / 2, h / 2), self._settings.rotation, 1.0,
+                )
+                self._rotation_cached_for = self._settings.rotation
+            frame = cv2.warpAffine(frame, self._rotation_matrix, (frame.shape[1], frame.shape[0]))
 
         return frame
 

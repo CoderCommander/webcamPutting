@@ -1271,20 +1271,6 @@ class PuttingApp:
 
         is_putter = club_upper in ("PT", "PUTTER")
 
-        # Window z-order: topmost during putting to prevent camera throttling,
-        # normal when not putting so GSPro can be in front.
-        # Must schedule on main thread — tkinter is not thread-safe.
-        if self._window:
-            try:
-                if is_putter:
-                    self._window.after(0, self._window.attributes, "-topmost", True)
-                    logger.info("Window set to topmost (putter selected)")
-                else:
-                    self._window.after(0, self._window.attributes, "-topmost", False)
-                    logger.info("Window set to normal z-order (%s)", club)
-            except RuntimeError:
-                pass
-
         # Pause/resume Mevo OCR — no point running Tesseract during putting
         if self._mevo_detector:
             if is_putter and not self._mevo_paused:
