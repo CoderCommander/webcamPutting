@@ -349,8 +349,14 @@ class PuttingApp:
                 self._window.set_angle_cal_state(False)
             logger.info("Angle calibration cancelled")
         else:
-            # Capture current frame as background (line should NOT be projected yet)
-            frame = self._camera.read()
+            # Capture current frame as background (line should NOT be projected yet).
+            # Retry briefly — grab thread may not have a new frame ready yet.
+            frame = None
+            for _ in range(50):
+                frame = self._camera.read()
+                if frame is not None:
+                    break
+                time.sleep(0.02)
             if frame is not None:
                 bg = resize_with_aspect_ratio(frame, width=640)
                 self._angle_cal_bg = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
