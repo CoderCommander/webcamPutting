@@ -340,21 +340,42 @@ else:
                 )
                 return True
 
-            # Fallback: focus the window, simulate keypress via keybd_event, restore
+            # Fallback: focus the window, simulate keypress via keybd_event, restore.
+            # Windows restricts SetForegroundWindow — must attach to the
+            # foreground thread first to be allowed to steal focus.
             import time
 
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
             KEYEVENTF_KEYUP = 0x0002
 
             prev_hwnd = user32.GetForegroundWindow()
-            user32.SetForegroundWindow(self._hwnd)
-            time.sleep(0.1)  # Let Electron fully activate
+            fg_tid = user32.GetWindowThreadProcessId(prev_hwnd, None)
+            our_tid = kernel32.GetCurrentThreadId()
 
-            # keybd_event goes through the OS input queue — Electron always sees it
-            user32.keybd_event(vk, scan, 0, 0)  # Key down
-            time.sleep(0.05)
-            user32.keybd_event(vk, scan, KEYEVENTF_KEYUP, 0)  # Key up
-            time.sleep(0.05)
+            # Attach to foreground thread so SetForegroundWindow is allowed
+            attached = False
+            if fg_tid != our_tid:
+                attached = bool(user32.AttachThreadInput(our_tid, fg_tid, True))
 
+            try:
+                result = user32.SetForegroundWindow(self._hwnd)
+                if not result:
+                    logger.warning(
+                        "SetForegroundWindow failed for '%s' — key '%s' may not register",
+                        self._title, char,
+                    )
+                time.sleep(0.1)  # Let Electron fully activate
+
+                # keybd_event goes through the OS input queue
+                user32.keybd_event(vk, scan, 0, 0)  # Key down
+                time.sleep(0.05)
+                user32.keybd_event(vk, scan, KEYEVENTF_KEYUP, 0)  # Key up
+                time.sleep(0.05)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(our_tid, fg_tid, False)
+
+            # Restore previous foreground window
             if prev_hwnd and prev_hwnd != self._hwnd:
                 user32.SetForegroundWindow(prev_hwnd)
 
