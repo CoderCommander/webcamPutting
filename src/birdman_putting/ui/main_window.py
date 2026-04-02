@@ -254,12 +254,12 @@ class MainWindow(ctk.CTk):
         row1.pack(fill="x", padx=8, pady=(6, 2))
 
         self._fps_label = ctk.CTkLabel(
-            row1, text="FPS: --", font=theme.font(12), text_color=theme.TEXT_PRIMARY,
+            row1, text="FPS: --", font=theme.font(20, "bold"), text_color=theme.ACCENT_GREEN,
         )
         self._fps_label.pack(side="left")
 
         self._state_label = ctk.CTkLabel(
-            row1, text="idle", font=theme.font(12), text_color=theme.STATUS_IDLE,
+            row1, text="idle", font=theme.font(14), text_color=theme.STATUS_IDLE,
         )
         self._state_label.pack(side="right")
 
