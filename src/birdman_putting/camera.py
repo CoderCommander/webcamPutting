@@ -378,12 +378,13 @@ class Camera:
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        # Always use DirectShow on the grab thread for background resilience.
-        # Don't force MJPEG — DirectShow codec negotiation on some cameras
-        # (e.g. Logitech C922) caps MJPEG at 30fps. Let DirectShow pick
-        # the best codec for the requested resolution and FPS.
+        # Always use DirectShow + MJPEG on the grab thread.
+        # The C922 needs MJPEG for 60fps (YUY2 caps at 30fps).
+        # DirectShow requires: codec → resolution → FPS (this order matters).
+        fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
         cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
         if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FOURCC, fourcc)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
             cap.set(cv2.CAP_PROP_FPS, target_fps)
