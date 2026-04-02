@@ -153,10 +153,10 @@ class PuttingApp:
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-            ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+            HIGH_PRIORITY_CLASS = 0x00000080
             handle = kernel32.GetCurrentProcess()
-            kernel32.SetPriorityClass(handle, ABOVE_NORMAL_PRIORITY_CLASS)
-            logger.info("Process priority set to ABOVE_NORMAL")
+            kernel32.SetPriorityClass(handle, HIGH_PRIORITY_CLASS)
+            logger.info("Process priority set to HIGH")
         except Exception as e:
             logger.debug("Could not set process priority: %s", e)
 
@@ -471,6 +471,20 @@ class PuttingApp:
 
     def _processing_loop(self) -> None:
         """Background thread: capture → detect → track → annotate → queue."""
+        # Raise this thread's priority so camera capture isn't starved
+        # when Birdman is in the background
+        import sys
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+                THREAD_PRIORITY_HIGHEST = 2
+                handle = kernel32.GetCurrentThread()
+                kernel32.SetThreadPriority(handle, THREAD_PRIORITY_HIGHEST)
+                logger.info("Processing thread priority set to HIGHEST")
+            except Exception:
+                pass
+
         zone = self.config.detection_zone
         last_ui_update = 0.0
 
