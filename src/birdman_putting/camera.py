@@ -322,24 +322,34 @@ class Camera:
         return True
 
     def start_grab_thread(self) -> None:
-        """Start a dedicated thread that continuously grabs frames.
+        """Start a dedicated thread that owns the camera and grabs frames.
 
-        This decouples camera I/O from the processing loop so that
-        Windows DirectShow/MSMF throttling of background apps doesn't
-        block frame delivery.
+        The camera is reopened on the grab thread so that DirectShow/MSMF
+        COM objects belong to that thread's apartment. This prevents
+        Windows from throttling capture when the main window loses focus.
         """
         if self._video_file or self._grab_running:
             return
+
+        # Release the camera from the main thread — it will be reopened
+        # on the grab thread with its own COM apartment
         self._grab_running = True
+        self._grab_ready = threading.Event()
         self._grab_thread = threading.Thread(
             target=self._grab_loop, daemon=True, name="camera-grab",
         )
         self._grab_thread.start()
+        # Wait for the grab thread to reopen the camera
+        self._grab_ready.wait(timeout=5)
         logger.info("Camera grab thread started")
 
     def _grab_loop(self) -> None:
-        """Continuously read frames from the camera into _latest_frame."""
+        """Continuously read frames from the camera into _latest_frame.
+
+        Opens its own VideoCapture so COM objects are on this thread.
+        """
         import sys
+
         # Set this thread to highest priority for uninterrupted capture
         if sys.platform == "win32":
             try:
@@ -348,8 +358,51 @@ class Camera:
                 kernel32.SetThreadPriority(
                     kernel32.GetCurrentThread(), 2,  # THREAD_PRIORITY_HIGHEST
                 )
+                # Initialize COM on this thread (MTA for DirectShow)
+                import ctypes.wintypes  # noqa: F401
+                ctypes.windll.ole32.CoInitializeEx(None, 0)  # type: ignore[attr-defined]
             except Exception:
                 pass
+
+        # Reopen the camera on this thread
+        s = self._settings
+        old_cap = self._cap
+        if s.mjpeg:
+            cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+            if cap.isOpened():
+                res_w = s.width if s.width > 0 else 1280
+                res_h = s.height if s.height > 0 else 720
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+                fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
+                cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+                target_fps = s.fps_override if s.fps_override > 0 else 60
+                cap.set(cv2.CAP_PROP_FPS, target_fps)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        else:
+            cap = cv2.VideoCapture(s.webcam_index)
+            if cap.isOpened():
+                res_w = s.width if s.width > 0 else 1280
+                res_h = s.height if s.height > 0 else 720
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+                target_fps = s.fps_override if s.fps_override > 0 else 60
+                cap.set(cv2.CAP_PROP_FPS, target_fps)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        if not cap.isOpened():
+            logger.error("Grab thread failed to reopen camera")
+            self._grab_ready.set()
+            self._grab_running = False
+            return
+
+        # Release old capture from main thread and use new one
+        if old_cap is not None:
+            old_cap.release()
+        self._cap = cap
+        self._apply_camera_properties()
+        logger.info("Camera reopened on grab thread")
+        self._grab_ready.set()
 
         while self._grab_running and self._cap is not None:
             ret, frame = self._cap.read()
