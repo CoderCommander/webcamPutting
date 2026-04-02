@@ -242,6 +242,19 @@ With `auto_scene_switch = true`:
 
 ## Windows Display Settings
 
+### Disable Background Power Throttling (Required)
+
+Windows 11 throttles background applications, which causes the webcam to drop from 60fps to 2fps when you click on GSPro or any other window. **This must be disabled for Birdman to work properly.**
+
+1. Press **Win + R**, type `regedit`, press Enter
+2. Navigate to: `HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power`
+3. Right-click the **Power** key → **New > Key** → name it `PowerThrottling`
+4. Right-click the **PowerThrottling** key → **New > DWORD (32-bit) Value** → name it `PowerThrottlingOff`
+5. Double-click `PowerThrottlingOff` and set the value to `1`
+6. **Restart your computer**
+
+This disables power throttling for all background apps, ensuring the webcam maintains full frame rate when Birdman is behind GSPro.
+
 ### Taskbar on Laptop Only
 
 When Birdman switches FS Golf PC modes (chipping/full swing), a brief window focus flash occurs. To prevent the taskbar from appearing on projectors:
