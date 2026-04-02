@@ -289,6 +289,11 @@ class MainWindow(ctk.CTk):
         )
         scroll.pack(fill="both", expand=True, padx=4, pady=4)
 
+        # Constrain content width so entries don't stretch across full screen
+        content = ctk.CTkFrame(scroll, fg_color="transparent", width=350)
+        content.pack(anchor="w")
+        scroll = content  # Redirect all widgets to constrained container
+
         # --- CAMERA ---
         self._section_label(scroll, "CAMERA")
 
@@ -337,7 +342,7 @@ class MainWindow(ctk.CTk):
 
         # Roll direction dropdown
         dir_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        dir_frame.pack(fill="x", pady=1)
+        dir_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
             dir_frame, text="Roll Direction", width=110, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
@@ -375,7 +380,7 @@ class MainWindow(ctk.CTk):
         ]
 
         zone_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        zone_color_frame.pack(fill="x", pady=1)
+        zone_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
             zone_color_frame, text="Zone Color", width=110, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
@@ -394,7 +399,7 @@ class MainWindow(ctk.CTk):
         ).pack(side="left", padx=2)
 
         gw_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        gw_color_frame.pack(fill="x", pady=1)
+        gw_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
             gw_color_frame, text="Gateway Color", width=110, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
@@ -578,7 +583,7 @@ class MainWindow(ctk.CTk):
         ]
 
         trail_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        trail_color_frame.pack(fill="x", pady=1)
+        trail_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
             trail_color_frame, text="Trail Color", width=110, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
@@ -597,7 +602,7 @@ class MainWindow(ctk.CTk):
         ).pack(side="left", padx=2)
 
         active_color_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        active_color_frame.pack(fill="x", pady=1)
+        active_color_frame.pack(anchor="w", pady=1)
         ctk.CTkLabel(
             active_color_frame, text="Active Color", width=110, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
@@ -832,44 +837,41 @@ class MainWindow(ctk.CTk):
         initial: int,
         setter: Callable[[int], None],
         live: bool = True,
-    ) -> ctk.CTkSlider:
-        """Add a slider that applies changes in real-time."""
+    ) -> ctk.CTkEntry:
+        """Add a labeled numeric entry field with real-time apply."""
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", pady=1)
+        frame.pack(anchor="w", pady=1)
 
         ctk.CTkLabel(
-            frame, text=label, width=110, anchor="w",
+            frame, text=label, width=160, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
-        value_label = ctk.CTkLabel(
-            frame, text=str(initial), width=30,
-            font=theme.font(11), text_color=theme.TEXT_PRIMARY,
+        entry = ctk.CTkEntry(
+            frame, width=60, font=theme.font(11),
+            fg_color=theme.BG_INPUT, text_color=theme.TEXT_PRIMARY,
+            border_color=theme.BORDER_SUBTLE,
+            corner_radius=theme.CORNER_RADIUS_SM,
         )
-        value_label.pack(side="right")
+        entry.insert(0, str(initial))
+        entry.pack(side="left", padx=4)
 
-        def on_change(v: float) -> None:
-            val = int(v)
-            value_label.configure(text=str(val))
-            setter(val)
-            if live:
-                self._on_setting_changed()
-            else:
-                self._schedule_save()
+        def on_apply(_event: Any = None) -> None:
+            try:
+                val = int(entry.get().strip())
+                val = max(from_, min(to, val))
+                setter(val)
+                if live:
+                    self._on_setting_changed()
+                else:
+                    self._schedule_save()
+            except ValueError:
+                pass
 
-        slider = ctk.CTkSlider(
-            frame, from_=from_, to=to,
-            number_of_steps=max(1, abs(to - from_)),
-            width=90, command=on_change,
-            fg_color=theme.SLIDER_BG,
-            progress_color=theme.SLIDER_PROGRESS,
-            button_color=theme.ACCENT_BLUE,
-            button_hover_color=theme.ACCENT_BLUE_HOVER,
-        )
-        slider.set(initial)
-        slider.pack(side="right", padx=2)
+        entry.bind("<Return>", on_apply)
+        entry.bind("<FocusOut>", on_apply)
 
-        return slider
+        return entry
 
     def _add_live_checkbox(
         self,
@@ -907,10 +909,10 @@ class MainWindow(ctk.CTk):
     ) -> ctk.CTkEntry:
         """Add a labeled text entry."""
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", pady=1)
+        frame.pack(anchor="w", pady=1)
 
         ctk.CTkLabel(
-            frame, text=label, width=70, anchor="w",
+            frame, text=label, width=100, anchor="w",
             font=theme.font(11), text_color=theme.TEXT_SECONDARY,
         ).pack(side="left")
 
