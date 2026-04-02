@@ -492,21 +492,25 @@ class PuttingApp:
         last_ui_update = 0.0
 
         while self._running:
+            # Read frame
+            frame = self._camera.read()
+            if frame is None:
+                if self._camera._grab_running:
+                    # Threaded grab: no new frame yet, wait briefly and retry
+                    time.sleep(0.001)
+                    continue
+                logger.warning("No frame received, stopping")
+                self._running = False
+                break
+
             frame_time = time.perf_counter()
             self._fps_queue.append(frame_time)
 
-            # Calculate FPS
+            # Calculate FPS (only counts actual new frames)
             if len(self._fps_queue) >= 2:
                 elapsed = self._fps_queue[-1] - self._fps_queue[0]
                 if elapsed > 0:
                     self._actual_fps = (len(self._fps_queue) - 1) / elapsed
-
-            # Read frame (always read to drain camera buffer)
-            frame = self._camera.read()
-            if frame is None:
-                logger.warning("No frame received, stopping")
-                self._running = False
-                break
 
             # FPS watchdog: auto-reset if FPS stays critically low
             if self._actual_fps > 0 and self._actual_fps < 10:

@@ -62,6 +62,7 @@ class Camera:
         self._grab_thread: threading.Thread | None = None
         self._grab_running = False
         self._latest_frame: np.ndarray | None = None
+        self._frame_new = False  # True when grab thread has a new frame
         self._frame_lock = threading.Lock()
 
     @property
@@ -355,6 +356,7 @@ class Camera:
             if ret and frame is not None:
                 with self._frame_lock:
                     self._latest_frame = frame
+                    self._frame_new = True
 
     def stop_grab_thread(self) -> None:
         """Stop the grab thread."""
@@ -378,7 +380,10 @@ class Camera:
         # Use threaded grab if available
         if self._grab_running:
             with self._frame_lock:
+                if not self._frame_new:
+                    return None  # No new frame since last read
                 frame = self._latest_frame
+                self._frame_new = False
             if frame is None:
                 return None
         else:
