@@ -79,6 +79,26 @@ class PuttingApp:
             min_circularity=config.ball.min_circularity,
             morph_iterations=config.ball.morph_iterations,
         )
+
+        # GPU acceleration: replace detector with CUDA version if enabled
+        if config.gpu.enabled:
+            try:
+                from birdman_putting.gpu import init_cuda
+
+                if init_cuda(config.gpu.device_name):
+                    from birdman_putting.cuda_detection import CudaBallDetector
+
+                    self._detector = CudaBallDetector(
+                        hsv_range=self._hsv_range,
+                        min_radius=config.ball.min_radius,
+                        min_circularity=config.ball.min_circularity,
+                        morph_iterations=config.ball.morph_iterations,
+                    )
+                    logger.info("GPU-accelerated detection enabled")
+                else:
+                    logger.warning("CUDA init failed, using CPU detection")
+            except Exception as e:
+                logger.warning("GPU detection unavailable: %s", e)
         self._tracker = BallTracker(
             zone=config.detection_zone,
             ball_settings=config.ball,

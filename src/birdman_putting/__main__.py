@@ -68,6 +68,10 @@ def main() -> None:
         help="Enable OBS WebSocket integration for shot data overlay",
     )
     parser.add_argument(
+        "--gpu", action="store_true",
+        help="Enable CUDA GPU acceleration for ball detection",
+    )
+    parser.add_argument(
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)",
@@ -117,6 +121,9 @@ def main() -> None:
 
     if args.obs:
         config.obs.enabled = True
+
+    if args.gpu:
+        config.gpu.enabled = True
 
     # Handle calibration mode
     if args.calibrate_mevo:

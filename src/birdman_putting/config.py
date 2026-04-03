@@ -168,6 +168,14 @@ class OverlaySettings:
 
 
 @dataclass
+class GpuSettings:
+    """CUDA GPU acceleration settings."""
+
+    enabled: bool = False  # Enable GPU-accelerated ball detection
+    device_name: str = "A3000"  # Substring match for target CUDA device
+
+
+@dataclass
 class AppConfig:
     """Top-level application configuration."""
 
@@ -180,6 +188,7 @@ class AppConfig:
     mevo: MevoSettings = field(default_factory=MevoSettings)
     obs: OBSSettings = field(default_factory=OBSSettings)
     overlay: OverlaySettings = field(default_factory=OverlaySettings)
+    gpu: GpuSettings = field(default_factory=GpuSettings)
 
 
 def _dataclass_to_dict(obj: Any) -> dict[str, Any]:
