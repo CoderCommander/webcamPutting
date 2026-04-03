@@ -378,14 +378,15 @@ class Camera:
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        # Use DirectShow — it's throttle-resistant when the app is backgrounded.
-        # MSMF supports 60fps but drops to 2fps when another window has focus
-        # despite the message pump. DirectShow delivers stable 50fps regardless.
-        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-        backend = "DirectShow"
+        # Use MSMF (60fps on Brio 501) with message pump to prevent throttling.
+        # MSMF + message pump holds 59-60fps in most cases, even backgrounded.
+        # Occasional intermittent drops are handled by the FPS watchdog.
+        # DirectShow fallback only if MSMF fails (caps at 30fps on Brio 501).
+        cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
+        backend = "MSMF"
         if not cap.isOpened():
-            cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
-            backend = "MSMF"
+            cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+            backend = "DirectShow"
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
