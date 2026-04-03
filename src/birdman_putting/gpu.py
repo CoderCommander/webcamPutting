@@ -1,44 +1,45 @@
-"""CUDA GPU initialization and device selection for OpenCV acceleration."""
+"""CUDA GPU initialization and device selection via CuPy."""
 
 from __future__ import annotations
 
 import logging
 
-import cv2
-
 logger = logging.getLogger(__name__)
 
 
 def is_cuda_available() -> bool:
-    """Check if OpenCV was built with CUDA and a GPU is available."""
+    """Check if CuPy is installed and a CUDA GPU is available."""
     try:
-        count = cv2.cuda.getCudaEnabledDeviceCount()
-        return count > 0
-    except (cv2.error, AttributeError):
+        import cupy as cp
+
+        return cp.cuda.runtime.getDeviceCount() > 0
+    except Exception:
         return False
 
 
 def get_device_count() -> int:
     """Return the number of CUDA-enabled devices."""
     try:
-        return cv2.cuda.getCudaEnabledDeviceCount()
-    except (cv2.error, AttributeError):
+        import cupy as cp
+
+        return cp.cuda.runtime.getDeviceCount()
+    except Exception:
         return 0
 
 
 def get_device_name(index: int) -> str:
     """Get the name of a CUDA device by index."""
     try:
-        cv2.cuda.setDevice(index)
-        # cv2.cuda.DeviceInfo is not always available; fall back to printShortCudaDeviceInfo
-        info = cv2.cuda.DeviceInfo(index)
-        return info.name()
+        import cupy as cp
+
+        props = cp.cuda.runtime.getDeviceProperties(index)
+        return props["name"].decode() if isinstance(props["name"], bytes) else props["name"]
     except Exception:
         return f"device_{index}"
 
 
 def init_cuda(preferred_device: str = "A3000") -> bool:
-    """Initialize CUDA on the preferred GPU device.
+    """Initialize CuPy on the preferred GPU device.
 
     Enumerates all CUDA devices and selects one whose name contains
     ``preferred_device`` (case-insensitive substring match). This allows
@@ -52,7 +53,13 @@ def init_cuda(preferred_device: str = "A3000") -> bool:
         True if a matching device was found and selected.
     """
     if not is_cuda_available():
-        logger.warning("CUDA not available (OpenCV built without CUDA?)")
+        logger.warning("CUDA not available (CuPy not installed or no GPU?)")
+        return False
+
+    try:
+        import cupy as cp
+    except ImportError:
+        logger.warning("CuPy not installed — pip install cupy-cuda12x")
         return False
 
     count = get_device_count()
@@ -68,14 +75,14 @@ def init_cuda(preferred_device: str = "A3000") -> bool:
             selected_index = i
 
     if selected_index is not None:
-        cv2.cuda.setDevice(selected_index)
+        cp.cuda.Device(selected_index).use()
         name = get_device_name(selected_index)
         logger.info("Selected CUDA device %d: %s", selected_index, name)
         return True
 
     # No preferred match — use the first device as fallback
     if count > 0:
-        cv2.cuda.setDevice(0)
+        cp.cuda.Device(0).use()
         name = get_device_name(0)
         logger.warning(
             "No device matching '%s' found, using device 0: %s",

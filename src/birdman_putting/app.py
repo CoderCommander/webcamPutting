@@ -86,9 +86,9 @@ class PuttingApp:
                 from birdman_putting.gpu import init_cuda
 
                 if init_cuda(config.gpu.device_name):
-                    from birdman_putting.cuda_detection import CudaBallDetector
+                    from birdman_putting.cuda_detection import CupyBallDetector
 
-                    self._detector = CudaBallDetector(
+                    self._detector = CupyBallDetector(
                         hsv_range=self._hsv_range,
                         min_radius=config.ball.min_radius,
                         min_circularity=config.ball.min_circularity,
