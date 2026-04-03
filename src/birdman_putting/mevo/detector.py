@@ -23,13 +23,13 @@ _VALID_RANGES: dict[str, tuple[float, float]] = {
     "spin_axis": (-90.0, 90.0),        # degrees
     "club_speed": (0.0, 200.0),        # mph
     "smash_factor": (0.5, 2.0),
-    "carry_distance": (0.0, 400.0),    # yards
-    "total_distance": (0.0, 450.0),    # yards
-    "apex_height": (0.0, 200.0),       # yards
+    "carry_distance": (0.0, 500.0),    # yards
+    "total_distance": (0.0, 550.0),    # yards
+    "apex_height": (0.0, 250.0),       # yards/feet
     "flight_time": (0.0, 15.0),        # seconds
     "descent_angle": (0.0, 90.0),      # degrees
     "curve": (-100.0, 100.0),          # yards
-    "roll_distance": (0.0, 100.0),     # yards
+    "roll_distance": (0.0, 200.0),     # yards
     "aoa": (-20.0, 20.0),             # degrees (angle of attack)
     "club_path": (-30.0, 30.0),       # degrees
     "dynamic_loft": (0.0, 70.0),      # degrees
