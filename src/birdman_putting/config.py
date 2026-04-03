@@ -33,7 +33,7 @@ class DetectionZone:
     start_x2: int = 180
     y1: int = 180
     y2: int = 450
-    gateway_width: int = 15  # Width of the detection gateway past start_x2
+    gateway_width: int = 30  # Width of the detection gateway past start_x2
     direction: str = "left_to_right"  # "left_to_right" or "right_to_left"
     zone_color: str = "yellow"  # Start zone outline/fill color name
     gateway_color: str = "red"  # Gateway outline color name (when idle)
@@ -92,10 +92,10 @@ class ShotSettings:
 
     min_speed_mph: float = 0.5
     max_speed_mph: float = 25.0
-    min_time_seconds: float = 0.5
+    min_time_seconds: float = 0.3
     max_hla_degrees: float = 40.0
     hla_consistency_threshold: float = 30.0
-    min_exit_distance_px: int = 50  # Minimum pixel distance beyond gateway to count as exit
+    min_exit_distance_px: int = 30  # Minimum pixel distance beyond gateway to count as exit
     extended_tracking: bool = False  # Track ball across full frame after start
     stimpmeter: float = 10.0  # Green speed rating for putt distance estimation
 

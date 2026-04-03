@@ -658,8 +658,8 @@ class PuttingApp:
                 ShotState.STARTED, ShotState.ENTERED,
             )
             if ball_in_motion:
-                det_y1 = max(0, zone.y1 - 50)
-                det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+                det_y1 = max(0, zone.y1 - 80)
+                det_y2 = min(display_frame.shape[0], zone.y2 + 80)
                 saved_circ = self._detector.min_circularity
                 self._detector.min_circularity = 0.0
             else:
@@ -1115,8 +1115,8 @@ class PuttingApp:
                 ShotState.STARTED, ShotState.ENTERED,
             )
             if ball_in_motion:
-                det_y1 = max(0, zone.y1 - 50)
-                det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+                det_y1 = max(0, zone.y1 - 80)
+                det_y2 = min(display_frame.shape[0], zone.y2 + 80)
                 saved_circ = self._detector.min_circularity
                 self._detector.min_circularity = 0.0
             else:
