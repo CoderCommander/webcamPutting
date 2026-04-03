@@ -144,10 +144,12 @@ class CupyBallDetector(BallDetector):
             & (v >= lo[2]) & (v <= hi[2])
         )
 
-        # Morphological operations
+        # Morphological operations (loop manually — CuPy doesn't support
+        # multi-iteration dilation without brute_force)
         if self.morph_iterations > 0 and cp.any(mask):
-            mask = binary_erosion(mask, iterations=1)
-            mask = binary_dilation(mask, iterations=self.morph_iterations)
+            mask = binary_erosion(mask, brute_force=True)
+            for _ in range(self.morph_iterations):
+                mask = binary_dilation(mask, brute_force=True)
 
         # Download to CPU as uint8 (0/255)
         return (mask.astype(cp.uint8) * 255).get()

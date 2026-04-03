@@ -78,11 +78,14 @@ def main() -> None:
         from birdman_putting.cuda_detection import CupyBallDetector
         from birdman_putting.gpu import get_device_name, init_cuda
 
-        if not init_cuda():
+        if not init_cuda("RTX 3000"):
             print("\nCUDA init failed — cannot benchmark GPU")
             return
 
-        print(f"\nGPU: {get_device_name(0)}")
+        import cupy as _cp
+
+        dev_id = _cp.cuda.Device().id
+        print(f"\nGPU: {get_device_name(dev_id)} (device {dev_id})")
 
         gpu_detector = CupyBallDetector(hsv_range=hsv_range)
         gpu_times = benchmark_detector(gpu_detector, frame, label="CuPy GPU (CupyBallDetector)")
