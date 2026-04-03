@@ -172,7 +172,7 @@ class GpuSettings:
     """CUDA GPU acceleration settings."""
 
     enabled: bool = False  # Enable GPU-accelerated ball detection
-    device_name: str = "A3000"  # Substring match for target CUDA device
+    device_name: str = "RTX 3000"  # Substring match for target CUDA device
 
 
 @dataclass
