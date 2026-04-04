@@ -358,28 +358,37 @@ class Camera:
         logger.info("Camera grab thread started")
 
     def start_async_open(self, on_ready: Callable[[], None] | None = None) -> None:
-        """Start opening the camera on a background grab thread (non-blocking).
+        """Open the camera on a background thread, then start the grab thread.
 
-        Opens the camera directly on the grab thread to avoid the slow
-        double-open (main thread + grab thread reopen). The UI remains
-        responsive while the camera enumerates (~5-40s on Windows).
+        Runs the full open_webcam() sequence (DirectShow warmup + default
+        backend) on a background thread so the UI stays responsive. Once
+        the camera is open, starts the grab thread for continuous capture.
 
         Args:
-            on_ready: Optional callback invoked (from the grab thread) once
-                the camera is open and capturing. The caller should use
-                window.after() to schedule UI updates from this callback.
+            on_ready: Optional callback invoked once the camera is open and
+                the grab thread is capturing. Called from a background thread;
+                use window.after() to schedule UI updates from this callback.
         """
         if self._video_file or self._grab_running:
             return
 
         self._status_message = "Connecting to camera..."
         self._on_ready_callback = on_ready
-        self._grab_running = True
-        self._grab_ready = threading.Event()
-        self._grab_thread = threading.Thread(
-            target=self._grab_loop, daemon=True, name="camera-grab",
+
+        def _open_and_start() -> None:
+            if self.open_webcam():
+                self.start_grab_thread()
+                if self._on_ready_callback:
+                    self._on_ready_callback()
+            else:
+                logger.error("Background camera open failed")
+                if self._on_ready_callback:
+                    self._on_ready_callback()
+
+        thread = threading.Thread(
+            target=_open_and_start, daemon=True, name="camera-open",
         )
-        self._grab_thread.start()
+        thread.start()
 
     def _grab_loop(self) -> None:
         """Continuously read frames from the camera into _latest_frame.
@@ -406,33 +415,25 @@ class Camera:
         # Reopen the camera on this thread so DirectShow/MSMF COM objects
         # belong to this thread's apartment, preventing Windows from
         # throttling capture when the main window loses focus.
-        #
-        # Strategy: use the default backend (cv2.VideoCapture(index)) which
-        # lets OpenCV perform full device initialization through all available
-        # backends. The explicit two-argument form (index, CAP_MSMF) uses a
-        # shallower code path that fails on some systems.
-        #
-        # The default backend takes ~30-40s on Windows (device enumeration)
-        # but this is non-blocking since the grab thread runs in the background.
         s = self._settings
         old_cap = self._cap
         res_w = s.width if s.width > 0 else 1280
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        logger.info("Opening camera %d (this may take 30-40s)...", s.webcam_index)
-        cap = cv2.VideoCapture(s.webcam_index)
-        backend = "default"
+        # Try DirectShow first (hardware MJPEG on supported cameras),
+        # fall back to MSMF. open_webcam() already ran on the background
+        # thread, so the camera subsystem is initialized.
+        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+        backend = "DirectShow"
         if not cap.isOpened():
-            # Fallback: try explicit MSMF (different init path)
             cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
             backend = "MSMF"
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-            # Request MJPEG codec only on DirectShow — offloads decoding to
-            # camera hardware. On MSMF/default, setting MJPEG can cause the
-            # camera to negotiate a 30fps mode instead of 60fps.
+            # Request MJPEG codec only on DirectShow — on MSMF it can
+            # cause the camera to negotiate 30fps instead of 60fps.
             if s.mjpeg and backend == "DirectShow":
                 mjpg_fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
                 cap.set(cv2.CAP_PROP_FOURCC, mjpg_fourcc)
@@ -456,15 +457,8 @@ class Camera:
             old_cap.release()
         self._cap = cap
         self._apply_camera_properties()
-        self._read_properties()
-        self._status_message = (
-            f"Connected ({self._frame_width}x{self._frame_height}"
-            f" @ {self._fps:.0f}fps)"
-        )
-        logger.info("Camera ready: %s", self._status_message)
+        logger.info("Camera reopened on grab thread")
         self._grab_ready.set()
-        if getattr(self, "_on_ready_callback", None):
-            self._on_ready_callback()  # type: ignore[misc]
 
         # Set up message pump for MSMF fallback (DirectShow doesn't need it)
         _pump_messages = None

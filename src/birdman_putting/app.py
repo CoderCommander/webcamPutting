@@ -246,7 +246,14 @@ class PuttingApp:
             self._camera.start_async_open(on_ready=self._on_camera_ready)
 
     def _on_camera_ready(self) -> None:
-        """Called from the grab thread when the camera is open and capturing."""
+        """Called from background thread when camera open attempt completes."""
+        if not self._camera.is_open:
+            logger.error("Failed to open webcam")
+            if self._window:
+                self._window.after(0, lambda: self._window.update_camera_status(
+                    self._camera.status_message, "error"
+                ))
+            return
         if self._window:
             # Schedule UI update and remaining init on the main thread
             self._window.after(0, self._finish_gui_start)
