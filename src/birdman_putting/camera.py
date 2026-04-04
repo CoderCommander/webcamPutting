@@ -34,10 +34,10 @@ _CAMERA_PROPS = {
     "autofocus": cv2.CAP_PROP_AUTOFOCUS,
 }
 
-_WARMUP_FRAMES = 5            # frames to discard before brightness checking
-_WARMUP_DELAY = 0.1           # seconds between warmup reads
-_FRAME_VALIDATE_ATTEMPTS = 3  # frames to check after warmup
-_FRAME_VALIDATE_DELAY = 0.1   # seconds between validation reads
+_WARMUP_FRAMES = 30           # frames to discard before brightness checking (~2s at 30fps)
+_WARMUP_DELAY = 0.05          # seconds between warmup reads
+_FRAME_VALIDATE_ATTEMPTS = 10 # frames to check after warmup
+_FRAME_VALIDATE_DELAY = 0.3   # seconds between validation reads (3s total window)
 _BLACK_FRAME_THRESHOLD = 3.0  # mean brightness below this = black frame
 
 
