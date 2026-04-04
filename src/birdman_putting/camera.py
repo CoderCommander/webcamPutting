@@ -376,6 +376,17 @@ class Camera:
         self._on_ready_callback = on_ready
 
         def _open_and_start() -> None:
+            import sys
+            # Initialize COM on this thread — DirectShow and MSMF both
+            # require COM. Without it, VideoCapture silently skips these
+            # backends and only tries FFMPEG/obsensor (which fail).
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    ctypes.windll.ole32.CoInitializeEx(None, 0)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+
             if self.open_webcam():
                 self.start_grab_thread()
                 if self._on_ready_callback:
