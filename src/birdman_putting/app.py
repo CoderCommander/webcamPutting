@@ -238,7 +238,10 @@ class PuttingApp:
                     self._window.update_camera_status("Failed to open video", "error")
                 return
         else:
-            if not self._camera.open_webcam():
+            # Open the camera directly on the grab thread to avoid the slow
+            # double-open (main thread open + grab thread reopen). This cuts
+            # ~30s of redundant DirectShow/MSMF enumeration at startup.
+            if not self._camera.open_on_grab_thread():
                 logger.error("Failed to open webcam")
                 if self._window:
                     self._window.update_camera_status(
@@ -249,9 +252,6 @@ class PuttingApp:
                 self._window.update_camera_status(
                     self._camera.status_message, "ok"
                 )
-
-        # Start threaded camera capture (decoupled from tkinter event loop)
-        self._camera.start_grab_thread()
 
         # Connect to GSPro
         connected = self._gspro.connect()

@@ -345,6 +345,42 @@ class Camera:
         self._grab_ready.wait(timeout=5)
         logger.info("Camera grab thread started")
 
+    def open_on_grab_thread(self) -> bool:
+        """Open the camera directly on a grab thread, skipping the main-thread open.
+
+        Combines open_webcam + start_grab_thread into a single operation so
+        the camera is only opened once (on the grab thread). This avoids the
+        slow DirectShow/MSMF enumeration happening twice — once on the main
+        thread and again when the grab thread reopens.
+
+        Returns:
+            True if camera opened successfully on the grab thread.
+        """
+        if self._video_file or self._grab_running:
+            return False
+
+        self._grab_running = True
+        self._grab_ready = threading.Event()
+        self._grab_thread = threading.Thread(
+            target=self._grab_loop, daemon=True, name="camera-grab",
+        )
+        self._grab_thread.start()
+        # Wait for the grab thread to open and validate the camera
+        self._grab_ready.wait(timeout=15)
+
+        if self._cap is not None and self._cap.isOpened():
+            self._read_properties()
+            self._status_message = (
+                f"Connected ({self._frame_width}x{self._frame_height}"
+                f" @ {self._fps:.0f}fps)"
+            )
+            logger.info("Camera ready: %s", self._status_message)
+            return True
+        else:
+            self._status_message = "Failed to open camera"
+            logger.error(self._status_message)
+            return False
+
     def _grab_loop(self) -> None:
         """Continuously read frames from the camera into _latest_frame.
 
