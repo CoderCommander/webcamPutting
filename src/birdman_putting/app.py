@@ -237,38 +237,25 @@ class PuttingApp:
                 if self._window:
                     self._window.update_camera_status("Failed to open video", "error")
                 return
-            self._finish_gui_start()
         else:
-            # Start camera open on background thread — UI stays responsive
-            # while Windows enumerates video devices (~5-40s).
+            # Open on the main thread (which has COM from tkinter).
+            # Skip the MJPEG/DirectShow attempt — it always fails on this
+            # system and takes ~30s. The grab thread will retry DirectShow
+            # with its own COM apartment.
+            if not self._camera.open_webcam(skip_mjpeg=True):
+                logger.error("Failed to open webcam")
+                if self._window:
+                    self._window.update_camera_status(
+                        self._camera.status_message, "error"
+                    )
+                return
             if self._window:
-                self._window.update_camera_status("Connecting to camera...", "warning")
-            self._camera.start_async_open(on_ready=self._on_camera_ready)
+                self._window.update_camera_status(
+                    self._camera.status_message, "ok"
+                )
 
-    def _on_camera_ready(self) -> None:
-        """Called from background thread when camera open attempt completes."""
-        if not self._camera.is_open:
-            logger.error("Failed to open webcam")
-            if self._window:
-                self._window.after(0, lambda: self._window.update_camera_status(
-                    self._camera.status_message, "error"
-                ))
-            return
-        if self._window:
-            # Schedule UI update and remaining init on the main thread
-            self._window.after(0, self._finish_gui_start)
-        else:
-            self._finish_gui_start()
-
-    def _finish_gui_start(self) -> None:
-        """Complete startup after camera is ready (or for video files)."""
-        if self._running:
-            return
-
-        if self._window:
-            self._window.update_camera_status(
-                self._camera.status_message, "ok"
-            )
+        # Start threaded camera capture (decoupled from tkinter event loop)
+        self._camera.start_grab_thread()
 
         # Connect to GSPro
         connected = self._gspro.connect()
