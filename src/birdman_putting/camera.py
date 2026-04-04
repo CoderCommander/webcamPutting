@@ -445,17 +445,14 @@ class Camera:
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        # Try the default backend first (matches what worked on the main thread).
-        # DirectShow produces black frames on some cameras (e.g. Kiyo Pro).
-        # Fall back to explicit MSMF, then DirectShow as last resort.
-        cap = cv2.VideoCapture(s.webcam_index)
-        backend = "default"
+        # Try DirectShow first for 60fps hardware capture. Camera properties
+        # are applied immediately after open (before any frame reads), which
+        # prevents the black-frame issue seen when properties were deferred.
+        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+        backend = "DirectShow"
         if not cap.isOpened():
-            cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
-            backend = "MSMF"
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-            backend = "DirectShow"
+            cap = cv2.VideoCapture(s.webcam_index)
+            backend = "default"
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
@@ -623,8 +620,15 @@ class Camera:
     def _collect_properties(self) -> list[tuple[int, float]]:
         """Collect all camera properties that should be applied."""
         props = []
+        auto_exp = getattr(self._settings, "auto_exposure", 0.0)
+        auto_focus = getattr(self._settings, "autofocus", 0.0)
         for field_name, prop_id in _CAMERA_PROPS.items():
             value = getattr(self._settings, field_name, 0.0)
+            # Skip manual exposure/focus when auto mode is on — they conflict
+            if field_name == "exposure" and auto_exp == 3.0:
+                continue
+            if field_name == "focus" and auto_focus == 1.0:
+                continue
             if value != 0.0 or field_name in self._ALWAYS_APPLY:
                 props.append((prop_id, value))
         return props
@@ -653,8 +657,15 @@ class Camera:
         if self._cap is None:
             return
 
+        auto_exp = getattr(self._settings, "auto_exposure", 0.0)
+        auto_focus = getattr(self._settings, "autofocus", 0.0)
         for field_name, prop_id in _CAMERA_PROPS.items():
             value = getattr(self._settings, field_name, 0.0)
+            # Skip manual exposure/focus when auto mode is on — they conflict
+            if field_name == "exposure" and auto_exp == 3.0:
+                continue
+            if field_name == "focus" and auto_focus == 1.0:
+                continue
             if value != 0.0 or field_name in self._ALWAYS_APPLY:
                 self._cap.set(prop_id, value)
                 logger.debug("Set camera %s = %s", field_name, value)
