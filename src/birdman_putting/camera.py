@@ -84,11 +84,16 @@ class Camera:
         """Human-readable status of the last open attempt."""
         return self._status_message
 
-    def open_webcam(self) -> bool:
+    def open_webcam(self, *, skip_mjpeg: bool = False) -> bool:
         """Open the webcam with configured settings and frame validation.
 
         Tries MJPEG/DirectShow first (if configured), validates that frames
         actually arrive, and falls back to the default backend on failure.
+
+        Args:
+            skip_mjpeg: Skip the MJPEG/DirectShow attempt. Use when the grab
+                thread will reopen with DirectShow anyway — avoids a slow
+                (~20-30s) DirectShow enumeration timeout on the main thread.
 
         Returns:
             True if camera opened successfully and producing frames.
@@ -97,7 +102,7 @@ class Camera:
         self._video_file = False
 
         # Try MJPEG/DirectShow first if configured
-        if s.mjpeg and self._try_open_mjpeg():
+        if s.mjpeg and not skip_mjpeg and self._try_open_mjpeg():
                 if self._validate_frames():
                     self._read_properties()
                     self._apply_camera_properties()
@@ -451,7 +456,6 @@ class Camera:
             old_cap.release()
         self._cap = cap
         self._apply_camera_properties()
-        self._read_properties()
         logger.info("Camera reopened on grab thread")
         self._grab_ready.set()
 
