@@ -367,27 +367,33 @@ class Camera:
             except Exception:
                 pass
 
-        # Reopen the camera on this thread using DirectShow.
-        # MSMF (default backend) requires a Windows message pump on the
-        # owning thread; without one it falls back to the main thread's
-        # pump, which tkinter throttles when backgrounded. DirectShow
-        # doesn't have this dependency.
+        # Reopen the camera on this thread with DirectShow + MJPEG.
+        # DirectShow avoids the MSMF message-pump throttling issue, and
+        # MJPEG uses the camera's hardware encoder for true 60fps without
+        # CPU overhead that would lag GSPro.
         s = self._settings
         old_cap = self._cap
         res_w = s.width if s.width > 0 else 1280
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        # Use DirectShow for stable 30fps that doesn't throttle when backgrounded
-        # and doesn't compete with GSPro for system resources.
+        # Use DirectShow + MJPEG for true 60fps via hardware encoder.
+        # DirectShow avoids the MSMF message-pump dependency that causes
+        # tkinter throttling when backgrounded.
         cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
         backend = "DirectShow"
         if not cap.isOpened():
             cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
             backend = "MSMF"
         if cap.isOpened():
+            # Resolution must be set before codec on DirectShow
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+            # Request MJPEG codec — offloads decoding to camera hardware,
+            # keeping CPU free for GSPro. Falls back to YUY2 if rejected.
+            if s.mjpeg:
+                mjpg_fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
+                cap.set(cv2.CAP_PROP_FOURCC, mjpg_fourcc)
             cap.set(cv2.CAP_PROP_FPS, target_fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             actual_fps = cap.get(cv2.CAP_PROP_FPS)
