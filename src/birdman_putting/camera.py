@@ -445,14 +445,17 @@ class Camera:
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        # Try DirectShow first (hardware MJPEG on supported cameras),
-        # fall back to MSMF. open_webcam() already ran on the background
-        # thread, so the camera subsystem is initialized.
-        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-        backend = "DirectShow"
+        # Try the default backend first (matches what worked on the main thread).
+        # DirectShow produces black frames on some cameras (e.g. Kiyo Pro).
+        # Fall back to explicit MSMF, then DirectShow as last resort.
+        cap = cv2.VideoCapture(s.webcam_index)
+        backend = "default"
         if not cap.isOpened():
             cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
             backend = "MSMF"
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+            backend = "DirectShow"
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
