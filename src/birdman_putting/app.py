@@ -237,21 +237,31 @@ class PuttingApp:
                 if self._window:
                     self._window.update_camera_status("Failed to open video", "error")
                 return
+            self._finish_gui_start()
         else:
-            # Open the camera directly on the grab thread — avoids opening
-            # the camera twice (main thread + grab thread reopen) which added
-            # ~20-30s of redundant backend enumeration at startup.
-            if not self._camera.open_on_grab_thread():
-                logger.error("Failed to open webcam")
-                if self._window:
-                    self._window.update_camera_status(
-                        self._camera.status_message, "error"
-                    )
-                return
+            # Start camera open on background thread — UI stays responsive
+            # while Windows enumerates video devices (~5-40s).
             if self._window:
-                self._window.update_camera_status(
-                    self._camera.status_message, "ok"
-                )
+                self._window.update_camera_status("Connecting to camera...", "warning")
+            self._camera.start_async_open(on_ready=self._on_camera_ready)
+
+    def _on_camera_ready(self) -> None:
+        """Called from the grab thread when the camera is open and capturing."""
+        if self._window:
+            # Schedule UI update and remaining init on the main thread
+            self._window.after(0, self._finish_gui_start)
+        else:
+            self._finish_gui_start()
+
+    def _finish_gui_start(self) -> None:
+        """Complete startup after camera is ready (or for video files)."""
+        if self._running:
+            return
+
+        if self._window:
+            self._window.update_camera_status(
+                self._camera.status_message, "ok"
+            )
 
         # Connect to GSPro
         connected = self._gspro.connect()
