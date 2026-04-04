@@ -469,28 +469,28 @@ class MainWindow(ctk.CTk):
             scroll, "Darkness", 0, 200, c.darkness,
             lambda v: setattr(self._config.camera, "darkness", v),
         )
-        self._add_float_entry(
-            scroll, "Brightness", c.brightness,
+        self._add_camera_slider(
+            scroll, "Brightness", 0, 255, c.brightness,
             lambda v: setattr(self._config.camera, "brightness", v),
         )
-        self._add_float_entry(
-            scroll, "Contrast", c.contrast,
+        self._add_camera_slider(
+            scroll, "Contrast", 0, 255, c.contrast,
             lambda v: setattr(self._config.camera, "contrast", v),
         )
-        self._add_float_entry(
-            scroll, "Saturation", c.saturation,
+        self._add_camera_slider(
+            scroll, "Saturation", 0, 255, c.saturation,
             lambda v: setattr(self._config.camera, "saturation", v),
         )
-        self._add_float_entry(
-            scroll, "Gain", c.gain,
+        self._add_camera_slider(
+            scroll, "Gain", 0, 255, c.gain,
             lambda v: setattr(self._config.camera, "gain", v),
         )
-        self._add_float_entry(
-            scroll, "Sharpness", c.sharpness,
+        self._add_camera_slider(
+            scroll, "Sharpness", 0, 255, c.sharpness,
             lambda v: setattr(self._config.camera, "sharpness", v),
         )
-        self._add_float_entry(
-            scroll, "Gamma", c.gamma,
+        self._add_camera_slider(
+            scroll, "Gamma", 100, 500, c.gamma,
             lambda v: setattr(self._config.camera, "gamma", v),
         )
         self._add_live_slider(
@@ -955,6 +955,48 @@ class MainWindow(ctk.CTk):
         entry.bind("<FocusOut>", on_apply)
         return entry
 
+    def _add_camera_slider(
+        self,
+        parent: Any,
+        label: str,
+        from_: float,
+        to: float,
+        initial: float,
+        setter: Callable[[float], None],
+    ) -> ctk.CTkSlider:
+        """Add a slider for camera properties that applies changes live on drag."""
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(anchor="w", pady=1)
+
+        ctk.CTkLabel(
+            frame, text=label, width=120, anchor="w",
+            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+
+        value_label = ctk.CTkLabel(
+            frame, text=f"{initial:.0f}", width=40, anchor="e",
+            font=theme.font(11), text_color=theme.TEXT_PRIMARY,
+        )
+
+        def on_change(val: float) -> None:
+            rounded = round(val)
+            setter(float(rounded))
+            value_label.configure(text=f"{rounded:.0f}")
+            self._on_setting_changed()
+
+        slider = ctk.CTkSlider(
+            frame, from_=from_, to=to, number_of_steps=int(to - from_),
+            width=140, command=on_change,
+            fg_color=theme.BG_INPUT, progress_color=theme.ACCENT_BLUE,
+            button_color=theme.TEXT_PRIMARY,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+        )
+        slider.set(initial)
+        slider.pack(side="left", padx=4)
+        value_label.pack(side="left", padx=2)
+
+        return slider
+
     def _add_live_checkbox(
         self,
         parent: Any,
@@ -1294,9 +1336,12 @@ class MainWindow(ctk.CTk):
             )
 
     def _toggle_settings(self) -> None:
-        """Toggle the settings overlay panel. Saves config on close."""
+        """Toggle the settings panel. Shows beside video (column 1) so camera stays visible."""
         if self._settings_visible:
             self._settings_frame.grid_remove()
+            self._right_frame.grid()  # Restore status panel
+            # Restore original column 1 width
+            self._main_frame.grid_columnconfigure(1, weight=0, minsize=270)
             self._settings_visible = False
             self._settings_btn.configure(
                 fg_color=theme.BTN_SECONDARY[0],
@@ -1313,9 +1358,11 @@ class MainWindow(ctk.CTk):
             if not self._settings_built:
                 self._build_settings_panel(self._settings_frame)
                 self._settings_built = True
-            # Place settings over the video area (column 0), spanning full height
+            # Hide status panel and show settings in column 1 (beside video)
+            self._right_frame.grid_remove()
+            self._main_frame.grid_columnconfigure(1, weight=0, minsize=370)
             self._settings_frame.grid(
-                row=0, column=0, sticky="nsew", padx=(0, 8),
+                row=0, column=1, sticky="nsew",
             )
             self._settings_visible = True
             self._settings_btn.configure(
