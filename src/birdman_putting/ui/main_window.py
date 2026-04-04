@@ -493,6 +493,32 @@ class MainWindow(ctk.CTk):
             scroll, "Gamma", 100, 500, c.gamma,
             lambda v: setattr(self._config.camera, "gamma", v),
         )
+        self._add_camera_slider(
+            scroll, "Hue", -180, 180, c.hue,
+            lambda v: setattr(self._config.camera, "hue", v),
+        )
+        self._add_camera_slider(
+            scroll, "Zoom", 100, 400, c.zoom,
+            lambda v: setattr(self._config.camera, "zoom", v),
+        )
+
+        self._auto_wb_var = self._add_live_checkbox(
+            scroll, "Auto White Balance", bool(c.auto_wb),
+            self._on_auto_wb_toggle,
+        )
+
+        self._wb_blue_slider = self._add_camera_slider(
+            scroll, "WB Blue", 0, 10000, c.white_balance_blue,
+            lambda v: setattr(self._config.camera, "white_balance_blue", v),
+        )
+        self._wb_red_slider = self._add_camera_slider(
+            scroll, "WB Red", 0, 10000, c.white_balance_red,
+            lambda v: setattr(self._config.camera, "white_balance_red", v),
+        )
+        if self._auto_wb_var.get():
+            self._wb_blue_slider.configure(state="disabled")
+            self._wb_red_slider.configure(state="disabled")
+
         self._add_live_slider(
             scroll, "Width (0=auto)", 0, 1920, c.width,
             lambda v: setattr(self._config.camera, "width", v),
@@ -1080,6 +1106,16 @@ class MainWindow(ctk.CTk):
             self._config.camera.exposure = 0.0
         else:
             self._exposure_slider.configure(state="normal")
+
+    def _on_auto_wb_toggle(self, checked: bool) -> None:
+        """Handle auto white balance checkbox change."""
+        self._config.camera.auto_wb = 1.0 if checked else 0.0
+        if checked:
+            self._wb_blue_slider.configure(state="disabled")
+            self._wb_red_slider.configure(state="disabled")
+        else:
+            self._wb_blue_slider.configure(state="normal")
+            self._wb_red_slider.configure(state="normal")
 
     def _on_mode_changed(self) -> None:
         """Handle connection mode radio change."""

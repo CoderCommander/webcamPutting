@@ -577,7 +577,7 @@ class Camera:
 
     # Properties that use 0.0 as a valid/meaningful value and should
     # always be sent to the camera (not skipped when zero).
-    _ALWAYS_APPLY = {"auto_exposure", "autofocus"}
+    _ALWAYS_APPLY = {"auto_exposure", "autofocus", "auto_wb"}
 
     def _apply_camera_properties(self) -> None:
         """Apply all configured camera properties."""
