@@ -407,24 +407,22 @@ class Camera:
         # belong to this thread's apartment, preventing Windows from
         # throttling capture when the main window loses focus.
         #
-        # Strategy: try default backend first (fast, lets OpenCV pick the
-        # best available). Only fall back to explicit DirectShow or MSMF
-        # if the default fails.
+        # Strategy: try MSMF first (most reliable on Windows, works with
+        # the full device initialization path). The default backend's
+        # auto-probe is fast but unreliable — it often fails on non-zero
+        # camera indices. DirectShow is tried last as it has long timeouts
+        # on systems where it's unsupported.
         s = self._settings
         old_cap = self._cap
         res_w = s.width if s.width > 0 else 1280
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        cap = cv2.VideoCapture(s.webcam_index)
-        backend = "default"
+        cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
+        backend = "MSMF"
         if not cap.isOpened():
-            # Default failed — try DirectShow (hardware MJPEG on some cameras)
             cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
             backend = "DirectShow"
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
-            backend = "MSMF"
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
