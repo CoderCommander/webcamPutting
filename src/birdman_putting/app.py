@@ -239,8 +239,10 @@ class PuttingApp:
                 return
         else:
             # Open on the main thread (which has COM from tkinter).
-            # The MJPEG/DirectShow attempt takes ~30s and fails, but it
+            # The DirectShow attempt takes ~30s and fails, but it
             # initializes the camera subsystem so the default backend works.
+            logger.debug("Opening webcam (index=%d, mjpeg=%s)",
+                         self.config.camera.webcam_index, self.config.camera.mjpeg)
             if not self._camera.open_webcam():
                 logger.error("Failed to open webcam")
                 if self._window:

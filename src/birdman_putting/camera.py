@@ -91,16 +91,13 @@ class Camera:
         """Human-readable status of the last open attempt."""
         return self._status_message
 
-    def open_webcam(self, *, skip_mjpeg: bool = False) -> bool:
+    def open_webcam(self) -> bool:
         """Open the webcam with configured settings and frame validation.
 
-        Tries MJPEG/DirectShow first (if configured), validates that frames
-        actually arrive, and falls back to the default backend on failure.
-
-        Args:
-            skip_mjpeg: Skip the MJPEG/DirectShow attempt. Use when the grab
-                thread will reopen with DirectShow anyway — avoids a slow
-                (~20-30s) DirectShow enumeration timeout on the main thread.
+        Always tries DirectShow first — even when it fails, it initializes
+        the Windows camera subsystem so that the default backend can find
+        DirectShow/MSMF devices. Without this warmup, only FFMPEG/obsensor
+        backends are available and webcam open fails.
 
         Returns:
             True if camera opened successfully and producing frames.
@@ -108,25 +105,34 @@ class Camera:
         s = self._settings
         self._video_file = False
 
-        # Try MJPEG/DirectShow first if configured
-        if s.mjpeg and not skip_mjpeg and self._try_open_mjpeg():
-                if self._validate_frames():
-                    self._read_properties()
-                    self._apply_camera_properties()
-                    self._status_message = (
-                        f"Connected (MJPEG {self._frame_width}x{self._frame_height}"
-                        f" @ {self._fps:.0f}fps)"
-                    )
-                    logger.info("Camera ready: %s", self._status_message)
-                    return True
-                else:
-                    logger.warning(
-                        "MJPEG opened but frames are black or absent, "
-                        "falling back to default backend"
-                    )
-                    self._release_cap()
+        logger.debug(
+            "open_webcam: index=%d, mjpeg=%s, width=%d, height=%d, fps_override=%d",
+            s.webcam_index, s.mjpeg, s.width, s.height, s.fps_override,
+        )
 
-        # Fallback (or primary if MJPEG not configured)
+        # Always try DirectShow first — even if MJPEG is disabled, the
+        # DirectShow attempt initializes the Windows camera subsystem.
+        # Without this, the default backend only finds FFMPEG/obsensor.
+        logger.debug("Trying DirectShow (warmup)...")
+        if self._try_open_mjpeg():
+            if self._validate_frames():
+                self._read_properties()
+                self._apply_camera_properties()
+                self._status_message = (
+                    f"Connected (DirectShow {self._frame_width}x{self._frame_height}"
+                    f" @ {self._fps:.0f}fps)"
+                )
+                logger.info("Camera ready: %s", self._status_message)
+                return True
+            else:
+                logger.warning(
+                    "DirectShow opened but frames are black or absent, "
+                    "falling back to default backend"
+                )
+                self._release_cap()
+
+        # Fallback — DirectShow failed (common) but initialized the subsystem
+        logger.debug("Trying default backend...")
         if self._try_open_default():
             if self._validate_frames():
                 self._read_properties()
@@ -154,8 +160,12 @@ class Camera:
             (frames not yet validated).
         """
         s = self._settings
+        logger.debug("DirectShow: opening camera index %d (cv2.CAP_DSHOW=%d, combined=%d)",
+                      s.webcam_index, cv2.CAP_DSHOW, s.webcam_index + cv2.CAP_DSHOW)
         self._cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-        if self._cap is None or not self._cap.isOpened():
+        opened = self._cap is not None and self._cap.isOpened()
+        logger.debug("DirectShow: isOpened=%s", opened)
+        if not opened:
             logger.warning("Failed to open camera %d with DirectShow", s.webcam_index)
             return False
 
@@ -211,8 +221,11 @@ class Camera:
             True if the capture device opened (frames not yet validated).
         """
         s = self._settings
+        logger.debug("Default backend: opening camera index %d", s.webcam_index)
         self._cap = cv2.VideoCapture(s.webcam_index)
-        if self._cap is None or not self._cap.isOpened():
+        opened = self._cap is not None and self._cap.isOpened()
+        logger.debug("Default backend: isOpened=%s", opened)
+        if not opened:
             logger.error("Failed to open camera %d with default backend", s.webcam_index)
             return False
 
