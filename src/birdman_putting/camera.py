@@ -369,7 +369,7 @@ class Camera:
         self._grab_ready.wait(timeout=15)
 
         if self._cap is not None and self._cap.isOpened():
-            self._read_properties()
+            # _read_properties() already called on the grab thread
             self._status_message = (
                 f"Connected ({self._frame_width}x{self._frame_height}"
                 f" @ {self._fps:.0f}fps)"
@@ -425,9 +425,10 @@ class Camera:
             # Resolution must be set before codec on DirectShow
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-            # Request MJPEG codec — offloads decoding to camera hardware,
-            # keeping CPU free for GSPro. Falls back to YUY2 if rejected.
-            if s.mjpeg:
+            # Request MJPEG codec only on DirectShow — offloads decoding to
+            # camera hardware. On MSMF, setting MJPEG can cause the camera
+            # to negotiate a 30fps mode instead of 60fps.
+            if s.mjpeg and backend == "DirectShow":
                 mjpg_fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
                 cap.set(cv2.CAP_PROP_FOURCC, mjpg_fourcc)
             cap.set(cv2.CAP_PROP_FPS, target_fps)
@@ -450,6 +451,7 @@ class Camera:
             old_cap.release()
         self._cap = cap
         self._apply_camera_properties()
+        self._read_properties()
         logger.info("Camera reopened on grab thread")
         self._grab_ready.set()
 
