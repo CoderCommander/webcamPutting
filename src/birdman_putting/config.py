@@ -65,11 +65,11 @@ class CameraSettings:
     hue: float = 0.0
     gain: float = 0.0
     sharpness: float = 0.0
-    auto_exposure: float = 0.0
+    auto_exposure: float = 3.0  # 3=auto, 1=manual (OpenCV convention)
     gamma: float = 0.0
     zoom: float = 0.0
     focus: float = 0.0
-    autofocus: float = 0.0
+    autofocus: float = 1.0  # 1=on, 0=off
 
 
 @dataclass

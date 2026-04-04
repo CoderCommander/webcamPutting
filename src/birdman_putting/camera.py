@@ -575,6 +575,10 @@ class Camera:
         """Re-apply all camera properties from current settings."""
         self._apply_camera_properties()
 
+    # Properties that use 0.0 as a valid/meaningful value and should
+    # always be sent to the camera (not skipped when zero).
+    _ALWAYS_APPLY = {"auto_exposure", "autofocus"}
+
     def _apply_camera_properties(self) -> None:
         """Apply all configured camera properties."""
         if self._cap is None:
@@ -582,7 +586,7 @@ class Camera:
 
         for field_name, prop_id in _CAMERA_PROPS.items():
             value = getattr(self._settings, field_name, 0.0)
-            if value != 0.0:
+            if value != 0.0 or field_name in self._ALWAYS_APPLY:
                 self._cap.set(prop_id, value)
                 logger.debug("Set camera %s = %s", field_name, value)
 
