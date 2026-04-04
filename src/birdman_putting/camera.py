@@ -113,11 +113,11 @@ class Camera:
         # Always try DirectShow first — even if MJPEG is disabled, the
         # DirectShow attempt initializes the Windows camera subsystem.
         # Without this, the default backend only finds FFMPEG/obsensor.
-        logger.debug("Trying DirectShow (warmup)...")
+        logger.debug("Trying DirectShow...")
         if self._try_open_mjpeg():
+            self._read_properties()
+            self._apply_camera_properties()
             if self._validate_frames():
-                self._read_properties()
-                self._apply_camera_properties()
                 self._status_message = (
                     f"Connected (DirectShow {self._frame_width}x{self._frame_height}"
                     f" @ {self._fps:.0f}fps)"
@@ -134,9 +134,9 @@ class Camera:
         # Fallback — DirectShow failed (common) but initialized the subsystem
         logger.debug("Trying default backend...")
         if self._try_open_default():
+            self._read_properties()
+            self._apply_camera_properties()
             if self._validate_frames():
-                self._read_properties()
-                self._apply_camera_properties()
                 label = "fallback" if s.mjpeg else "default"
                 self._status_message = (
                     f"Connected ({label} {self._frame_width}x{self._frame_height}"
