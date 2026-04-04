@@ -238,10 +238,10 @@ class PuttingApp:
                     self._window.update_camera_status("Failed to open video", "error")
                 return
         else:
-            # Skip the slow MJPEG/DirectShow attempt on the main thread —
-            # the grab thread will retry DirectShow with its own COM apartment.
-            # This avoids ~20-30s of DirectShow enumeration timeout at startup.
-            if not self._camera.open_webcam(skip_mjpeg=True):
+            # Open the camera directly on the grab thread — avoids opening
+            # the camera twice (main thread + grab thread reopen) which added
+            # ~20-30s of redundant backend enumeration at startup.
+            if not self._camera.open_on_grab_thread():
                 logger.error("Failed to open webcam")
                 if self._window:
                     self._window.update_camera_status(
@@ -252,9 +252,6 @@ class PuttingApp:
                 self._window.update_camera_status(
                     self._camera.status_message, "ok"
                 )
-
-        # Start threaded camera capture (decoupled from tkinter event loop)
-        self._camera.start_grab_thread()
 
         # Connect to GSPro
         connected = self._gspro.connect()
