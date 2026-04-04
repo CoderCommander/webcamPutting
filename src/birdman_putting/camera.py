@@ -68,6 +68,12 @@ class Camera:
         self._frame_new = False  # True when grab thread has a new frame
         self._frame_lock = threading.Lock()
 
+        # Property changes queued from the main thread and applied on the
+        # grab thread between frame reads. MSMF crashes if properties are
+        # set from a different thread while capturing.
+        self._pending_props: list[tuple[int, float]] = []
+        self._props_lock = threading.Lock()
+
     @property
     def fps(self) -> float:
         return self._fps
@@ -480,6 +486,9 @@ class Camera:
         while self._grab_running and self._cap is not None:
             if _pump_messages is not None:
                 _pump_messages()
+            # Apply any queued property changes from the main thread
+            if self._pending_props:
+                self._drain_pending_props()
             ret, frame = self._cap.read()
             if ret and frame is not None:
                 with self._frame_lock:
@@ -571,15 +580,53 @@ class Camera:
             logger.info("Camera released")
 
     def apply_properties(self) -> None:
-        """Re-apply all camera properties from current settings."""
-        self._apply_camera_properties()
+        """Re-apply all camera properties from current settings.
+
+        When the grab thread is running, changes are queued and applied
+        on the grab thread between frame reads. MSMF crashes if camera
+        properties are set from a different thread while capturing.
+        """
+        if self._grab_running:
+            props = self._collect_properties()
+            with self._props_lock:
+                self._pending_props.extend(props)
+        else:
+            self._apply_camera_properties()
 
     # Properties that use 0.0 as a valid/meaningful value and should
     # always be sent to the camera (not skipped when zero).
-    _ALWAYS_APPLY = {"auto_exposure", "autofocus", "auto_wb"}
+    _ALWAYS_APPLY = {"auto_exposure", "autofocus", "auto_wb", "focus"}
+
+    def _collect_properties(self) -> list[tuple[int, float]]:
+        """Collect all camera properties that should be applied."""
+        props = []
+        for field_name, prop_id in _CAMERA_PROPS.items():
+            value = getattr(self._settings, field_name, 0.0)
+            if value != 0.0 or field_name in self._ALWAYS_APPLY:
+                props.append((prop_id, value))
+        return props
+
+    def _drain_pending_props(self) -> None:
+        """Apply any queued property changes (called from grab thread)."""
+        with self._props_lock:
+            pending = list(self._pending_props)
+            self._pending_props.clear()
+        for prop_id, value in pending:
+            if self._cap is not None:
+                self._cap.set(prop_id, value)
+                # Reverse-lookup name for logging
+                name = next(
+                    (k for k, v in _CAMERA_PROPS.items() if v == prop_id),
+                    str(prop_id),
+                )
+                logger.debug("Set camera %s = %s (from queue)", name, value)
 
     def _apply_camera_properties(self) -> None:
-        """Apply all configured camera properties."""
+        """Apply all configured camera properties directly (not thread-safe for MSMF).
+
+        Only call from the thread that owns the VideoCapture, or when the
+        grab thread is not running.
+        """
         if self._cap is None:
             return
 
