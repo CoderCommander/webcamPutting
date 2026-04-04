@@ -407,22 +407,26 @@ class Camera:
         # belong to this thread's apartment, preventing Windows from
         # throttling capture when the main window loses focus.
         #
-        # Strategy: try MSMF first (most reliable on Windows, works with
-        # the full device initialization path). The default backend's
-        # auto-probe is fast but unreliable — it often fails on non-zero
-        # camera indices. DirectShow is tried last as it has long timeouts
-        # on systems where it's unsupported.
+        # Strategy: use the default backend (cv2.VideoCapture(index)) which
+        # lets OpenCV perform full device initialization through all available
+        # backends. The explicit two-argument form (index, CAP_MSMF) uses a
+        # shallower code path that fails on some systems.
+        #
+        # The default backend takes ~30-40s on Windows (device enumeration)
+        # but this is non-blocking since the grab thread runs in the background.
         s = self._settings
         old_cap = self._cap
         res_w = s.width if s.width > 0 else 1280
         res_h = s.height if s.height > 0 else 720
         target_fps = s.fps_override if s.fps_override > 0 else 60
 
-        cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
-        backend = "MSMF"
+        logger.info("Opening camera %d (this may take 30-40s)...", s.webcam_index)
+        cap = cv2.VideoCapture(s.webcam_index)
+        backend = "default"
         if not cap.isOpened():
-            cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-            backend = "DirectShow"
+            # Fallback: try explicit MSMF (different init path)
+            cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
+            backend = "MSMF"
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
