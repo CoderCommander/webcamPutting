@@ -116,7 +116,9 @@ class Camera:
         logger.debug("Trying DirectShow...")
         if self._try_open_mjpeg():
             self._read_properties()
-            self._apply_camera_properties()
+            # Don't apply user camera properties here — _validate_frames()
+            # forces auto-exposure so the camera can produce visible frames.
+            # The grab thread applies real user settings when it reopens.
             if self._validate_frames():
                 self._status_message = (
                     f"Connected (DirectShow {self._frame_width}x{self._frame_height}"
@@ -135,7 +137,6 @@ class Camera:
         logger.debug("Trying default backend...")
         if self._try_open_default():
             self._read_properties()
-            self._apply_camera_properties()
             if self._validate_frames():
                 label = "fallback" if s.mjpeg else "default"
                 self._status_message = (
@@ -252,6 +253,10 @@ class Camera:
     def _validate_frames(self) -> bool:
         """Read test frames to confirm the camera is producing usable data.
 
+        Forces auto-exposure ON during validation so the camera can auto-adjust
+        brightness. User's actual exposure settings are applied later by the
+        grab thread when it reopens the camera.
+
         Phase 1: Discard warmup frames (auto-exposure settling).
         Phase 2: Validate that at least one frame is non-black.
 
@@ -260,6 +265,12 @@ class Camera:
         """
         if self._cap is None:
             return False
+
+        # Force auto-exposure during validation — the user's saved settings
+        # may include manual exposure that's too dark, producing all-black
+        # frames. The grab thread will apply the real settings later.
+        self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3.0)  # 3 = auto
+        logger.debug("Validation: forced auto_exposure=3 for warmup")
 
         # Phase 1: Warmup — read and discard frames for auto-exposure
         for i in range(1, _WARMUP_FRAMES + 1):
