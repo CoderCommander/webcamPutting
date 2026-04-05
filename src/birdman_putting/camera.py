@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 import cv2
@@ -34,10 +33,11 @@ _CAMERA_PROPS = {
     "autofocus": cv2.CAP_PROP_AUTOFOCUS,
 }
 
-_WARMUP_FRAMES = 15           # frames to discard before validation (~0.75s at 30fps)
-_WARMUP_DELAY = 0.05          # seconds between warmup reads
-_FRAME_VALIDATE_ATTEMPTS = 5  # frames to check after warmup
-_FRAME_VALIDATE_DELAY = 0.2   # seconds between validation reads
+_WARMUP_FRAMES = 5            # frames to discard before brightness checking
+_WARMUP_DELAY = 0.1           # seconds between warmup reads
+_FRAME_VALIDATE_ATTEMPTS = 3  # frames to check after warmup
+_FRAME_VALIDATE_DELAY = 0.1   # seconds between validation reads
+_BLACK_FRAME_THRESHOLD = 3.0  # mean brightness below this = black frame
 
 
 class Camera:
@@ -67,12 +67,6 @@ class Camera:
         self._frame_new = False  # True when grab thread has a new frame
         self._frame_lock = threading.Lock()
 
-        # Property changes queued from the main thread and applied on the
-        # grab thread between frame reads. MSMF crashes if properties are
-        # set from a different thread while capturing.
-        self._pending_props: list[tuple[int, float]] = []
-        self._props_lock = threading.Lock()
-
     @property
     def fps(self) -> float:
         return self._fps
@@ -93,10 +87,8 @@ class Camera:
     def open_webcam(self) -> bool:
         """Open the webcam with configured settings and frame validation.
 
-        Always tries DirectShow first — even when it fails, it initializes
-        the Windows camera subsystem so that the default backend can find
-        DirectShow/MSMF devices. Without this warmup, only FFMPEG/obsensor
-        backends are available and webcam open fails.
+        Tries MJPEG/DirectShow first (if configured), validates that frames
+        actually arrive, and falls back to the default backend on failure.
 
         Returns:
             True if camera opened successfully and producing frames.
@@ -104,39 +96,29 @@ class Camera:
         s = self._settings
         self._video_file = False
 
-        logger.debug(
-            "open_webcam: index=%d, mjpeg=%s, width=%d, height=%d, fps_override=%d",
-            s.webcam_index, s.mjpeg, s.width, s.height, s.fps_override,
-        )
+        # Try MJPEG/DirectShow first if configured
+        if s.mjpeg and self._try_open_mjpeg():
+                if self._validate_frames():
+                    self._read_properties()
+                    self._apply_camera_properties()
+                    self._status_message = (
+                        f"Connected (MJPEG {self._frame_width}x{self._frame_height}"
+                        f" @ {self._fps:.0f}fps)"
+                    )
+                    logger.info("Camera ready: %s", self._status_message)
+                    return True
+                else:
+                    logger.warning(
+                        "MJPEG opened but frames are black or absent, "
+                        "falling back to default backend"
+                    )
+                    self._release_cap()
 
-        # Always try DirectShow first — even if MJPEG is disabled, the
-        # DirectShow attempt initializes the Windows camera subsystem.
-        # Without this, the default backend only finds FFMPEG/obsensor.
-        logger.debug("Trying DirectShow...")
-        if self._try_open_mjpeg():
-            self._read_properties()
-            # Don't apply user camera properties here — _validate_frames()
-            # forces auto-exposure so the camera can produce visible frames.
-            # The grab thread applies real user settings when it reopens.
-            if self._validate_frames():
-                self._status_message = (
-                    f"Connected (DirectShow {self._frame_width}x{self._frame_height}"
-                    f" @ {self._fps:.0f}fps)"
-                )
-                logger.info("Camera ready: %s", self._status_message)
-                return True
-            else:
-                logger.warning(
-                    "DirectShow opened but frames are black or absent, "
-                    "falling back to default backend"
-                )
-                self._release_cap()
-
-        # Fallback — DirectShow failed (common) but initialized the subsystem
-        logger.debug("Trying default backend...")
+        # Fallback (or primary if MJPEG not configured)
         if self._try_open_default():
-            self._read_properties()
             if self._validate_frames():
+                self._read_properties()
+                self._apply_camera_properties()
                 label = "fallback" if s.mjpeg else "default"
                 self._status_message = (
                     f"Connected ({label} {self._frame_width}x{self._frame_height}"
@@ -160,12 +142,8 @@ class Camera:
             (frames not yet validated).
         """
         s = self._settings
-        logger.debug("DirectShow: opening camera index %d (cv2.CAP_DSHOW=%d, combined=%d)",
-                      s.webcam_index, cv2.CAP_DSHOW, s.webcam_index + cv2.CAP_DSHOW)
         self._cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-        opened = self._cap is not None and self._cap.isOpened()
-        logger.debug("DirectShow: isOpened=%s", opened)
-        if not opened:
+        if self._cap is None or not self._cap.isOpened():
             logger.warning("Failed to open camera %d with DirectShow", s.webcam_index)
             return False
 
@@ -221,11 +199,8 @@ class Camera:
             True if the capture device opened (frames not yet validated).
         """
         s = self._settings
-        logger.debug("Default backend: opening camera index %d", s.webcam_index)
         self._cap = cv2.VideoCapture(s.webcam_index)
-        opened = self._cap is not None and self._cap.isOpened()
-        logger.debug("Default backend: isOpened=%s", opened)
-        if not opened:
+        if self._cap is None or not self._cap.isOpened():
             logger.error("Failed to open camera %d with default backend", s.webcam_index)
             return False
 
@@ -244,43 +219,46 @@ class Camera:
         )
         return True
 
-    def _validate_frames(self) -> bool:
-        """Confirm the camera can deliver frames (not stuck or disconnected).
+    @staticmethod
+    def _is_black_frame(frame: np.ndarray) -> bool:
+        """Check if a frame is effectively black (all/nearly-all zero pixels)."""
+        return float(np.mean(frame)) < _BLACK_FRAME_THRESHOLD
 
-        Only checks that cap.read() returns data — does NOT reject black
-        frames. Some cameras (Razer Kiyo Pro) produce black frames for
-        several seconds while auto-exposure converges; the grab thread
-        will pick up real frames once the sensor settles.
+    def _validate_frames(self) -> bool:
+        """Read test frames to confirm the camera is producing usable data.
+
+        Phase 1: Discard warmup frames (auto-exposure settling).
+        Phase 2: Validate that at least one frame is non-black.
 
         Returns:
-            True if at least one frame was successfully read.
+            True if at least one non-black frame was successfully read.
         """
         if self._cap is None:
             return False
 
-        # Phase 1: Warmup — discard initial frames
+        # Phase 1: Warmup — read and discard frames for auto-exposure
         for i in range(1, _WARMUP_FRAMES + 1):
             ret, frame = self._cap.read()
             if not ret or frame is None:
                 logger.debug("Warmup frame %d: no frame", i)
             time.sleep(_WARMUP_DELAY)
 
-        # Phase 2: Validate — just need one readable frame
+        # Phase 2: Validate — require at least one non-black frame
         for attempt in range(1, _FRAME_VALIDATE_ATTEMPTS + 1):
             ret, frame = self._cap.read()
             if ret and frame is not None:
-                mean_val = float(np.mean(frame))
-                logger.debug(
-                    "Frame validation passed on attempt %d (mean=%.1f)",
-                    attempt, mean_val,
-                )
-                if mean_val < 3.0:
-                    logger.warning(
-                        "Camera frames are dark (mean=%.1f) — auto-exposure "
-                        "may still be converging", mean_val,
+                if not self._is_black_frame(frame):
+                    logger.debug(
+                        "Frame validation passed on attempt %d (mean=%.1f)",
+                        attempt, float(np.mean(frame)),
                     )
-                return True
-            logger.debug("Frame validation attempt %d: no frame", attempt)
+                    return True
+                logger.debug(
+                    "Frame validation attempt %d: black frame (mean=%.1f)",
+                    attempt, float(np.mean(frame)),
+                )
+            else:
+                logger.debug("Frame validation attempt %d: no frame", attempt)
             time.sleep(_FRAME_VALIDATE_DELAY)
 
         return False
@@ -367,50 +345,6 @@ class Camera:
         self._grab_ready.wait(timeout=5)
         logger.info("Camera grab thread started")
 
-    def start_async_open(self, on_ready: Callable[[], None] | None = None) -> None:
-        """Open the camera on a background thread, then start the grab thread.
-
-        Runs the full open_webcam() sequence (DirectShow warmup + default
-        backend) on a background thread so the UI stays responsive. Once
-        the camera is open, starts the grab thread for continuous capture.
-
-        Args:
-            on_ready: Optional callback invoked once the camera is open and
-                the grab thread is capturing. Called from a background thread;
-                use window.after() to schedule UI updates from this callback.
-        """
-        if self._video_file or self._grab_running:
-            return
-
-        self._status_message = "Connecting to camera..."
-        self._on_ready_callback = on_ready
-
-        def _open_and_start() -> None:
-            import sys
-            # Initialize COM on this thread — DirectShow and MSMF both
-            # require COM. Without it, VideoCapture silently skips these
-            # backends and only tries FFMPEG/obsensor (which fail).
-            if sys.platform == "win32":
-                try:
-                    import ctypes
-                    ctypes.windll.ole32.CoInitializeEx(None, 0)  # type: ignore[attr-defined]
-                except Exception:
-                    pass
-
-            if self.open_webcam():
-                self.start_grab_thread()
-                if self._on_ready_callback:
-                    self._on_ready_callback()
-            else:
-                logger.error("Background camera open failed")
-                if self._on_ready_callback:
-                    self._on_ready_callback()
-
-        thread = threading.Thread(
-            target=_open_and_start, daemon=True, name="camera-open",
-        )
-        thread.start()
-
     def _grab_loop(self) -> None:
         """Continuously read frames from the camera into _latest_frame.
 
@@ -433,24 +367,48 @@ class Camera:
             except Exception:
                 pass
 
-        # Reuse the existing VideoCapture instead of reopening.
-        # Reopening creates a fresh DirectShow connection that resets
-        # camera firmware settings (Razer Synapse exposure, etc.) and
-        # the Kiyo Pro starts black — OpenCV can't fix it via properties.
-        # COM is initialized on this thread (MTA) which is sufficient for
-        # cross-thread DirectShow/MSMF access.
-        if self._cap is None or not self._cap.isOpened():
-            logger.error("Grab thread: no open camera to use")
+        # Reopen the camera on this thread using DirectShow.
+        # MSMF (default backend) requires a Windows message pump on the
+        # owning thread; without one it falls back to the main thread's
+        # pump, which tkinter throttles when backgrounded. DirectShow
+        # doesn't have this dependency.
+        s = self._settings
+        old_cap = self._cap
+        res_w = s.width if s.width > 0 else 1280
+        res_h = s.height if s.height > 0 else 720
+        target_fps = s.fps_override if s.fps_override > 0 else 60
+
+        # Use DirectShow for stable 30fps that doesn't throttle when backgrounded
+        # and doesn't compete with GSPro for system resources.
+        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+        backend = "DirectShow"
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
+            backend = "MSMF"
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+            cap.set(cv2.CAP_PROP_FPS, target_fps)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            actual_fps = cap.get(cv2.CAP_PROP_FPS)
+            actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+            codec = "".join(chr((actual_fourcc >> (8 * i)) & 0xFF) for i in range(4))
+            logger.info(
+                "Grab thread: %s %s @ %.0ffps", backend, codec, actual_fps,
+            )
+
+        if not cap.isOpened():
+            logger.error("Grab thread failed to reopen camera")
             self._grab_ready.set()
             self._grab_running = False
             return
 
-        # Don't apply saved camera properties here — the camera already has
-        # working exposure/brightness from the firmware (Synapse, auto-exposure).
-        # Applying saved props like auto_exposure=1 + exposure=-5 would override
-        # that and cause black frames. User can still adjust via Settings sliders
-        # which queue property changes through _pending_props.
-        logger.info("Grab thread: using existing capture (no reopen, no property override)")
+        # Release old capture from main thread and use new one
+        if old_cap is not None:
+            old_cap.release()
+        self._cap = cap
+        self._apply_camera_properties()
+        logger.info("Camera reopened on grab thread")
         self._grab_ready.set()
 
         # Set up message pump for MSMF fallback (DirectShow doesn't need it)
@@ -475,9 +433,6 @@ class Camera:
         while self._grab_running and self._cap is not None:
             if _pump_messages is not None:
                 _pump_messages()
-            # Apply any queued property changes from the main thread
-            if self._pending_props:
-                self._drain_pending_props()
             ret, frame = self._cap.read()
             if ret and frame is not None:
                 with self._frame_lock:
@@ -569,73 +524,17 @@ class Camera:
             logger.info("Camera released")
 
     def apply_properties(self) -> None:
-        """Re-apply all camera properties from current settings.
-
-        When the grab thread is running, changes are queued and applied
-        on the grab thread between frame reads. MSMF crashes if camera
-        properties are set from a different thread while capturing.
-        """
-        if self._grab_running:
-            props = self._collect_properties()
-            with self._props_lock:
-                self._pending_props.extend(props)
-        else:
-            self._apply_camera_properties()
-
-    # Properties that use 0.0 as a valid/meaningful value and should
-    # always be sent to the camera (not skipped when zero).
-    _ALWAYS_APPLY = {"auto_exposure", "autofocus", "auto_wb", "focus"}
-
-    def _collect_properties(self) -> list[tuple[int, float]]:
-        """Collect all camera properties that should be applied."""
-        props = []
-        auto_exp = getattr(self._settings, "auto_exposure", 0.0)
-        auto_focus = getattr(self._settings, "autofocus", 0.0)
-        for field_name, prop_id in _CAMERA_PROPS.items():
-            value = getattr(self._settings, field_name, 0.0)
-            # Skip manual exposure/focus when auto mode is on — they conflict
-            if field_name == "exposure" and auto_exp == 3.0:
-                continue
-            if field_name == "focus" and auto_focus == 1.0:
-                continue
-            if value != 0.0 or field_name in self._ALWAYS_APPLY:
-                props.append((prop_id, value))
-        return props
-
-    def _drain_pending_props(self) -> None:
-        """Apply any queued property changes (called from grab thread)."""
-        with self._props_lock:
-            pending = list(self._pending_props)
-            self._pending_props.clear()
-        for prop_id, value in pending:
-            if self._cap is not None:
-                self._cap.set(prop_id, value)
-                # Reverse-lookup name for logging
-                name = next(
-                    (k for k, v in _CAMERA_PROPS.items() if v == prop_id),
-                    str(prop_id),
-                )
-                logger.debug("Set camera %s = %s (from queue)", name, value)
+        """Re-apply all camera properties from current settings."""
+        self._apply_camera_properties()
 
     def _apply_camera_properties(self) -> None:
-        """Apply all configured camera properties directly.
-
-        Only call from the thread that owns the VideoCapture, or when the
-        grab thread is not running.
-        """
+        """Apply all configured camera properties."""
         if self._cap is None:
             return
 
-        auto_exp = getattr(self._settings, "auto_exposure", 0.0)
-        auto_focus = getattr(self._settings, "autofocus", 0.0)
         for field_name, prop_id in _CAMERA_PROPS.items():
             value = getattr(self._settings, field_name, 0.0)
-            # Skip manual exposure/focus when auto mode is on — they conflict
-            if field_name == "exposure" and auto_exp == 3.0:
-                continue
-            if field_name == "focus" and auto_focus == 1.0:
-                continue
-            if value != 0.0 or field_name in self._ALWAYS_APPLY:
+            if value != 0.0:
                 self._cap.set(prop_id, value)
                 logger.debug("Set camera %s = %s", field_name, value)
 

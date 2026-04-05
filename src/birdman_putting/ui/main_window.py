@@ -313,26 +313,31 @@ class MainWindow(ctk.CTk):
         ).pack(side="left", padx=2)
         self._bind_entry_apply(self._rotation_entry, self._apply_rotation)
 
-        self._autofocus_slider = self._add_camera_slider_with_entry(
-            scroll, "Autofocus", 0, 1, c.autofocus, recommended=1,
-            setter=lambda v: setattr(self._config.camera, "autofocus", v),
+        self._autofocus_var = self._add_live_checkbox(
+            scroll, "Autofocus", bool(c.autofocus),
+            self._on_autofocus_toggle,
         )
 
-        self._focus_slider = self._add_camera_slider_with_entry(
-            scroll, "Manual Focus", 0, 255, c.focus, recommended=0,
-            setter=lambda v: setattr(self._config.camera, "focus", v),
+        self._focus_slider = self._add_live_slider(
+            scroll, "Manual Focus", 0, 255, int(c.focus),
+            lambda v: setattr(self._config.camera, "focus", float(v)),
+        )
+        if self._autofocus_var.get():
+            self._focus_slider.configure(state="disabled")
+
+        auto_exp_on = c.auto_exposure != 1.0
+        self._auto_exposure_var = self._add_live_checkbox(
+            scroll, "Auto-Exposure", auto_exp_on,
+            self._on_auto_exposure_toggle,
         )
 
-        self._auto_exposure_slider = self._add_camera_slider_with_entry(
-            scroll, "Auto-Exposure", 0, 3, c.auto_exposure, recommended=3,
-            setter=lambda v: setattr(self._config.camera, "auto_exposure", v),
+        initial_exp = int(c.exposure) if c.exposure != 0.0 else -6
+        self._exposure_slider = self._add_live_slider(
+            scroll, "Exposure", -13, -1, initial_exp,
+            lambda v: setattr(self._config.camera, "exposure", float(v)),
         )
-
-        initial_exp = c.exposure if c.exposure != 0.0 else -6.0
-        self._exposure_slider = self._add_camera_slider_with_entry(
-            scroll, "Exposure", -13, -1, initial_exp, recommended=-6,
-            setter=lambda v: setattr(self._config.camera, "exposure", v),
-        )
+        if auto_exp_on:
+            self._exposure_slider.configure(state="disabled")
 
         # --- DETECTION ---
         self._section_label(scroll, "DETECTION")
@@ -464,56 +469,30 @@ class MainWindow(ctk.CTk):
             scroll, "Darkness", 0, 200, c.darkness,
             lambda v: setattr(self._config.camera, "darkness", v),
         )
-        self._add_camera_slider(
-            scroll, "Brightness", 0, 255, c.brightness,
+        self._add_float_entry(
+            scroll, "Brightness", c.brightness,
             lambda v: setattr(self._config.camera, "brightness", v),
         )
-        self._add_camera_slider(
-            scroll, "Contrast", 0, 255, c.contrast,
+        self._add_float_entry(
+            scroll, "Contrast", c.contrast,
             lambda v: setattr(self._config.camera, "contrast", v),
         )
-        self._add_camera_slider(
-            scroll, "Saturation", 0, 255, c.saturation,
+        self._add_float_entry(
+            scroll, "Saturation", c.saturation,
             lambda v: setattr(self._config.camera, "saturation", v),
         )
-        self._add_camera_slider(
-            scroll, "Gain", 0, 255, c.gain,
+        self._add_float_entry(
+            scroll, "Gain", c.gain,
             lambda v: setattr(self._config.camera, "gain", v),
         )
-        self._add_camera_slider(
-            scroll, "Sharpness", 0, 255, c.sharpness,
+        self._add_float_entry(
+            scroll, "Sharpness", c.sharpness,
             lambda v: setattr(self._config.camera, "sharpness", v),
         )
-        self._add_camera_slider(
-            scroll, "Gamma", 100, 500, c.gamma,
+        self._add_float_entry(
+            scroll, "Gamma", c.gamma,
             lambda v: setattr(self._config.camera, "gamma", v),
         )
-        self._add_camera_slider(
-            scroll, "Hue", -180, 180, c.hue,
-            lambda v: setattr(self._config.camera, "hue", v),
-        )
-        self._add_camera_slider(
-            scroll, "Zoom", 100, 400, c.zoom,
-            lambda v: setattr(self._config.camera, "zoom", v),
-        )
-
-        self._auto_wb_var = self._add_live_checkbox(
-            scroll, "Auto White Balance", bool(c.auto_wb),
-            self._on_auto_wb_toggle,
-        )
-
-        self._wb_blue_slider = self._add_camera_slider(
-            scroll, "WB Blue", 0, 10000, c.white_balance_blue,
-            lambda v: setattr(self._config.camera, "white_balance_blue", v),
-        )
-        self._wb_red_slider = self._add_camera_slider(
-            scroll, "WB Red", 0, 10000, c.white_balance_red,
-            lambda v: setattr(self._config.camera, "white_balance_red", v),
-        )
-        if self._auto_wb_var.get():
-            self._wb_blue_slider.configure(state="disabled")
-            self._wb_red_slider.configure(state="disabled")
-
         self._add_live_slider(
             scroll, "Width (0=auto)", 0, 1920, c.width,
             lambda v: setattr(self._config.camera, "width", v),
@@ -976,121 +955,6 @@ class MainWindow(ctk.CTk):
         entry.bind("<FocusOut>", on_apply)
         return entry
 
-    def _add_camera_slider(
-        self,
-        parent: Any,
-        label: str,
-        from_: float,
-        to: float,
-        initial: float,
-        setter: Callable[[float], None],
-    ) -> ctk.CTkSlider:
-        """Add a slider for camera properties that applies changes live on drag."""
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(anchor="w", pady=1)
-
-        ctk.CTkLabel(
-            frame, text=label, width=120, anchor="w",
-            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
-        ).pack(side="left")
-
-        value_label = ctk.CTkLabel(
-            frame, text=f"{initial:.0f}", width=40, anchor="e",
-            font=theme.font(11), text_color=theme.TEXT_PRIMARY,
-        )
-
-        def on_change(val: float) -> None:
-            rounded = round(val)
-            setter(float(rounded))
-            value_label.configure(text=f"{rounded:.0f}")
-            self._on_setting_changed()
-
-        slider = ctk.CTkSlider(
-            frame, from_=from_, to=to, number_of_steps=int(to - from_),
-            width=140, command=on_change,
-            fg_color=theme.BG_INPUT, progress_color=theme.ACCENT_BLUE,
-            button_color=theme.TEXT_PRIMARY,
-            button_hover_color=theme.ACCENT_BLUE_HOVER,
-        )
-        slider.set(initial)
-        slider.pack(side="left", padx=4)
-        value_label.pack(side="left", padx=2)
-
-        return slider
-
-    def _add_camera_slider_with_entry(
-        self,
-        parent: Any,
-        label: str,
-        from_: float,
-        to: float,
-        initial: float,
-        setter: Callable[[float], None],
-        recommended: float = 0,
-    ) -> ctk.CTkSlider:
-        """Add a camera slider with an editable text entry and recommended value hint.
-
-        The text entry shows the current value and updates the slider on Enter/FocusOut.
-        A placeholder shows the recommended value when the entry is empty.
-        """
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(anchor="w", pady=1)
-
-        ctk.CTkLabel(
-            frame, text=label, width=120, anchor="w",
-            font=theme.font(11), text_color=theme.TEXT_SECONDARY,
-        ).pack(side="left")
-
-        entry = ctk.CTkEntry(
-            frame, width=50, font=theme.font(11),
-            fg_color=theme.BG_INPUT, text_color=theme.TEXT_PRIMARY,
-            border_color=theme.BORDER_SUBTLE,
-            corner_radius=theme.CORNER_RADIUS_SM,
-            placeholder_text=f"{recommended:g}",
-            placeholder_text_color=theme.TEXT_MUTED,
-        )
-        entry.insert(0, f"{initial:g}")
-        entry.pack(side="left", padx=2)
-
-        steps = max(1, int(to - from_))
-
-        def on_slider_change(val: float) -> None:
-            rounded = round(val)
-            setter(float(rounded))
-            entry.delete(0, "end")
-            entry.insert(0, str(rounded))
-            self._on_setting_changed()
-
-        slider = ctk.CTkSlider(
-            frame, from_=from_, to=to, number_of_steps=steps,
-            width=140, command=on_slider_change,
-            fg_color=theme.BG_INPUT, progress_color=theme.ACCENT_BLUE,
-            button_color=theme.TEXT_PRIMARY,
-            button_hover_color=theme.ACCENT_BLUE_HOVER,
-        )
-        slider.set(initial)
-        slider.pack(side="left", padx=4)
-
-        def on_entry_apply(_event: Any = None) -> None:
-            text = entry.get().strip()
-            if not text:
-                return
-            try:
-                val = float(text)
-                val = max(from_, min(to, val))
-                setter(val)
-                slider.set(val)
-                entry.delete(0, "end")
-                entry.insert(0, f"{val:g}")
-                self._on_setting_changed()
-            except ValueError:
-                pass
-
-        entry.bind("<Return>", on_entry_apply)
-        entry.bind("<FocusOut>", on_entry_apply)
-
-        return slider
-
     def _add_live_checkbox(
         self,
         parent: Any,
@@ -1157,17 +1021,23 @@ class MainWindow(ctk.CTk):
 
     # ---- Settings Callbacks ----
 
-
-
-    def _on_auto_wb_toggle(self, checked: bool) -> None:
-        """Handle auto white balance checkbox change."""
-        self._config.camera.auto_wb = 1.0 if checked else 0.0
+    def _on_autofocus_toggle(self, checked: bool) -> None:
+        """Handle autofocus checkbox change."""
+        self._config.camera.autofocus = 1.0 if checked else 0.0
         if checked:
-            self._wb_blue_slider.configure(state="disabled")
-            self._wb_red_slider.configure(state="disabled")
+            self._focus_slider.configure(state="disabled")
+            self._config.camera.focus = 0.0
         else:
-            self._wb_blue_slider.configure(state="normal")
-            self._wb_red_slider.configure(state="normal")
+            self._focus_slider.configure(state="normal")
+
+    def _on_auto_exposure_toggle(self, checked: bool) -> None:
+        """Handle auto-exposure checkbox change."""
+        self._config.camera.auto_exposure = 3.0 if checked else 1.0
+        if checked:
+            self._exposure_slider.configure(state="disabled")
+            self._config.camera.exposure = 0.0
+        else:
+            self._exposure_slider.configure(state="normal")
 
     def _on_mode_changed(self) -> None:
         """Handle connection mode radio change."""
@@ -1424,12 +1294,9 @@ class MainWindow(ctk.CTk):
             )
 
     def _toggle_settings(self) -> None:
-        """Toggle the settings panel. Shows beside video (column 1) so camera stays visible."""
+        """Toggle the settings overlay panel. Saves config on close."""
         if self._settings_visible:
             self._settings_frame.grid_remove()
-            self._right_frame.grid()  # Restore status panel
-            # Restore original column 1 width
-            self._main_frame.grid_columnconfigure(1, weight=0, minsize=270)
             self._settings_visible = False
             self._settings_btn.configure(
                 fg_color=theme.BTN_SECONDARY[0],
@@ -1446,11 +1313,9 @@ class MainWindow(ctk.CTk):
             if not self._settings_built:
                 self._build_settings_panel(self._settings_frame)
                 self._settings_built = True
-            # Hide status panel and show settings in column 1 (beside video)
-            self._right_frame.grid_remove()
-            self._main_frame.grid_columnconfigure(1, weight=0, minsize=370)
+            # Place settings over the video area (column 0), spanning full height
             self._settings_frame.grid(
-                row=0, column=1, sticky="nsew",
+                row=0, column=0, sticky="nsew", padx=(0, 8),
             )
             self._settings_visible = True
             self._settings_btn.configure(
