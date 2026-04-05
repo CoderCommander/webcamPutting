@@ -477,7 +477,18 @@ class Camera:
         if old_cap is not None:
             old_cap.release()
         self._cap = cap
-        self._apply_camera_properties()
+
+        # Force auto-exposure ON before applying user properties.
+        # Some cameras (Razer Kiyo Pro) produce black frames when manual
+        # exposure is applied via DirectShow — the driver ignores OpenCV's
+        # exposure values and stays dark. Auto-exposure lets the camera
+        # hardware handle brightness, which always works.
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3.0)  # 3 = auto
+        logger.debug("Grab thread: forced auto_exposure=3")
+
+        # Apply user properties EXCEPT manual exposure settings —
+        # auto_exposure=3 overrides them and they can cause black frames.
+        self._apply_camera_properties_safe()
         logger.info("Camera reopened on grab thread")
         self._grab_ready.set()
 
@@ -645,18 +656,38 @@ class Camera:
                 )
                 logger.debug("Set camera %s = %s (from queue)", name, value)
 
+    # Properties to skip during safe startup — these can cause black frames
+    # on cameras like the Razer Kiyo Pro when set via DirectShow.
+    _EXPOSURE_PROPS = {"auto_exposure", "exposure"}
+
     def _apply_camera_properties(self) -> None:
         """Apply all configured camera properties directly (not thread-safe for MSMF).
 
         Only call from the thread that owns the VideoCapture, or when the
         grab thread is not running.
         """
+        self._apply_camera_properties_impl(skip_exposure=False)
+
+    def _apply_camera_properties_safe(self) -> None:
+        """Apply camera properties but skip exposure settings.
+
+        Used during grab thread startup where auto_exposure=3 has been
+        forced. Skips auto_exposure and exposure to avoid overriding the
+        forced auto-exposure with the user's saved manual exposure.
+        """
+        self._apply_camera_properties_impl(skip_exposure=True)
+
+    def _apply_camera_properties_impl(self, *, skip_exposure: bool = False) -> None:
+        """Apply camera properties with optional exposure skip."""
         if self._cap is None:
             return
 
         auto_exp = getattr(self._settings, "auto_exposure", 0.0)
         auto_focus = getattr(self._settings, "autofocus", 0.0)
         for field_name, prop_id in _CAMERA_PROPS.items():
+            if skip_exposure and field_name in self._EXPOSURE_PROPS:
+                logger.debug("Skipping %s (auto-exposure forced)", field_name)
+                continue
             value = getattr(self._settings, field_name, 0.0)
             # Skip manual exposure/focus when auto mode is on — they conflict
             if field_name == "exposure" and auto_exp == 3.0:
