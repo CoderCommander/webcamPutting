@@ -445,8 +445,12 @@ class Camera:
             self._grab_running = False
             return
 
-        self._apply_camera_properties()
-        logger.info("Grab thread: using existing capture (no reopen)")
+        # Don't apply saved camera properties here — the camera already has
+        # working exposure/brightness from the firmware (Synapse, auto-exposure).
+        # Applying saved props like auto_exposure=1 + exposure=-5 would override
+        # that and cause black frames. User can still adjust via Settings sliders
+        # which queue property changes through _pending_props.
+        logger.info("Grab thread: using existing capture (no reopen, no property override)")
         self._grab_ready.set()
 
         # Set up message pump for MSMF fallback (DirectShow doesn't need it)
