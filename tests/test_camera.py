@@ -74,9 +74,10 @@ class TestValidateFrames:
         black_frame = np.zeros((360, 640, 3), dtype=np.uint8)
         good_frame = np.ones((360, 640, 3), dtype=np.uint8) * 128
 
-        # warmup reads (discarded) + first validation read is good
+        # exposure baseline reads (5) + warmup reads (60) + first validation read
         from birdman_putting.camera import _WARMUP_FRAMES
-        frames = [(True, black_frame)] * _WARMUP_FRAMES + [(True, good_frame)]
+        warmup_total = 5 + _WARMUP_FRAMES * 2  # baseline + doubled warmup
+        frames = [(True, black_frame)] * warmup_total + [(True, good_frame)]
         mock_cap.read.side_effect = frames
         camera._cap = mock_cap
 

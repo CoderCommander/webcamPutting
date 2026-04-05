@@ -34,10 +34,10 @@ _CAMERA_PROPS = {
     "autofocus": cv2.CAP_PROP_AUTOFOCUS,
 }
 
-_WARMUP_FRAMES = 30           # frames to discard before brightness checking (~2s at 30fps)
+_WARMUP_FRAMES = 30           # base frames to discard (doubled during validation)
 _WARMUP_DELAY = 0.05          # seconds between warmup reads
-_FRAME_VALIDATE_ATTEMPTS = 10 # frames to check after warmup
-_FRAME_VALIDATE_DELAY = 0.3   # seconds between validation reads (3s total window)
+_FRAME_VALIDATE_ATTEMPTS = 15 # frames to check after warmup (~4.5s window)
+_FRAME_VALIDATE_DELAY = 0.3   # seconds between validation reads
 _BLACK_FRAME_THRESHOLD = 3.0  # mean brightness below this = black frame
 
 
@@ -269,14 +269,32 @@ class Camera:
         # Force auto-exposure during validation — the user's saved settings
         # may include manual exposure that's too dark, producing all-black
         # frames. The grab thread will apply the real settings later.
-        self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3.0)  # 3 = auto
-        logger.debug("Validation: forced auto_exposure=3 for warmup")
+        #
+        # Some cameras (Razer Kiyo Pro) retain manual exposure in the driver
+        # even after switching to auto mode. Setting auto_exposure alone
+        # isn't enough — we also set a safe manual exposure value first,
+        # THEN enable auto-exposure so the camera has a bright starting point.
+        self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)   # 1 = manual
+        self._cap.set(cv2.CAP_PROP_EXPOSURE, -3.0)        # safe bright value
+        logger.debug("Validation: set manual exposure=-3 as bright baseline")
+        # Read a few frames to let the manual exposure take effect
+        for _ in range(5):
+            self._cap.read()
+            time.sleep(0.05)
+        # Now switch to auto-exposure
+        self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3.0)   # 3 = auto
+        logger.debug("Validation: switched to auto_exposure=3 for warmup")
 
         # Phase 1: Warmup — read and discard frames for auto-exposure
-        for i in range(1, _WARMUP_FRAMES + 1):
+        # Use a longer warmup (60 frames) — some cameras need several seconds
+        # for auto-exposure to ramp up after being stuck on a dark value.
+        warmup_count = _WARMUP_FRAMES * 2  # 60 frames
+        for i in range(1, warmup_count + 1):
             ret, frame = self._cap.read()
             if not ret or frame is None:
                 logger.debug("Warmup frame %d: no frame", i)
+            elif i % 20 == 0 and frame is not None:
+                logger.debug("Warmup frame %d: mean=%.1f", i, float(np.mean(frame)))
             time.sleep(_WARMUP_DELAY)
 
         # Phase 2: Validate — require at least one non-black frame
