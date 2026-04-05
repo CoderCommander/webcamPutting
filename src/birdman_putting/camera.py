@@ -34,11 +34,10 @@ _CAMERA_PROPS = {
     "autofocus": cv2.CAP_PROP_AUTOFOCUS,
 }
 
-_WARMUP_FRAMES = 30           # base frames to discard (doubled during validation)
+_WARMUP_FRAMES = 15           # frames to discard before validation (~0.75s at 30fps)
 _WARMUP_DELAY = 0.05          # seconds between warmup reads
-_FRAME_VALIDATE_ATTEMPTS = 15 # frames to check after warmup (~4.5s window)
-_FRAME_VALIDATE_DELAY = 0.3   # seconds between validation reads
-_BLACK_FRAME_THRESHOLD = 3.0  # mean brightness below this = black frame
+_FRAME_VALIDATE_ATTEMPTS = 5  # frames to check after warmup
+_FRAME_VALIDATE_DELAY = 0.2   # seconds between validation reads
 
 
 class Camera:
@@ -245,74 +244,43 @@ class Camera:
         )
         return True
 
-    @staticmethod
-    def _is_black_frame(frame: np.ndarray) -> bool:
-        """Check if a frame is effectively black (all/nearly-all zero pixels)."""
-        return float(np.mean(frame)) < _BLACK_FRAME_THRESHOLD
-
     def _validate_frames(self) -> bool:
-        """Read test frames to confirm the camera is producing usable data.
+        """Confirm the camera can deliver frames (not stuck or disconnected).
 
-        Forces auto-exposure ON during validation so the camera can auto-adjust
-        brightness. User's actual exposure settings are applied later by the
-        grab thread when it reopens the camera.
-
-        Phase 1: Discard warmup frames (auto-exposure settling).
-        Phase 2: Validate that at least one frame is non-black.
+        Only checks that cap.read() returns data — does NOT reject black
+        frames. Some cameras (Razer Kiyo Pro) produce black frames for
+        several seconds while auto-exposure converges; the grab thread
+        will pick up real frames once the sensor settles.
 
         Returns:
-            True if at least one non-black frame was successfully read.
+            True if at least one frame was successfully read.
         """
         if self._cap is None:
             return False
 
-        # Force auto-exposure during validation — the user's saved settings
-        # may include manual exposure that's too dark, producing all-black
-        # frames. The grab thread will apply the real settings later.
-        #
-        # Some cameras (Razer Kiyo Pro) retain manual exposure in the driver
-        # even after switching to auto mode. Setting auto_exposure alone
-        # isn't enough — we also set a safe manual exposure value first,
-        # THEN enable auto-exposure so the camera has a bright starting point.
-        self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)   # 1 = manual
-        self._cap.set(cv2.CAP_PROP_EXPOSURE, -3.0)        # safe bright value
-        logger.debug("Validation: set manual exposure=-3 as bright baseline")
-        # Read a few frames to let the manual exposure take effect
-        for _ in range(5):
-            self._cap.read()
-            time.sleep(0.05)
-        # Now switch to auto-exposure
-        self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3.0)   # 3 = auto
-        logger.debug("Validation: switched to auto_exposure=3 for warmup")
-
-        # Phase 1: Warmup — read and discard frames for auto-exposure
-        # Use a longer warmup (60 frames) — some cameras need several seconds
-        # for auto-exposure to ramp up after being stuck on a dark value.
-        warmup_count = _WARMUP_FRAMES * 2  # 60 frames
-        for i in range(1, warmup_count + 1):
+        # Phase 1: Warmup — discard initial frames
+        for i in range(1, _WARMUP_FRAMES + 1):
             ret, frame = self._cap.read()
             if not ret or frame is None:
                 logger.debug("Warmup frame %d: no frame", i)
-            elif i % 20 == 0 and frame is not None:
-                logger.debug("Warmup frame %d: mean=%.1f", i, float(np.mean(frame)))
             time.sleep(_WARMUP_DELAY)
 
-        # Phase 2: Validate — require at least one non-black frame
+        # Phase 2: Validate — just need one readable frame
         for attempt in range(1, _FRAME_VALIDATE_ATTEMPTS + 1):
             ret, frame = self._cap.read()
             if ret and frame is not None:
-                if not self._is_black_frame(frame):
-                    logger.debug(
-                        "Frame validation passed on attempt %d (mean=%.1f)",
-                        attempt, float(np.mean(frame)),
-                    )
-                    return True
+                mean_val = float(np.mean(frame))
                 logger.debug(
-                    "Frame validation attempt %d: black frame (mean=%.1f)",
-                    attempt, float(np.mean(frame)),
+                    "Frame validation passed on attempt %d (mean=%.1f)",
+                    attempt, mean_val,
                 )
-            else:
-                logger.debug("Frame validation attempt %d: no frame", attempt)
+                if mean_val < 3.0:
+                    logger.warning(
+                        "Camera frames are dark (mean=%.1f) — auto-exposure "
+                        "may still be converging", mean_val,
+                    )
+                return True
+            logger.debug("Frame validation attempt %d: no frame", attempt)
             time.sleep(_FRAME_VALIDATE_DELAY)
 
         return False

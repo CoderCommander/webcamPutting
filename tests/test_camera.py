@@ -10,35 +10,6 @@ from birdman_putting.camera import Camera
 from birdman_putting.config import CameraSettings
 
 
-class TestIsBlackFrame:
-    """Test the static black frame detection helper."""
-
-    def test_pure_black_is_detected(self) -> None:
-        frame = np.zeros((360, 640, 3), dtype=np.uint8)
-        assert Camera._is_black_frame(frame) is True
-
-    def test_near_black_is_detected(self) -> None:
-        frame = np.ones((360, 640, 3), dtype=np.uint8) * 2
-        assert Camera._is_black_frame(frame) is True
-
-    def test_dim_frame_is_not_black(self) -> None:
-        frame = np.ones((360, 640, 3), dtype=np.uint8) * 10
-        assert Camera._is_black_frame(frame) is False
-
-    def test_normal_frame_is_not_black(self) -> None:
-        frame = np.ones((360, 640, 3), dtype=np.uint8) * 128
-        assert Camera._is_black_frame(frame) is False
-
-    def test_threshold_boundary(self) -> None:
-        # Just below threshold — should be black
-        frame = np.full((100, 100, 3), 2, dtype=np.uint8)
-        assert Camera._is_black_frame(frame) is True
-
-        # Above threshold — should not be black
-        frame = np.full((100, 100, 3), 4, dtype=np.uint8)
-        assert Camera._is_black_frame(frame) is False
-
-
 class TestValidateFrames:
     """Test the _validate_frames method with mocked capture."""
 
@@ -57,28 +28,12 @@ class TestValidateFrames:
         assert camera._validate_frames() is True
 
     @patch("birdman_putting.camera.time.sleep")
-    def test_black_frames_fail(self, mock_sleep: MagicMock) -> None:
+    def test_black_frames_still_pass(self, mock_sleep: MagicMock) -> None:
+        """Black frames are accepted — brightness validates later via grab thread."""
         camera = self._make_camera()
         mock_cap = MagicMock()
         black_frame = np.zeros((360, 640, 3), dtype=np.uint8)
         mock_cap.read.return_value = (True, black_frame)
-        camera._cap = mock_cap
-
-        assert camera._validate_frames() is False
-
-    @patch("birdman_putting.camera.time.sleep")
-    def test_warmup_then_good_frame_passes(self, mock_sleep: MagicMock) -> None:
-        """Simulate camera that produces black during warmup then good frames."""
-        camera = self._make_camera()
-        mock_cap = MagicMock()
-        black_frame = np.zeros((360, 640, 3), dtype=np.uint8)
-        good_frame = np.ones((360, 640, 3), dtype=np.uint8) * 128
-
-        # exposure baseline reads (5) + warmup reads (60) + first validation read
-        from birdman_putting.camera import _WARMUP_FRAMES
-        warmup_total = 5 + _WARMUP_FRAMES * 2  # baseline + doubled warmup
-        frames = [(True, black_frame)] * warmup_total + [(True, good_frame)]
-        mock_cap.read.side_effect = frames
         camera._cap = mock_cap
 
         assert camera._validate_frames() is True
