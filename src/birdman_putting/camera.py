@@ -433,63 +433,20 @@ class Camera:
             except Exception:
                 pass
 
-        # Reopen the camera on this thread so DirectShow/MSMF COM objects
-        # belong to this thread's apartment, preventing Windows from
-        # throttling capture when the main window loses focus.
-        s = self._settings
-        old_cap = self._cap
-        res_w = s.width if s.width > 0 else 1280
-        res_h = s.height if s.height > 0 else 720
-        target_fps = s.fps_override if s.fps_override > 0 else 60
-
-        # Try DirectShow first for 60fps hardware capture. Camera properties
-        # are applied immediately after open (before any frame reads), which
-        # prevents the black-frame issue seen when properties were deferred.
-        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-        backend = "DirectShow"
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(s.webcam_index)
-            backend = "default"
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-            # Request MJPEG codec only on DirectShow — on MSMF it can
-            # cause the camera to negotiate 30fps instead of 60fps.
-            if s.mjpeg and backend == "DirectShow":
-                mjpg_fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')  # type: ignore[attr-defined]
-                cap.set(cv2.CAP_PROP_FOURCC, mjpg_fourcc)
-            cap.set(cv2.CAP_PROP_FPS, target_fps)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            actual_fps = cap.get(cv2.CAP_PROP_FPS)
-            actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-            codec = "".join(chr((actual_fourcc >> (8 * i)) & 0xFF) for i in range(4))
-            logger.info(
-                "Grab thread: %s %s @ %.0ffps", backend, codec, actual_fps,
-            )
-
-        if not cap.isOpened():
-            logger.error("Grab thread failed to reopen camera")
+        # Reuse the existing VideoCapture instead of reopening.
+        # Reopening creates a fresh DirectShow connection that resets
+        # camera firmware settings (Razer Synapse exposure, etc.) and
+        # the Kiyo Pro starts black — OpenCV can't fix it via properties.
+        # COM is initialized on this thread (MTA) which is sufficient for
+        # cross-thread DirectShow/MSMF access.
+        if self._cap is None or not self._cap.isOpened():
+            logger.error("Grab thread: no open camera to use")
             self._grab_ready.set()
             self._grab_running = False
             return
 
-        # Release old capture from main thread and use new one
-        if old_cap is not None:
-            old_cap.release()
-        self._cap = cap
-
-        # Force auto-exposure ON before applying user properties.
-        # Some cameras (Razer Kiyo Pro) produce black frames when manual
-        # exposure is applied via DirectShow — the driver ignores OpenCV's
-        # exposure values and stays dark. Auto-exposure lets the camera
-        # hardware handle brightness, which always works.
-        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3.0)  # 3 = auto
-        logger.debug("Grab thread: forced auto_exposure=3")
-
-        # Apply user properties EXCEPT manual exposure settings —
-        # auto_exposure=3 overrides them and they can cause black frames.
-        self._apply_camera_properties_safe()
-        logger.info("Camera reopened on grab thread")
+        self._apply_camera_properties()
+        logger.info("Grab thread: using existing capture (no reopen)")
         self._grab_ready.set()
 
         # Set up message pump for MSMF fallback (DirectShow doesn't need it)
@@ -656,38 +613,18 @@ class Camera:
                 )
                 logger.debug("Set camera %s = %s (from queue)", name, value)
 
-    # Properties to skip during safe startup — these can cause black frames
-    # on cameras like the Razer Kiyo Pro when set via DirectShow.
-    _EXPOSURE_PROPS = {"auto_exposure", "exposure"}
-
     def _apply_camera_properties(self) -> None:
-        """Apply all configured camera properties directly (not thread-safe for MSMF).
+        """Apply all configured camera properties directly.
 
         Only call from the thread that owns the VideoCapture, or when the
         grab thread is not running.
         """
-        self._apply_camera_properties_impl(skip_exposure=False)
-
-    def _apply_camera_properties_safe(self) -> None:
-        """Apply camera properties but skip exposure settings.
-
-        Used during grab thread startup where auto_exposure=3 has been
-        forced. Skips auto_exposure and exposure to avoid overriding the
-        forced auto-exposure with the user's saved manual exposure.
-        """
-        self._apply_camera_properties_impl(skip_exposure=True)
-
-    def _apply_camera_properties_impl(self, *, skip_exposure: bool = False) -> None:
-        """Apply camera properties with optional exposure skip."""
         if self._cap is None:
             return
 
         auto_exp = getattr(self._settings, "auto_exposure", 0.0)
         auto_focus = getattr(self._settings, "autofocus", 0.0)
         for field_name, prop_id in _CAMERA_PROPS.items():
-            if skip_exposure and field_name in self._EXPOSURE_PROPS:
-                logger.debug("Skipping %s (auto-exposure forced)", field_name)
-                continue
             value = getattr(self._settings, field_name, 0.0)
             # Skip manual exposure/focus when auto mode is on — they conflict
             if field_name == "exposure" and auto_exp == 3.0:
