@@ -190,46 +190,32 @@ class Camera:
         return True
 
     def _try_open_default(self) -> bool:
-        """Try opening the camera, preferring DirectShow over MSMF.
+        """Try opening the camera with the default backend (MSMF on Windows).
 
-        DirectShow does not require a Windows message pump on the owning
-        thread, so the grab thread can read without throttling when the
-        main window is backgrounded.  Falls back to MSMF if DirectShow
-        fails.
+        DirectShow cannot be used here because it resets the Razer Kiyo Pro
+        firmware settings (exposure/white balance), causing black frames.
+        MSMF preserves firmware state.  The grab thread runs a Windows
+        message pump to prevent MSMF from throttling when backgrounded.
 
         Returns:
             True if the capture device opened (frames not yet validated).
         """
         s = self._settings
-        res_w = s.width if s.width > 0 else 1280
-        res_h = s.height if s.height > 0 else 720
-        target_fps = s.fps_override if s.fps_override > 0 else 60
-
-        # Try DirectShow first (no throttling, no message pump needed)
-        self._cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-        if self._cap is not None and self._cap.isOpened():
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-            self._cap.set(cv2.CAP_PROP_FPS, target_fps)
-            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            logger.info(
-                "DirectShow camera: %dx%d @ %d fps requested",
-                res_w, res_h, target_fps,
-            )
-            return True
-
-        # Fall back to default backend (MSMF)
         self._cap = cv2.VideoCapture(s.webcam_index)
         if self._cap is None or not self._cap.isOpened():
-            logger.error("Failed to open camera %d", s.webcam_index)
+            logger.error("Failed to open camera %d with default backend", s.webcam_index)
             return False
 
+        res_w = s.width if s.width > 0 else 1280
+        res_h = s.height if s.height > 0 else 720
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+
+        target_fps = s.fps_override if s.fps_override > 0 else 60
         self._cap.set(cv2.CAP_PROP_FPS, target_fps)
 
         logger.info(
-            "MSMF fallback camera: %dx%d @ %d fps requested",
+            "Default backend camera: %dx%d @ %d fps requested",
             res_w, res_h, target_fps,
         )
         return True
@@ -369,6 +355,9 @@ class Camera:
         if sys.platform == "win32":
             try:
                 import ctypes
+                # Initialize COM on this thread (MTA) — required for MSMF
+                # message pump to function properly on a background thread
+                ctypes.windll.ole32.CoInitializeEx(None, 0)  # type: ignore[attr-defined]
                 kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
                 kernel32.SetThreadPriority(
                     kernel32.GetCurrentThread(), 2,  # THREAD_PRIORITY_HIGHEST
@@ -389,9 +378,33 @@ class Camera:
             self._cap.read()
         logger.info("Grab thread: discarded %d settle frames", _SETTLE_FRAMES)
 
+        # Set up Windows message pump for MSMF backend.
+        # MSMF requires periodic message processing on the reading thread;
+        # without it, capture throttles to ~25fps when the window is
+        # backgrounded or loses focus.
+        _pump_messages = None
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                import ctypes.wintypes as wt
+                _msg = wt.MSG()
+                PM_REMOVE = 0x0001
+                user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+
+                def _pump_messages() -> None:
+                    while user32.PeekMessageW(
+                        ctypes.byref(_msg), 0, 0, 0, PM_REMOVE,
+                    ):
+                        user32.TranslateMessage(ctypes.byref(_msg))
+                        user32.DispatchMessageW(ctypes.byref(_msg))
+            except Exception:
+                _pump_messages = None
+
         grab_count = 0
         grab_start = time.perf_counter()
         while self._grab_running and self._cap is not None:
+            if _pump_messages is not None:
+                _pump_messages()
             ret, frame = self._cap.read()
             if ret and frame is not None:
                 with self._frame_lock:
