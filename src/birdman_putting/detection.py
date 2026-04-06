@@ -27,11 +27,13 @@ class BallDetection:
 class BallDetector:
     """Detects a golf ball in video frames using HSV color filtering.
 
-    Uses the same double BGR→HSV conversion as the original code:
-    the original converted BGR→HSV, then passed the HSV image to
-    ColorModuleExtended which converted it *again* (treating HSV bytes
-    as BGR). All 12 built-in presets were tuned against this
-    double-converted color space, so we must replicate it here.
+    Uses a single BGR→HSV conversion.  The original cam-putting-py code
+    accidentally converted twice (BGR→HSV, then treated the HSV bytes as
+    BGR and converted again).  While some legacy presets were tuned
+    against that double-converted space, the double conversion produces
+    near-100% mask coverage with common camera settings, making detection
+    unreliable.  A single conversion gives correct HSV values and stable
+    detections.
     """
 
     def __init__(
@@ -98,10 +100,9 @@ class BallDetector:
         crop_x2 = min(w, zone_x2_limit + margin)
         roi = frame[crop_y1:crop_y2, crop_x1:crop_x2]
 
-        # Blur and double-convert to match the original calibrated color space.
+        # Blur and convert to HSV for color-based detection.
         blurred = cv2.GaussianBlur(roi, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-        hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
 
         # Create color mask (using cached bounds)
         mask = cv2.inRange(hsv, self._lower, self._upper)

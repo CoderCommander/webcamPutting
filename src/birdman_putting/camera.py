@@ -324,31 +324,29 @@ class Camera:
         return True
 
     def start_grab_thread(self) -> None:
-        """Start a dedicated thread that owns the camera and grabs frames.
+        """Start a dedicated thread that continuously reads frames.
 
-        The camera is reopened on the grab thread so that DirectShow/MSMF
-        COM objects belong to that thread's apartment. This prevents
-        Windows from throttling capture when the main window loses focus.
+        Reuses the existing VideoCapture opened on the main thread rather
+        than reopening it.  Reopening resets camera firmware settings
+        (Razer Kiyo Pro loses Synapse exposure config → black frames).
+        DirectShow does not require COM apartment ownership for reads,
+        so cross-thread access is safe.
         """
         if self._video_file or self._grab_running:
             return
 
-        # Release the camera from the main thread — it will be reopened
-        # on the grab thread with its own COM apartment
         self._grab_running = True
-        self._grab_ready = threading.Event()
         self._grab_thread = threading.Thread(
             target=self._grab_loop, daemon=True, name="camera-grab",
         )
         self._grab_thread.start()
-        # Wait for the grab thread to reopen the camera
-        self._grab_ready.wait(timeout=5)
         logger.info("Camera grab thread started")
 
     def _grab_loop(self) -> None:
         """Continuously read frames from the camera into _latest_frame.
 
-        Opens its own VideoCapture so COM objects are on this thread.
+        Reuses the VideoCapture already opened on the main thread.
+        Reopening would reset Razer Kiyo Pro firmware → black frames.
         """
         import sys
 
@@ -360,79 +358,25 @@ class Camera:
                 kernel32.SetThreadPriority(
                     kernel32.GetCurrentThread(), 2,  # THREAD_PRIORITY_HIGHEST
                 )
-                # Initialize COM on this thread (MTA for DirectShow)
-                ctypes.windll.ole32.CoInitializeEx(None, 0)  # type: ignore[attr-defined]
                 # Set 1ms timer resolution to prevent background throttling
                 ctypes.windll.winmm.timeBeginPeriod(1)  # type: ignore[attr-defined]
             except Exception:
                 pass
 
-        # Reopen the camera on this thread using DirectShow.
-        # MSMF (default backend) requires a Windows message pump on the
-        # owning thread; without one it falls back to the main thread's
-        # pump, which tkinter throttles when backgrounded. DirectShow
-        # doesn't have this dependency.
-        s = self._settings
-        old_cap = self._cap
-        res_w = s.width if s.width > 0 else 1280
-        res_h = s.height if s.height > 0 else 720
-        target_fps = s.fps_override if s.fps_override > 0 else 60
+        logger.info("Grab thread reading from existing capture")
 
-        # Use DirectShow for stable 30fps that doesn't throttle when backgrounded
-        # and doesn't compete with GSPro for system resources.
-        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
-        backend = "DirectShow"
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(s.webcam_index, cv2.CAP_MSMF)
-            backend = "MSMF"
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-            cap.set(cv2.CAP_PROP_FPS, target_fps)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            actual_fps = cap.get(cv2.CAP_PROP_FPS)
-            actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-            codec = "".join(chr((actual_fourcc >> (8 * i)) & 0xFF) for i in range(4))
-            logger.info(
-                "Grab thread: %s %s @ %.0ffps", backend, codec, actual_fps,
-            )
-
-        if not cap.isOpened():
-            logger.error("Grab thread failed to reopen camera")
-            self._grab_ready.set()
-            self._grab_running = False
-            return
-
-        # Release old capture from main thread and use new one
-        if old_cap is not None:
-            old_cap.release()
-        self._cap = cap
-        self._apply_camera_properties()
-        logger.info("Camera reopened on grab thread")
-        self._grab_ready.set()
-
-        # Set up message pump for MSMF fallback (DirectShow doesn't need it)
-        _pump_messages = None
-        if sys.platform == "win32":
-            try:
-                import ctypes.wintypes as wt
-                _msg = wt.MSG()
-                PM_REMOVE = 0x0001
-
-                def _pump_messages() -> None:
-                    while user32.PeekMessageW(ctypes.byref(_msg), 0, 0, 0, PM_REMOVE):
-                        user32.TranslateMessage(ctypes.byref(_msg))
-                        user32.DispatchMessageW(ctypes.byref(_msg))
-
-                user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-            except Exception:
-                _pump_messages = None
+        # Discard initial frames so camera properties can settle
+        # (auto-exposure, white balance, etc. need a few frames to converge)
+        _SETTLE_FRAMES = 15
+        for i in range(_SETTLE_FRAMES):
+            if not self._grab_running or self._cap is None:
+                return
+            self._cap.read()
+        logger.info("Grab thread: discarded %d settle frames", _SETTLE_FRAMES)
 
         grab_count = 0
         grab_start = time.perf_counter()
         while self._grab_running and self._cap is not None:
-            if _pump_messages is not None:
-                _pump_messages()
             ret, frame = self._cap.read()
             if ret and frame is not None:
                 with self._frame_lock:

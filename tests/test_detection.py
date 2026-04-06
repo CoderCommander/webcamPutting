@@ -238,18 +238,16 @@ class TestGenerateHsvFromPatch:
         assert 0 <= hsv_range.vmin <= 255
         assert 0 <= hsv_range.vmax <= 255
 
-    def test_detector_uses_double_conversion_range(self):
-        """A detector with a range matching the double-converted color space detects the ball."""
+    def test_detector_uses_single_conversion_range(self):
+        """A detector with an HSV range matching single BGR→HSV detects the ball."""
         frame = np.zeros((360, 640, 3), dtype=np.uint8)
         # Draw an orange ball
         cv2.circle(frame, (100, 200), 15, (0, 140, 255), -1)
 
-        # Compute the double-converted HSV for this BGR color and build a range
-        # BGR(0,140,255) → HSV(~13,255,255) → treat as BGR → HSV(~30,~242,255)
-        # Use a range wide enough to cover blur effects
+        # BGR(0,140,255) → single HSV gives H≈13, S=255, V=255
         from birdman_putting.color_presets import HSVRange
 
-        hsv_range = HSVRange(hmin=20, smin=200, vmin=200, hmax=40, smax=255, vmax=255)
+        hsv_range = HSVRange(hmin=5, smin=200, vmin=200, hmax=25, smax=255, vmax=255)
 
         detector = BallDetector(hsv_range=hsv_range, min_radius=5)
         detection = detector.detect(

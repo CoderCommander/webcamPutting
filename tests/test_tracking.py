@@ -51,7 +51,8 @@ class TestStateTransitions:
 
         assert tracker.state == ShotState.STARTED
 
-        # Ball moves past gateway (start_x2=180, gateway at 190)
+        # Ball moves through transit zone then past gateway (start_x2=180, gateway at 195)
+        tracker.update(_det(185, 300, t + 0.4))  # transit between start zone and gateway
         tracker.update(_det(195, 300, t + 0.5))
         assert tracker.state == ShotState.ENTERED
 
@@ -64,8 +65,9 @@ class TestStateTransitions:
         for i in range(10):
             tracker.update(_det(50, 300, t + i * 0.016))
 
-        # Enter gateway
+        # Transit through zone then enter gateway
         gateway_x1 = zone.start_x2 + zone.gateway_width
+        tracker.update(_det(zone.start_x2 + 5, 300, t + 0.4))  # transit
         tracker.update(_det(gateway_x1 + 5, 300, t + 0.5))
         assert tracker.state == ShotState.ENTERED
 
@@ -256,8 +258,9 @@ class TestRightToLeft:
 
         assert rtl_tracker.state == ShotState.STARTED
 
-        # Gateway is to the LEFT: gateway_x2 = start_x1 - gw_width = 390
+        # Transit through zone then enter gateway (to the LEFT)
         gateway_x2 = zone.start_x1 - zone.gateway_width
+        rtl_tracker.update(_det(zone.start_x1 - 5, 300, t + 0.4))  # transit
         rtl_tracker.update(_det(gateway_x2 - 5, 300, t + 0.5))
         assert rtl_tracker.state == ShotState.ENTERED
 
@@ -272,9 +275,10 @@ class TestRightToLeft:
 
         assert rtl_tracker.state == ShotState.STARTED
 
-        # Enter gateway (moving left past start_x1)
+        # Transit then enter gateway (moving left past start_x1)
         gateway_x2 = zone.start_x1 - zone.gateway_width
         gateway_x1 = gateway_x2 - zone.gateway_width
+        rtl_tracker.update(_det(zone.start_x1 - 5, 300, t + 0.4))  # transit
         rtl_tracker.update(_det(gateway_x2 - 5, 300, t + 0.5))
         assert rtl_tracker.state == ShotState.ENTERED
 

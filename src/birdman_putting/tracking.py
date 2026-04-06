@@ -189,6 +189,11 @@ class BallTracker:
         if self._state == ShotState.STARTED:
             # Check if ball moved into gateway
             entered = x <= gateway_x2 if self._is_rtl else x >= gateway_x1
+            if entered and len(self._positions) < 2:
+                # Only start position recorded — ball hasn't been seen moving
+                # toward the gateway. This is likely a noise contour in the
+                # gateway area, not actual ball movement. Ignore it.
+                return None
             if entered:
                 self._state = ShotState.ENTERED
                 self._entry_time = detection.timestamp

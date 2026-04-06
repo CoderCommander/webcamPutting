@@ -639,25 +639,23 @@ class PuttingApp:
                         self._frame_queue.put_nowait(display_frame)
                 continue
 
-            # Widen detection zone when ball is in motion (extended tracking)
+            # Set detection area based on state and tracking mode
             if (
                 self.config.shot.extended_tracking
                 and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
             ):
                 detect_x1 = 0
                 detect_x2 = display_frame.shape[1]
+            elif self._tracker.state == ShotState.ENTERED:
+                # Wide search to track ball exiting past gateway
+                detect_x1 = zone.start_x1
+                detect_x2 = display_frame.shape[1]
             else:
                 detect_x1 = zone.start_x1
                 detect_x2 = display_frame.shape[1]
 
-            # Detect ball
-            # When ball is in motion (STARTED/ENTERED):
-            # - Widen Y range so vertical drift doesn't lose the ball
-            # - Disable circularity filter (motion blur makes ball non-circular)
-            ball_in_motion = self._tracker.state in (
-                ShotState.STARTED, ShotState.ENTERED,
-            )
-            if ball_in_motion:
+            # Relax detection (widen Y, disable circularity) only in ENTERED
+            if self._tracker.state == ShotState.ENTERED:
                 det_y1 = max(0, zone.y1 - 50)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 50)
                 saved_circ = self._detector.min_circularity
@@ -665,22 +663,59 @@ class PuttingApp:
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2
+                saved_circ = None
 
-            detection = self._detector.detect(
-                frame=display_frame,
-                zone_x1=detect_x1,
-                zone_x2_limit=detect_x2,
-                zone_y1=det_y1,
-                zone_y2=det_y2,
-                timestamp=frame_time,
-                expected_radius=(
-                    self._tracker.start_circle[2]
-                    if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
-                    else None
-                ),
+            expected_r = (
+                self._tracker.start_circle[2]
+                if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
+                else None
             )
 
-            if ball_in_motion:
+            # Two-pass detection in STARTED state:
+            # 1. Search start zone only — if ball still there, use that
+            # 2. Only if ball NOT found at start, search wider area for gateway
+            # This prevents noise contours in the gateway area from
+            # triggering false ENTERED transitions while the ball is stationary.
+            if self._tracker.state == ShotState.STARTED:
+                # Pass 1: start zone only
+                detection = self._detector.detect(
+                    frame=display_frame,
+                    zone_x1=zone.start_x1,
+                    zone_x2_limit=zone.start_x2,
+                    zone_y1=det_y1,
+                    zone_y2=det_y2,
+                    timestamp=frame_time,
+                    expected_radius=expected_r,
+                )
+                if detection is None:
+                    # Ball not in start zone — search wider for gateway crossing
+                    if zone.direction == "right_to_left":
+                        wider_x1 = max(0, zone.start_x1 - 2 * zone.gateway_width)
+                        wider_x2 = zone.start_x2
+                    else:
+                        wider_x1 = zone.start_x1
+                        wider_x2 = zone.start_x2 + 2 * zone.gateway_width
+                    detection = self._detector.detect(
+                        frame=display_frame,
+                        zone_x1=wider_x1,
+                        zone_x2_limit=wider_x2,
+                        zone_y1=det_y1,
+                        zone_y2=det_y2,
+                        timestamp=frame_time,
+                        expected_radius=expected_r,
+                    )
+            else:
+                detection = self._detector.detect(
+                    frame=display_frame,
+                    zone_x1=detect_x1,
+                    zone_x2_limit=detect_x2,
+                    zone_y1=det_y1,
+                    zone_y2=det_y2,
+                    timestamp=frame_time,
+                    expected_radius=expected_r,
+                )
+
+            if saved_circ is not None:
                 self._detector.min_circularity = saved_circ
 
             # Track ball (with state transition logging)
@@ -1100,21 +1135,21 @@ class PuttingApp:
                     self._running = False
                 continue
 
-            # Widen detection zone when ball is in motion (extended tracking)
+            # Set detection area based on state and tracking mode
             if (
                 self.config.shot.extended_tracking
                 and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
             ):
                 detect_x1 = 0
                 detect_x2 = display_frame.shape[1]
+            elif self._tracker.state == ShotState.ENTERED:
+                detect_x1 = zone.start_x1
+                detect_x2 = display_frame.shape[1]
             else:
                 detect_x1 = zone.start_x1
                 detect_x2 = display_frame.shape[1]
 
-            ball_in_motion = self._tracker.state in (
-                ShotState.STARTED, ShotState.ENTERED,
-            )
-            if ball_in_motion:
+            if self._tracker.state == ShotState.ENTERED:
                 det_y1 = max(0, zone.y1 - 50)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 50)
                 saved_circ = self._detector.min_circularity
@@ -1122,22 +1157,53 @@ class PuttingApp:
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2
+                saved_circ = None
 
-            detection = self._detector.detect(
-                frame=display_frame,
-                zone_x1=detect_x1,
-                zone_x2_limit=detect_x2,
-                zone_y1=det_y1,
-                zone_y2=det_y2,
-                timestamp=frame_time,
-                expected_radius=(
-                    self._tracker.start_circle[2]
-                    if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
-                    else None
-                ),
+            expected_r = (
+                self._tracker.start_circle[2]
+                if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
+                else None
             )
 
-            if ball_in_motion:
+            # Two-pass detection in STARTED state (headless)
+            if self._tracker.state == ShotState.STARTED:
+                detection = self._detector.detect(
+                    frame=display_frame,
+                    zone_x1=zone.start_x1,
+                    zone_x2_limit=zone.start_x2,
+                    zone_y1=det_y1,
+                    zone_y2=det_y2,
+                    timestamp=frame_time,
+                    expected_radius=expected_r,
+                )
+                if detection is None:
+                    if zone.direction == "right_to_left":
+                        wider_x1 = max(0, zone.start_x1 - 2 * zone.gateway_width)
+                        wider_x2 = zone.start_x2
+                    else:
+                        wider_x1 = zone.start_x1
+                        wider_x2 = zone.start_x2 + 2 * zone.gateway_width
+                    detection = self._detector.detect(
+                        frame=display_frame,
+                        zone_x1=wider_x1,
+                        zone_x2_limit=wider_x2,
+                        zone_y1=det_y1,
+                        zone_y2=det_y2,
+                        timestamp=frame_time,
+                        expected_radius=expected_r,
+                    )
+            else:
+                detection = self._detector.detect(
+                    frame=display_frame,
+                    zone_x1=detect_x1,
+                    zone_x2_limit=detect_x2,
+                    zone_y1=det_y1,
+                    zone_y2=det_y2,
+                    timestamp=frame_time,
+                    expected_radius=expected_r,
+                )
+
+            if saved_circ is not None:
                 self._detector.min_circularity = saved_circ
 
             shot_result = self._tracker.update(detection)
