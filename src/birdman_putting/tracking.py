@@ -72,6 +72,7 @@ class BallTracker:
         self._px_mm_ratio: float = 0.0
         self._positions: deque[tuple[int, int, float]] = deque(maxlen=max_trail_points)
         self._shot_count: int = 0
+        self._post_shot_cooldown_until: float = 0.0
 
         # Last shot data for UI display
         self.last_shot_speed: float = 0.0
@@ -101,8 +102,14 @@ class BallTracker:
     def px_mm_ratio(self) -> float:
         return self._px_mm_ratio
 
-    def reset(self) -> None:
-        """Reset tracking state for next shot."""
+    def reset(self, cooldown: bool = False) -> None:
+        """Reset tracking state for next shot.
+
+        Args:
+            cooldown: If True, activate post-shot cooldown to prevent
+                immediate re-arm.  Only shot completions should pass True;
+                manual resets and watchdog resets should use the default.
+        """
         self._state = ShotState.IDLE
         self._start_candidates.clear()
         self._start_circle = (0, 0, 0)
@@ -111,6 +118,10 @@ class BallTracker:
         self._entry_time = 0.0
         self._px_mm_ratio = 0.0
         self._positions.clear()
+        if cooldown and self.shot_settings.post_shot_cooldown > 0:
+            self._post_shot_cooldown_until = (
+                time.perf_counter() + self.shot_settings.post_shot_cooldown
+            )
 
     @property
     def _is_rtl(self) -> bool:
@@ -149,7 +160,12 @@ class BallTracker:
         x, y = detection.x, detection.y
 
         # --- IDLE / BALL_DETECTED: Looking for stable ball in start zone ---
+        # Post-shot cooldown: ignore detections until timer expires
         if self._state in (ShotState.IDLE, ShotState.BALL_DETECTED):
+            if self._post_shot_cooldown_until > 0:
+                if time.perf_counter() < self._post_shot_cooldown_until:
+                    return None
+                self._post_shot_cooldown_until = 0.0
             if self.zone.start_x1 <= x <= self.zone.start_x2:
                 self._state = ShotState.BALL_DETECTED
                 self._start_candidates.append((x, y))
@@ -249,7 +265,7 @@ class BallTracker:
                             positions=list(self._positions),
                         )
                         logger.info("Ball left at (%d, %d), shot complete", x, y)
-                        self.reset()
+                        self.reset(cooldown=True)
                         return result
             else:
                 exited = x > gateway_x2 and len(self._positions) >= 2
@@ -267,7 +283,7 @@ class BallTracker:
                             positions=list(self._positions),
                         )
                         logger.info("Ball left at (%d, %d), shot complete", x, y)
-                        self.reset()
+                        self.reset(cooldown=True)
                         return result
 
             return None

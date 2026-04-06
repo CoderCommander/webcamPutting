@@ -213,6 +213,7 @@ class PuttingApp:
             on_auto_zone=self._on_auto_zone,
             on_reset_putt=self.reset_putt,
             on_angle_cal=self._on_angle_cal,
+            on_reconnect_gspro=self.reconnect_gspro,
         )
 
         # Auto-start if camera/video is available
@@ -314,6 +315,23 @@ class PuttingApp:
         self._tracker.last_shot_positions.clear()
         self._post_shot_tracking = False
         logger.info("Putt tracker manually reset")
+
+    def reconnect_gspro(self) -> None:
+        """Disconnect and reconnect GSPro (camera/OBS/Mevo stay running)."""
+        import threading as _threading
+
+        def _do_reconnect() -> None:
+            logger.info("Reconnecting to GSPro...")
+            self._gspro.disconnect()
+            connected = self._gspro.connect()
+            if self._window:
+                try:
+                    self._window.after(0, self._window.update_connection_status, connected)
+                except RuntimeError:
+                    pass
+            logger.info("GSPro reconnect %s", "succeeded" if connected else "failed")
+
+        _threading.Thread(target=_do_reconnect, daemon=True, name="gspro-reconnect").start()
 
     def _on_auto_zone(self) -> None:
         """Handle Auto Zone button — toggle calibration mode."""

@@ -98,6 +98,7 @@ class ShotSettings:
     min_exit_distance_px: int = 50  # Minimum pixel distance beyond gateway to count as exit
     extended_tracking: bool = False  # Track ball across full frame after start
     stimpmeter: float = 10.0  # Green speed rating for putt distance estimation
+    post_shot_cooldown: float = 2.5  # Seconds to wait after shot before re-arming
 
 
 @dataclass

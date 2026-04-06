@@ -287,3 +287,45 @@ class TestRightToLeft:
 
         assert result is not None
         assert result.end_position[0] == gateway_x1 - 200
+
+
+class TestPostShotCooldown:
+    """Tests for post-shot cooldown timer."""
+
+    def test_cooldown_blocks_rearm(self, detection_zone, ball_settings) -> None:
+        """After shot completion, tracker ignores detections during cooldown."""
+        shot_settings = ShotSettings(post_shot_cooldown=1.0)
+        tracker = BallTracker(
+            zone=detection_zone, ball_settings=ball_settings, shot_settings=shot_settings,
+        )
+        t = time.perf_counter()
+
+        # Complete a full shot
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+        tracker.update(_det(185, 300, t + 0.4))
+        tracker.update(_det(195, 300, t + 0.5))
+        assert tracker.state == ShotState.ENTERED
+        gateway_x2 = detection_zone.start_x2 + 2 * detection_zone.gateway_width
+        result = tracker.update(_det(gateway_x2 + 200, 295, t + 0.6))
+        assert result is not None
+        assert tracker.state == ShotState.IDLE
+
+        # Immediately after shot: cooldown should block new detections
+        tracker.update(_det(50, 300, t + 0.7))
+        assert tracker.state == ShotState.IDLE  # Still idle, cooldown active
+
+    def test_manual_reset_no_cooldown(self, tracker) -> None:
+        """Manual reset() does not trigger cooldown."""
+        t = time.perf_counter()
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+
+        tracker.reset()  # Manual reset, no cooldown
+        assert tracker.state == ShotState.IDLE
+
+        # Should immediately detect a new ball (no cooldown)
+        tracker.update(_det(50, 300, t + 1.0))
+        assert tracker.state == ShotState.BALL_DETECTED

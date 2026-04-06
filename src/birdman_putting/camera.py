@@ -190,31 +190,46 @@ class Camera:
         return True
 
     def _try_open_default(self) -> bool:
-        """Try opening the camera with the default backend (no DirectShow/MJPEG).
+        """Try opening the camera, preferring DirectShow over MSMF.
 
-        Applies configured resolution and FPS so the fallback path still
-        achieves the desired capture settings (e.g. 1280x720 @ 60fps).
+        DirectShow does not require a Windows message pump on the owning
+        thread, so the grab thread can read without throttling when the
+        main window is backgrounded.  Falls back to MSMF if DirectShow
+        fails.
 
         Returns:
             True if the capture device opened (frames not yet validated).
         """
         s = self._settings
-        self._cap = cv2.VideoCapture(s.webcam_index)
-        if self._cap is None or not self._cap.isOpened():
-            logger.error("Failed to open camera %d with default backend", s.webcam_index)
-            return False
-
-        # Apply resolution and FPS (same defaults as MJPEG path)
         res_w = s.width if s.width > 0 else 1280
         res_h = s.height if s.height > 0 else 720
+        target_fps = s.fps_override if s.fps_override > 0 else 60
+
+        # Try DirectShow first (no throttling, no message pump needed)
+        self._cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+        if self._cap is not None and self._cap.isOpened():
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+            self._cap.set(cv2.CAP_PROP_FPS, target_fps)
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            logger.info(
+                "DirectShow camera: %dx%d @ %d fps requested",
+                res_w, res_h, target_fps,
+            )
+            return True
+
+        # Fall back to default backend (MSMF)
+        self._cap = cv2.VideoCapture(s.webcam_index)
+        if self._cap is None or not self._cap.isOpened():
+            logger.error("Failed to open camera %d", s.webcam_index)
+            return False
+
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-
-        target_fps = s.fps_override if s.fps_override > 0 else 60
         self._cap.set(cv2.CAP_PROP_FPS, target_fps)
 
         logger.info(
-            "Default backend camera: %dx%d @ %d fps requested",
+            "MSMF fallback camera: %dx%d @ %d fps requested",
             res_w, res_h, target_fps,
         )
         return True

@@ -54,6 +54,7 @@ class MainWindow(ctk.CTk):
         on_auto_zone: Callable[[], None] | None = None,
         on_reset_putt: Callable[[], None] | None = None,
         on_angle_cal: Callable[[], None] | None = None,
+        on_reconnect_gspro: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -79,6 +80,7 @@ class MainWindow(ctk.CTk):
         self._on_auto_zone = on_auto_zone
         self._on_reset_putt = on_reset_putt
         self._on_angle_cal = on_angle_cal
+        self._on_reconnect_gspro = on_reconnect_gspro
         self._is_running = False
         self._edit_zone_active = False
         self._auto_zone_active = False
@@ -105,7 +107,7 @@ class MainWindow(ctk.CTk):
         # Main frame grid: col 0 = video (expands), col 1 = right panel (fixed)
         main_frame.grid_rowconfigure(0, weight=1)
         main_frame.grid_columnconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(1, weight=0, minsize=270)
+        main_frame.grid_columnconfigure(1, weight=0, minsize=320)
 
         # Left: video panel (expands to fill available space)
         video_container = ctk.CTkFrame(
@@ -121,26 +123,70 @@ class MainWindow(ctk.CTk):
         )
         self._video_panel.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
 
-        # Right: status panel (always visible)
+        # Right: side panel with Status/Settings tabs
         self._right_frame = ctk.CTkFrame(
-            main_frame, width=270,
+            main_frame, width=320,
             fg_color=theme.BG_PANEL, corner_radius=theme.CORNER_RADIUS,
             border_width=1, border_color=theme.BORDER_SUBTLE,
         )
         self._right_frame.grid(row=0, column=1, sticky="nsew")
         self._right_frame.grid_propagate(False)
 
-        self._build_status_panel(self._right_frame)
+        # Tab selector at top
+        tab_header = ctk.CTkFrame(self._right_frame, fg_color="transparent", height=36)
+        tab_header.pack(fill="x", padx=4, pady=(4, 2))
+        tab_header.pack_propagate(False)
 
-        # Settings overlay (hidden by default, lazy-built on first open)
-        self._settings_visible = False
-        self._settings_built = False
-        self._main_frame = main_frame
-        self._settings_frame = ctk.CTkFrame(
-            main_frame,
-            fg_color=theme.BG_PANEL, corner_radius=theme.CORNER_RADIUS,
-            border_width=1, border_color=theme.BORDER_ACTIVE,
+        self._tab_var = ctk.StringVar(value="Status")
+        self._tab_selector = ctk.CTkSegmentedButton(
+            tab_header, values=["Status", "Settings"],
+            variable=self._tab_var, command=self._on_tab_changed,
+            font=theme.font(11),
+            selected_color=theme.ACCENT_BLUE,
+            selected_hover_color=theme.ACCENT_BLUE_HOVER,
+            unselected_color=theme.BG_CARD,
+            unselected_hover_color=theme.BG_CARD_HOVER,
+            text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.CORNER_RADIUS_SM,
         )
+        self._tab_selector.pack(fill="x")
+
+        # Compact always-visible status strip (connection + FPS)
+        strip = ctk.CTkFrame(
+            self._right_frame, fg_color=theme.BG_CARD, height=28,
+            corner_radius=theme.CORNER_RADIUS_SM,
+        )
+        strip.pack(fill="x", padx=4, pady=(0, 2))
+        strip.pack_propagate(False)
+
+        self._strip_conn = ctk.CTkLabel(
+            strip, text="GSPro: --", font=theme.font(10),
+            text_color=theme.STATUS_IDLE if hasattr(theme, "STATUS_IDLE") else theme.TEXT_MUTED,
+        )
+        self._strip_conn.pack(side="left", padx=6)
+
+        self._strip_fps = ctk.CTkLabel(
+            strip, text="FPS: --", font=theme.font(10),
+            text_color=theme.ACCENT_GREEN,
+        )
+        self._strip_fps.pack(side="right", padx=6)
+
+        self._strip_state = ctk.CTkLabel(
+            strip, text="--", font=theme.font(10),
+            text_color=theme.TEXT_MUTED,
+        )
+        self._strip_state.pack(side="right", padx=6)
+
+        # Status content (default view)
+        self._status_content = ctk.CTkFrame(self._right_frame, fg_color="transparent")
+        self._status_content.pack(fill="both", expand=True)
+        self._build_status_panel(self._status_content)
+
+        # Settings content (lazy-built on first switch)
+        self._settings_content = ctk.CTkFrame(self._right_frame, fg_color="transparent")
+        self._settings_built = False
+        self._settings_visible = False
+        self._main_frame = main_frame
 
         # Bottom: control bar (fixed height)
         control_bar = ctk.CTkFrame(
@@ -263,22 +309,7 @@ class MainWindow(ctk.CTk):
         self._shot_count_label.pack(anchor="w", padx=8, pady=(0, 6))
 
     def _build_settings_panel(self, parent: ctk.CTkFrame) -> None:
-        """Build the settings overlay panel (3/4 width, slides over video)."""
-        # Header with title and close button
-        header = ctk.CTkFrame(parent, fg_color="transparent", height=40)
-        header.pack(fill="x", padx=8, pady=(8, 0))
-        header.pack_propagate(False)
-        ctk.CTkLabel(
-            header, text="SETTINGS", font=theme.font(14, "bold"),
-            text_color=theme.TEXT_HEADER,
-        ).pack(side="left", padx=4)
-        ctk.CTkButton(
-            header, text="Close", width=70, font=theme.font(11),
-            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            corner_radius=theme.CORNER_RADIUS_SM,
-            command=self._toggle_settings,
-        ).pack(side="right", padx=4)
-
+        """Build the scrollable settings content into a parent frame."""
         c = self._config.camera
         b = self._config.ball
         z = self._config.detection_zone
@@ -289,12 +320,7 @@ class MainWindow(ctk.CTk):
             scrollbar_button_color=theme.BG_CARD,
             scrollbar_button_hover_color=theme.BG_CARD_HOVER,
         )
-        scroll.pack(fill="both", expand=True, padx=4, pady=4)
-
-        # Constrain content width so entries don't stretch across full screen
-        content = ctk.CTkFrame(scroll, fg_color="transparent", width=350)
-        content.pack(anchor="w")
-        scroll = content  # Redirect all widgets to constrained container
+        scroll.pack(fill="both", expand=True, padx=2, pady=2)
 
         # --- CAMERA ---
         self._section_label(scroll, "CAMERA")
@@ -455,6 +481,11 @@ class MainWindow(ctk.CTk):
         self._add_live_checkbox(
             scroll, "Extended Tracking", s.extended_tracking,
             lambda v: setattr(self._config.shot, "extended_tracking", v),
+        )
+
+        self._add_float_entry(
+            scroll, "Post-Shot Cooldown (s)", s.post_shot_cooldown,
+            lambda v: setattr(self._config.shot, "post_shot_cooldown", max(0.0, v)),
         )
 
         # --- CAMERA (ADVANCED) ---
@@ -856,6 +887,15 @@ class MainWindow(ctk.CTk):
         )
         self._angle_cal_btn.pack(side="left", padx=(8, 0))
 
+        # GSPro Reconnect button
+        self._reconnect_btn = ctk.CTkButton(
+            parent, text="Reconnect", command=self._on_reconnect_clicked,
+            width=100, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
+        )
+        self._reconnect_btn.pack(side="left", padx=(8, 0))
+
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
         self._mode_label = ctk.CTkLabel(
@@ -1123,8 +1163,10 @@ class MainWindow(ctk.CTk):
         """Update the connection indicator."""
         if connected:
             self._conn_indicator.configure(text="  Connected", text_color=theme.STATUS_OK)
+            self._strip_conn.configure(text="GSPro: OK", text_color=theme.STATUS_OK)
         else:
             self._conn_indicator.configure(text="  Disconnected", text_color=theme.STATUS_ERROR)
+            self._strip_conn.configure(text="GSPro: --", text_color=theme.STATUS_ERROR)
 
     def update_mevo_status(self, text: str, state: str = "disabled") -> None:
         """Update the Mevo status indicator.
@@ -1175,6 +1217,7 @@ class MainWindow(ctk.CTk):
     def update_fps(self, fps: float) -> None:
         """Update FPS display."""
         self._fps_label.configure(text=f"FPS: {fps:.0f}")
+        self._strip_fps.configure(text=f"FPS: {fps:.0f}")
 
     def update_state(self, state_text: str) -> None:
         """Update state display with user-friendly label."""
@@ -1187,6 +1230,7 @@ class MainWindow(ctk.CTk):
         }
         label, color = _STATE_DISPLAY.get(state_text, (state_text, theme.STATUS_IDLE))
         self._state_label.configure(text=label, text_color=color)
+        self._strip_state.configure(text=label, text_color=color)
 
     def update_shot_count(self, count: int) -> None:
         """Update the shot count display."""
@@ -1255,6 +1299,11 @@ class MainWindow(ctk.CTk):
         if self._on_reset_putt:
             self._on_reset_putt()
 
+    def _on_reconnect_clicked(self) -> None:
+        """Handle GSPro Reconnect button click."""
+        if self._on_reconnect_gspro:
+            self._on_reconnect_gspro()
+
     def _on_auto_zone_clicked(self) -> None:
         """Handle Auto Zone button click."""
         if self._on_auto_zone:
@@ -1293,35 +1342,42 @@ class MainWindow(ctk.CTk):
                 fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
 
-    def _toggle_settings(self) -> None:
-        """Toggle the settings overlay panel. Saves config on close."""
-        if self._settings_visible:
-            self._settings_frame.grid_remove()
-            self._settings_visible = False
-            self._settings_btn.configure(
-                fg_color=theme.BTN_SECONDARY[0],
-                hover_color=theme.BTN_SECONDARY[1],
-            )
-            # Save config when closing settings
-            try:
-                save_config(self._config)
-                logger.info("Config saved on settings close")
-            except Exception:
-                logger.error("Failed to save config", exc_info=True)
-        else:
-            # Lazy-build widgets on first open
+    def _on_tab_changed(self, value: str) -> None:
+        """Switch between Status and Settings views in the right panel."""
+        if value == "Settings":
+            self._status_content.pack_forget()
             if not self._settings_built:
-                self._build_settings_panel(self._settings_frame)
+                self._build_settings_panel(self._settings_content)
                 self._settings_built = True
-            # Place settings over the video area (column 0), spanning full height
-            self._settings_frame.grid(
-                row=0, column=0, sticky="nsew", padx=(0, 8),
-            )
+            self._settings_content.pack(fill="both", expand=True)
             self._settings_visible = True
             self._settings_btn.configure(
                 fg_color=theme.BTN_WARNING[0],
                 hover_color=theme.BTN_WARNING[1],
             )
+        else:
+            self._settings_content.pack_forget()
+            self._status_content.pack(fill="both", expand=True)
+            self._settings_visible = False
+            self._settings_btn.configure(
+                fg_color=theme.BTN_SECONDARY[0],
+                hover_color=theme.BTN_SECONDARY[1],
+            )
+            # Save config when leaving settings
+            try:
+                save_config(self._config)
+                logger.info("Config saved on settings tab close")
+            except Exception:
+                logger.error("Failed to save config", exc_info=True)
+
+    def _toggle_settings(self) -> None:
+        """Toggle the settings tab via the control bar button."""
+        if self._tab_var.get() == "Settings":
+            self._tab_var.set("Status")
+            self._on_tab_changed("Status")
+        else:
+            self._tab_var.set("Settings")
+            self._on_tab_changed("Settings")
 
     def _on_zone_color_changed(self, label: str) -> None:
         """Handle zone color dropdown change."""
