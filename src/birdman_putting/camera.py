@@ -87,8 +87,11 @@ class Camera:
     def open_webcam(self) -> bool:
         """Open the webcam with configured settings and frame validation.
 
-        Tries MJPEG/DirectShow first (if configured), validates that frames
-        actually arrive, and falls back to the default backend on failure.
+        Strategy: open with MSMF first to validate frames and configure
+        camera properties (MSMF preserves Kiyo Pro firmware state).  Then
+        attempt to upgrade to DirectShow for higher FPS (~60 vs ~30).
+        DirectShow resets some cameras on first open, so the MSMF-first
+        approach ensures the firmware is configured before the switch.
 
         Returns:
             True if camera opened successfully and producing frames.
@@ -114,25 +117,38 @@ class Camera:
                     )
                     self._release_cap()
 
-        # Fallback (or primary if MJPEG not configured)
-        if self._try_open_default():
-            if self._validate_frames():
-                self._read_properties()
-                self._apply_camera_properties()
-                label = "fallback" if s.mjpeg else "default"
-                self._status_message = (
-                    f"Connected ({label} {self._frame_width}x{self._frame_height}"
-                    f" @ {self._fps:.0f}fps)"
-                )
-                logger.info("Camera ready: %s", self._status_message)
-                return True
-            else:
-                logger.error("Default backend opened but no frames arrived")
-                self._release_cap()
+        # Open with MSMF (default) — validates frames and configures firmware
+        if not self._try_open_default():
+            self._status_message = "Failed to open camera"
+            logger.error(self._status_message)
+            return False
 
-        self._status_message = "Failed to open camera"
-        logger.error(self._status_message)
-        return False
+        if not self._validate_frames():
+            logger.error("Default backend opened but no frames arrived")
+            self._release_cap()
+            self._status_message = "Failed to open camera"
+            logger.error(self._status_message)
+            return False
+
+        self._read_properties()
+        self._apply_camera_properties()
+
+        # Try upgrading to DirectShow for higher FPS.
+        # Release MSMF, open DirectShow, validate it still works.
+        # If it fails, fall back to reopening MSMF.
+        if self._try_upgrade_to_dshow():
+            self._status_message = (
+                f"Connected (DirectShow {self._frame_width}x{self._frame_height}"
+                f" @ {self._fps:.0f}fps)"
+            )
+        else:
+            self._status_message = (
+                f"Connected (default {self._frame_width}x{self._frame_height}"
+                f" @ {self._fps:.0f}fps)"
+            )
+
+        logger.info("Camera ready: %s", self._status_message)
+        return True
 
     def _try_open_mjpeg(self) -> bool:
         """Try opening the camera with MJPEG codec via DirectShow.
@@ -219,6 +235,68 @@ class Camera:
             res_w, res_h, target_fps,
         )
         return True
+
+    def _try_upgrade_to_dshow(self) -> bool:
+        """Attempt to switch from MSMF to DirectShow for higher FPS.
+
+        Releases the current MSMF capture, opens DirectShow, and validates
+        that frames still arrive.  If DirectShow fails, reopens MSMF as
+        fallback.  Camera properties are re-applied after the switch.
+
+        Returns:
+            True if successfully upgraded to DirectShow.
+        """
+        s = self._settings
+        res_w = s.width if s.width > 0 else 1280
+        res_h = s.height if s.height > 0 else 720
+        target_fps = s.fps_override if s.fps_override > 0 else 60
+
+        logger.info("Attempting DirectShow upgrade for higher FPS...")
+        self._release_cap()
+
+        cap = cv2.VideoCapture(s.webcam_index + cv2.CAP_DSHOW)
+        if cap is None or not cap.isOpened():
+            logger.warning("DirectShow failed to open, falling back to MSMF")
+            return self._fallback_to_msmf()
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+        cap.set(cv2.CAP_PROP_FPS, target_fps)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self._cap = cap
+        self._apply_camera_properties()
+
+        # Extended warmup — DirectShow may need time after firmware was
+        # configured by MSMF.  Read up to 30 frames looking for non-black.
+        for i in range(30):
+            ret, frame = self._cap.read()
+            if ret and frame is not None and not self._is_black_frame(frame):
+                actual_fps = self._cap.get(cv2.CAP_PROP_FPS)
+                logger.info(
+                    "DirectShow upgrade succeeded at frame %d (mean=%.1f, fps=%.0f)",
+                    i, float(np.mean(frame)), actual_fps,
+                )
+                self._read_properties()
+                return True
+            time.sleep(0.05)
+
+        # DirectShow gave only black frames — fall back
+        logger.warning("DirectShow produced black frames, falling back to MSMF")
+        self._release_cap()
+        return self._fallback_to_msmf()
+
+    def _fallback_to_msmf(self) -> bool:
+        """Reopen camera with default MSMF backend after DirectShow failure."""
+        if self._try_open_default():
+            # Brief warmup — MSMF was just working, should be quick
+            for _ in range(5):
+                self._cap.read()  # type: ignore[union-attr]
+                time.sleep(0.05)
+            self._read_properties()
+            self._apply_camera_properties()
+            return False
+        logger.error("MSMF fallback also failed")
+        return False
 
     @staticmethod
     def _is_black_frame(frame: np.ndarray) -> bool:
