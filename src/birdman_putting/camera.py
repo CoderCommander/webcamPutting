@@ -355,9 +355,6 @@ class Camera:
         if sys.platform == "win32":
             try:
                 import ctypes
-                # Initialize COM on this thread (MTA) — required for MSMF
-                # message pump to function properly on a background thread
-                ctypes.windll.ole32.CoInitializeEx(None, 0)  # type: ignore[attr-defined]
                 kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
                 kernel32.SetThreadPriority(
                     kernel32.GetCurrentThread(), 2,  # THREAD_PRIORITY_HIGHEST
@@ -378,33 +375,9 @@ class Camera:
             self._cap.read()
         logger.info("Grab thread: discarded %d settle frames", _SETTLE_FRAMES)
 
-        # Set up Windows message pump for MSMF backend.
-        # MSMF requires periodic message processing on the reading thread;
-        # without it, capture throttles to ~25fps when the window is
-        # backgrounded or loses focus.
-        _pump_messages = None
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                import ctypes.wintypes as wt
-                _msg = wt.MSG()
-                PM_REMOVE = 0x0001
-                user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-
-                def _pump_messages() -> None:
-                    while user32.PeekMessageW(
-                        ctypes.byref(_msg), 0, 0, 0, PM_REMOVE,
-                    ):
-                        user32.TranslateMessage(ctypes.byref(_msg))
-                        user32.DispatchMessageW(ctypes.byref(_msg))
-            except Exception:
-                _pump_messages = None
-
         grab_count = 0
         grab_start = time.perf_counter()
         while self._grab_running and self._cap is not None:
-            if _pump_messages is not None:
-                _pump_messages()
             ret, frame = self._cap.read()
             if ret and frame is not None:
                 with self._frame_lock:
