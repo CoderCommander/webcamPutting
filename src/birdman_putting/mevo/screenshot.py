@@ -335,15 +335,16 @@ else:
                 user32.PostMessageW(renderer, WM_CHAR, ord(char), lparam_down)
                 user32.PostMessageW(renderer, WM_KEYUP, vk, lparam_up)
                 logger.info(
-                    "Sent key '%s' to renderer child (hwnd=%d) of '%s'",
+                    "Sent key '%s' via PostMessage to renderer (hwnd=%d) of '%s'",
                     char, renderer, self._title,
                 )
                 return True
 
-            # Fallback: focus the window, simulate keypress via keybd_event, restore.
-            # Windows restricts SetForegroundWindow — must attach to the
-            # foreground thread first to be allowed to steal focus.
-            import time
+            # Fallback: focus the window, simulate keypress via keybd_event,
+            # then restore the previous foreground window.
+            # keybd_event is proven to work with FS Golf PC (commit b46466f).
+            # SendInput does NOT work — FS Golf PC ignores it.
+            import time as _time
 
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
             KEYEVENTF_KEYUP = 0x0002
@@ -364,13 +365,13 @@ else:
                         "SetForegroundWindow failed for '%s' — key '%s' may not register",
                         self._title, char,
                     )
-                time.sleep(0.1)  # Let Electron fully activate
+                _time.sleep(0.1)
 
                 # keybd_event goes through the OS input queue
-                user32.keybd_event(vk, scan, 0, 0)  # Key down
-                time.sleep(0.05)
-                user32.keybd_event(vk, scan, KEYEVENTF_KEYUP, 0)  # Key up
-                time.sleep(0.05)
+                user32.keybd_event(vk, scan, 0, 0)
+                _time.sleep(0.05)
+                user32.keybd_event(vk, scan, KEYEVENTF_KEYUP, 0)
+                _time.sleep(0.05)
             finally:
                 if attached:
                     user32.AttachThreadInput(our_tid, fg_tid, False)
@@ -379,7 +380,7 @@ else:
             if prev_hwnd and prev_hwnd != self._hwnd:
                 user32.SetForegroundWindow(prev_hwnd)
 
-            logger.info("Sent key '%s' to window '%s' (focus+keybd_event)", char, self._title)
+            logger.info("Sent key '%s' to '%s' via keybd_event (focus+restore)", char, self._title)
             return True
 
         def close(self) -> None:

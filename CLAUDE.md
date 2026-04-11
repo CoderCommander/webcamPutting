@@ -10,6 +10,49 @@ This repo contains two versions:
 - `cam-putting-py/` — Original upstream single-file application (reference only)
 - `src/birdman_putting/` — Modernized modular rewrite (active development)
 
+## Webcam Putting App 
+
+When fixing bugs in the webcam putting app, always verify camera feed still works after changes. Never modify camera backend/capture pipeline without testing that frames are still being received and displayed correctly.
+
+### Camera Backend — CRITICAL
+
+The camera MUST use the default MSMF backend via `cv2.VideoCapture(index)`. Do NOT:
+- Switch to DirectShow (`CAP_DSHOW`) — it resets Razer Kiyo Pro firmware settings, causing black frames
+- Set `OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS=0` — this disables MSMF's color conversion pipeline entirely, preventing the camera from opening
+- Use `cv2.VideoCapture(index, cv2.CAP_MSMF, [params])` — the 3-arg constructor fails with "can't capture by index" on some systems
+- Reopen the camera on the grab thread — reopening resets firmware state (black frames on Kiyo Pro)
+
+**GPU throttling with GSPro:** MSMF creates a D3D11 device for hardware-accelerated color conversion. When GSPro (a DirectX game) saturates the GPU, MSMF starves → 2fps. The fix is `cv2.VideoCapture(index, cv2.CAP_ANY, [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE])` which forces CPU-only capture. If this constructor fails on the user's system, fall back to default open + `cap.set(CAP_PROP_HW_ACCELERATION, VIDEO_ACCELERATION_NONE)` post-open. Never remove this — without it, FPS drops to 2 when GSPro is in the foreground.
+
+### Shot Detection Pipeline — DO NOT BREAK
+
+The putting detection pipeline has been carefully tuned. Do not change these without testing real putts:
+
+- **Two-pass detection in STARTED state**: Pass 1 searches start zone only, Pass 2 searches FULL frame width. Never cap Pass 2 to a narrow band — fast putts jump past the gateway in one frame.
+- **Y-range expansion**: STARTED state gets ±30px Y margin, ENTERED gets ±50px. The detection zone is only ~48px tall — ball drifts vertically during roll.
+- **"Jumped past gateway" logic** (tracking.py): When ball skips from start zone past `gateway_x2` in one frame, complete the shot immediately. Without this, fast putts never register.
+- **ENTERED timeout completes shot**: When ball enters gateway but then goes off-screen, complete the shot with last known position instead of discarding it.
+- **Rotation applied BEFORE detection**: `apply_rotation()` must run before `detect()` so coordinates are consistent between detection, overlay, and zone drawing. Moving rotation after detection causes the ball ring to be offset from the actual ball.
+- **`positions` list includes rest frames**: The physics `calculate_shot()` must handle positions where the ball sits still before moving. Movement-onset filtering is only used when 6+ positions AND 4+ moving points exist, with sanity checks.
+
+### FS Golf PC Key Sending — CRITICAL
+
+FS Golf PC chipping/full swing mode switching uses `keybd_event` (NOT `SendInput`). FS Golf PC ignores `SendInput`. The proven pattern (commit b46466f):
+1. `AttachThreadInput` to foreground thread
+2. `SetForegroundWindow` to FS Golf PC
+3. `keybd_event` key down/up
+4. Restore previous foreground window
+
+Do NOT replace `keybd_event` with `SendInput` or `PostMessageW` to the main window — both have been tried and fail with FS Golf PC.
+
+### Performance Changes
+
+Before applying performance optimizations (FPS, threading, COM initialization), create a checkpoint commit. If the optimization breaks existing functionality, revert immediately rather than iterating on a broken approach.
+
+### Debugging
+
+When modifying image processing pipelines (OpenCV, HSV conversion, overlays), test each stage independently. Log intermediate frame values to catch issues like double HSV conversion early.
+
 ## Commands
 
 ```bash

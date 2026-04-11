@@ -44,7 +44,7 @@ class GSProClient:
     def __init__(
         self,
         settings: ConnectionSettings,
-        on_club_change: Callable[[str], None] | None = None,
+        on_club_change: Callable[[str, float], None] | None = None,
     ):
         self._settings = settings
         self._socket: socket.socket | None = None
@@ -423,6 +423,7 @@ class GSProClient:
         non-blocking select() to read incoming data without sending
         heartbeats. The connection stays alive via TCP keepalive.
         """
+        logger.info("GSPro listener thread started")
         backoff = 1.0
         while self._running:
             if not self._connected.is_set():
@@ -450,23 +451,28 @@ class GSProClient:
                         logger.warning("GSPro closed the connection")
                         self._connected.clear()
                         continue
+                    logger.debug("GSPro raw recv (%d bytes): %s", len(data), data[:200])
                     # Parse messages (may be concatenated)
                     for part in data.decode("utf-8").replace("}{", "}|{").split("|"):
                         try:
                             msg = json.loads(part)
                             code = msg.get("Code", -1)
                             if code == 201:
-                                club = msg.get("Player", {}).get("Club", "")
-                                logger.info("GSPro club selected: %s", club)
+                                player = msg.get("Player", {})
+                                club = player.get("Club", "")
+                                distance = player.get("DistanceToTarget", 0.0)
+                                logger.info("GSPro club selected: %s (raw: %s)", club, player)
                                 if self._on_club_change and club:
-                                    self._on_club_change(club)
+                                    self._on_club_change(club, distance)
                             else:
                                 logger.debug("GSPro message (code %d): %s", code, msg)
                         except json.JSONDecodeError:
-                            pass
-            except OSError as e:
-                logger.error("GSPro listener error: %s", e)
-                self._connected.clear()
+                            logger.debug("GSPro JSON parse error for: %s", part[:100])
+            except Exception as e:
+                logger.error("GSPro listener error: %s", e, exc_info=True)
+                if isinstance(e, OSError):
+                    self._connected.clear()
+        logger.info("GSPro listener thread exiting")
 
     # --- HTTP Middleware (Legacy) ---
 

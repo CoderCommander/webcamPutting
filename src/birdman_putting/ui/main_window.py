@@ -54,6 +54,7 @@ class MainWindow(ctk.CTk):
         on_auto_zone: Callable[[], None] | None = None,
         on_reset_putt: Callable[[], None] | None = None,
         on_angle_cal: Callable[[], None] | None = None,
+        on_dist_cal: Callable[[], None] | None = None,
         on_reconnect_gspro: Callable[[], None] | None = None,
     ):
         super().__init__()
@@ -80,6 +81,7 @@ class MainWindow(ctk.CTk):
         self._on_auto_zone = on_auto_zone
         self._on_reset_putt = on_reset_putt
         self._on_angle_cal = on_angle_cal
+        self._on_dist_cal = on_dist_cal
         self._on_reconnect_gspro = on_reconnect_gspro
         self._is_running = False
         self._edit_zone_active = False
@@ -97,12 +99,12 @@ class MainWindow(ctk.CTk):
 
     def _build_ui(self) -> None:
         """Construct all UI elements using grid for proper resize behavior."""
-        # Root grid: row 0 = main content (expands), row 1 = control bar (fixed)
-        self.grid_rowconfigure(0, weight=1)
+        # Root grid: row 0 = control bar (fixed), row 1 = main content (expands)
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+        main_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(4, 8))
 
         # Main frame grid: col 0 = video (expands), col 1 = right panel (fixed)
         main_frame.grid_rowconfigure(0, weight=1)
@@ -188,13 +190,13 @@ class MainWindow(ctk.CTk):
         self._settings_visible = False
         self._main_frame = main_frame
 
-        # Bottom: control bar (fixed height)
+        # Top: control bar (fixed height)
         control_bar = ctk.CTkFrame(
             self, height=44, fg_color=theme.BG_PANEL,
             corner_radius=theme.CORNER_RADIUS,
             border_width=1, border_color=theme.BORDER_SUBTLE,
         )
-        control_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        control_bar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
         self._build_control_bar(control_bar)
 
     def _build_status_panel(self, parent: ctk.CTkFrame) -> None:
@@ -246,26 +248,32 @@ class MainWindow(ctk.CTk):
         )
         self._mevo_indicator.pack(anchor="w", padx=8, pady=(0, 6))
 
-        # Last shot
-        shot_frame = _card(parent)
+        # Last shot (black background for OBS visibility)
+        shot_frame = ctk.CTkFrame(
+            parent, corner_radius=theme.CORNER_RADIUS_SM,
+            fg_color="#000000", border_width=1, border_color=theme.BORDER_SUBTLE,
+        )
         shot_frame.pack(fill="x", padx=4, pady=3)
         _header(shot_frame, "LAST SHOT").pack(anchor="w", padx=8, pady=(6, 1))
 
         self._speed_label = ctk.CTkLabel(
             shot_frame, text="-- MPH",
             font=theme.font(22, "bold"), text_color=theme.ACCENT_GREEN,
+            fg_color="transparent",
         )
         self._speed_label.pack(anchor="w", padx=8)
 
         self._hla_label = ctk.CTkLabel(
             shot_frame, text="-- HLA",
             font=theme.font(16), text_color=theme.TEXT_SECONDARY,
+            fg_color="transparent",
         )
         self._hla_label.pack(anchor="w", padx=8)
 
         self._dist_label = ctk.CTkLabel(
             shot_frame, text="-- ft",
             font=theme.font(16), text_color=theme.TEXT_SECONDARY,
+            fg_color="transparent",
         )
         self._dist_label.pack(anchor="w", padx=8, pady=(0, 6))
 
@@ -282,8 +290,11 @@ class MainWindow(ctk.CTk):
         )
         self._history_text.pack(fill="both", expand=True, padx=6, pady=(0, 6))
 
-        # FPS / state / shot count
-        info_frame = _card(parent)
+        # FPS / state / shot count (black background for OBS visibility)
+        info_frame = ctk.CTkFrame(
+            parent, corner_radius=theme.CORNER_RADIUS_SM,
+            fg_color="#000000", border_width=1, border_color=theme.BORDER_SUBTLE,
+        )
         info_frame.pack(fill="x", padx=4, pady=(3, 4))
 
         # Row 1: FPS + State
@@ -292,19 +303,20 @@ class MainWindow(ctk.CTk):
 
         self._fps_label = ctk.CTkLabel(
             row1, text="FPS: --", font=theme.font(20, "bold"), text_color=theme.ACCENT_GREEN,
+            fg_color="transparent",
         )
         self._fps_label.pack(side="left")
 
         self._state_label = ctk.CTkLabel(
             row1, text="No Ball", font=theme.font(14, "bold"),
-            text_color=theme.STATUS_IDLE,
+            text_color=theme.STATUS_IDLE, fg_color="transparent",
         )
         self._state_label.pack(side="right")
 
         # Row 2: Shot count
         self._shot_count_label = ctk.CTkLabel(
             info_frame, text="Shots: 0", font=theme.font(12),
-            text_color=theme.TEXT_PRIMARY,
+            text_color=theme.TEXT_PRIMARY, fg_color="transparent",
         )
         self._shot_count_label.pack(anchor="w", padx=8, pady=(0, 6))
 
@@ -887,6 +899,15 @@ class MainWindow(ctk.CTk):
         )
         self._angle_cal_btn.pack(side="left", padx=(8, 0))
 
+        # Distance Cal button
+        self._dist_cal_btn = ctk.CTkButton(
+            parent, text="Dist Cal", command=self._on_dist_cal_clicked,
+            width=80, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
+        )
+        self._dist_cal_btn.pack(side="left", padx=(8, 0))
+
         # GSPro Reconnect button
         self._reconnect_btn = ctk.CTkButton(
             parent, text="Reconnect", command=self._on_reconnect_clicked,
@@ -895,6 +916,23 @@ class MainWindow(ctk.CTk):
             corner_radius=theme.CORNER_RADIUS,
         )
         self._reconnect_btn.pack(side="left", padx=(8, 0))
+
+        # Stimpmeter control (right side — frequently changed per course)
+        self._stimp_label = ctk.CTkLabel(
+            parent, text="Stimp:", font=theme.font(11), text_color=theme.TEXT_MUTED,
+        )
+        self._stimp_label.pack(side="right", padx=(0, 2))
+
+        self._stimp_var = ctk.StringVar(value=str(self._config.shot.stimpmeter))
+        self._stimp_entry = ctk.CTkEntry(
+            parent, textvariable=self._stimp_var, width=45,
+            font=theme.font(11), justify="center",
+            fg_color=theme.BG_INPUT, border_color=theme.BORDER_SUBTLE,
+            corner_radius=theme.CORNER_RADIUS_SM,
+        )
+        self._stimp_entry.pack(side="right", padx=(0, 4))
+        self._stimp_entry.bind("<Return>", self._on_stimp_changed)
+        self._stimp_entry.bind("<FocusOut>", self._on_stimp_changed)
 
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
@@ -1185,6 +1223,12 @@ class MainWindow(ctk.CTk):
             text=f"  {text}", text_color=colors.get(state, theme.STATUS_IDLE),
         )
 
+    def show_cal_phase(self, phase_text: str, detail: str = "") -> None:
+        """Show calibration phase info prominently in the shot display area."""
+        self._speed_label.configure(text=phase_text)
+        self._hla_label.configure(text=detail, text_color=theme.ACCENT_BLUE)
+        self._dist_label.configure(text="")
+
     def update_shot(
         self, speed: float, hla: float, shot_number: int, distance_ft: float = 0.0,
     ) -> None:
@@ -1299,6 +1343,18 @@ class MainWindow(ctk.CTk):
         if self._on_reset_putt:
             self._on_reset_putt()
 
+    def _on_stimp_changed(self, _event: object = None) -> None:
+        """Handle stimpmeter value change from the control bar entry."""
+        try:
+            val = float(self._stimp_var.get())
+            if 1.0 <= val <= 20.0:
+                self._config.shot.stimpmeter = val
+                from birdman_putting.config import save_config
+                save_config(self._config)
+        except ValueError:
+            # Reset to current value if invalid input
+            self._stimp_var.set(str(self._config.shot.stimpmeter))
+
     def _on_reconnect_clicked(self) -> None:
         """Handle GSPro Reconnect button click."""
         if self._on_reconnect_gspro:
@@ -1339,6 +1395,24 @@ class MainWindow(ctk.CTk):
         else:
             self._angle_cal_btn.configure(
                 text="Angle Cal",
+                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            )
+
+    def _on_dist_cal_clicked(self) -> None:
+        """Handle Dist Cal button click."""
+        if self._on_dist_cal:
+            self._on_dist_cal()
+
+    def set_dist_cal_state(self, active: bool) -> None:
+        """Update Dist Cal button appearance."""
+        if active:
+            self._dist_cal_btn.configure(
+                text="Cancel Cal.",
+                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
+            )
+        else:
+            self._dist_cal_btn.configure(
+                text="Dist Cal",
                 fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
 

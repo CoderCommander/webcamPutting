@@ -44,6 +44,22 @@ def estimate_putt_distance_feet(speed_mph: float, stimpmeter: float = 10.0) -> f
     return v_fps ** 2 * stimpmeter / _STIMP_RAMP_SPEED_FPS ** 2
 
 
+def target_speed_for_distance(distance_ft: float, stimpmeter: float = 10.0) -> float:
+    """Compute the ball speed (MPH) required to roll a given distance.
+
+    Inverse of estimate_putt_distance_feet.
+
+    Args:
+        distance_ft: Target roll distance in feet.
+        stimpmeter: Green speed rating (typical range 7-13).
+
+    Returns:
+        Required ball speed in MPH.
+    """
+    v_fps = math.sqrt(distance_ft * _STIMP_RAMP_SPEED_FPS ** 2 / stimpmeter)
+    return v_fps / _MPH_TO_FPS
+
+
 def pixel_to_mm_ratio(ball_radius_px: int) -> float:
     """Calculate pixels-per-mm ratio from detected ball radius.
 
@@ -148,41 +164,50 @@ def calculate_shot(
     if elapsed <= 0:
         return None
 
-    # Try trajectory fitting with multiple points
-    hla_degrees: float
-    distance_mm: float
+    # Always compute start→end as the baseline measurement.
+    # This is the most reliable for fast putts that skip the gateway
+    # (only 2-3 position samples).
+    dx_base = end_pos[0] - start_pos[0]
+    dy_base = end_pos[1] - start_pos[1]
+    distance_px = math.sqrt(dx_base * dx_base + dy_base * dy_base)
+    distance_mm = distance_px / px_mm_ratio
+    hla_degrees = calculate_angle(start_pos, end_pos, flip=flip)
 
-    if positions and len(positions) >= 3:
-        result = fit_trajectory(positions)
-        if result is not None:
-            x_arr, y_arr, t_arr = result
-            # HLA from fitted line slope
-            if len(x_arr) >= 2:
-                coeffs = np.polyfit(x_arr, y_arr, 1)
-                # Slope gives angle: negative slope = ball going up = positive HLA in golf terms
-                hla_degrees = -math.degrees(math.atan(coeffs[0]))
-                if flip:
-                    hla_degrees = -hla_degrees
+    # Try movement-onset refinement when we have enough position samples.
+    # With many samples (10+), the movement-onset window gives better
+    # timing than the raw entry/exit times.  With few samples (fast putts
+    # that jump past the gateway), the baseline above is more reliable.
+    if positions and len(positions) >= 6:
+        rest_x, rest_y = float(positions[0][0]), float(positions[0][1])
+        _MOVE_THRESHOLD_PX = 8
 
-            # Distance from first to last fitted point
-            dx = float(x_arr[-1] - x_arr[0])
-            dy = float(y_arr[-1] - y_arr[0])
-            distance_px = math.sqrt(dx * dx + dy * dy)
-            distance_mm = distance_px / px_mm_ratio
-        else:
-            # Fallback to simple calculation
-            dx = end_pos[0] - start_pos[0]
-            dy = end_pos[1] - start_pos[1]
-            distance_px = math.sqrt(dx * dx + dy * dy)
-            distance_mm = distance_px / px_mm_ratio
-            hla_degrees = calculate_angle(start_pos, end_pos, flip=flip)
-    else:
-        # Simple two-point calculation (original algorithm)
-        dx = end_pos[0] - start_pos[0]
-        dy = end_pos[1] - start_pos[1]
-        distance_px = math.sqrt(dx * dx + dy * dy)
-        distance_mm = distance_px / px_mm_ratio
-        hla_degrees = calculate_angle(start_pos, end_pos, flip=flip)
+        move_idx = 0
+        for i, (px, py, _pt) in enumerate(positions):
+            if math.sqrt((px - rest_x) ** 2 + (py - rest_y) ** 2) > _MOVE_THRESHOLD_PX:
+                move_idx = i
+                break
+
+        moving = positions[move_idx:]
+        if len(moving) >= 4:
+            result = fit_trajectory(moving)
+            if result is not None:
+                x_arr, y_arr, t_arr = result
+                if len(x_arr) >= 2:
+                    coeffs = np.polyfit(x_arr, y_arr, 1)
+                    hla_degrees = -math.degrees(math.atan(coeffs[0]))
+                    if flip:
+                        hla_degrees = -hla_degrees
+
+                    mdx = float(x_arr[-1] - x_arr[0])
+                    mdy = float(y_arr[-1] - y_arr[0])
+                    move_dist = math.sqrt(mdx * mdx + mdy * mdy)
+                    move_elapsed = float(t_arr[-1] - t_arr[0])
+
+                    # Only use movement-onset if it gives a reasonable result
+                    # (distance > 50% of baseline, elapsed > 20ms)
+                    if move_dist > distance_px * 0.5 and move_elapsed > 0.02:
+                        distance_mm = move_dist / px_mm_ratio
+                        elapsed = move_elapsed
 
     # Convert mm distance and seconds to MPH
     # mm -> m -> km, then km/s -> km/h -> mph

@@ -29,7 +29,12 @@ from birdman_putting.detection import (
     resize_with_aspect_ratio,
 )
 from birdman_putting.gspro_client import GSProClient
-from birdman_putting.physics import calculate_shot, estimate_putt_distance_feet
+from birdman_putting.physics import (
+    ShotData,
+    calculate_shot,
+    estimate_putt_distance_feet,
+    target_speed_for_distance,
+)
 from birdman_putting.tracking import BallTracker, ShotState
 from birdman_putting.ui.overlay import (
     draw_calibration_overlay,
@@ -129,6 +134,14 @@ class PuttingApp:
         self._angle_cal_samples: list[float] = []
         self._angle_cal_bg: np.ndarray | None = None  # Background frame for subtraction
 
+        # Distance calibration: putt known distances to derive speed factor
+        self._dist_cal_active = False
+        self._dist_cal_phase = 0  # 0 = ~5ft phase, 1 = ~10ft phase
+        self._dist_cal_phase_labels = ["~5 ft", "~10 ft"]
+        self._dist_cal_samples: list[tuple[float, float]] = []  # (measured_speed, actual_ft)
+        self._dist_cal_putts_per_phase = 3
+        self._dist_cal_pending_speed: float = 0.0  # speed awaiting user distance input
+
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
 
@@ -197,6 +210,31 @@ class PuttingApp:
         except Exception as e:
             logger.debug("Could not set process priority: %s", e)
 
+    def _start_msmf_pump(self) -> None:
+        """Prevent Windows from throttling camera capture when backgrounded.
+
+        Sets execution state flags so Windows knows this process is doing
+        real-time media work and should not be power-throttled or sleep.
+        The primary fix for GPU-related throttling (GSPro taking the GPU)
+        is disabling D3D11 HW acceleration in the camera open path.
+        """
+        import sys
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            ES_CONTINUOUS = 0x80000000
+            ES_SYSTEM_REQUIRED = 0x00000001
+            ES_DISPLAY_REQUIRED = 0x00000002
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            prev = kernel32.SetThreadExecutionState(
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED,
+            )
+            if prev:
+                logger.info("SetThreadExecutionState: anti-throttle active")
+        except Exception:
+            pass
+
     # ---- GUI Mode ----
 
     def _run_gui(self) -> None:
@@ -213,11 +251,20 @@ class PuttingApp:
             on_auto_zone=self._on_auto_zone,
             on_reset_putt=self.reset_putt,
             on_angle_cal=self._on_angle_cal,
+            on_dist_cal=self._on_dist_cal,
             on_reconnect_gspro=self.reconnect_gspro,
         )
 
         # Auto-start if camera/video is available
         self._on_gui_start()
+
+        # Start a Windows message pump on the main thread.
+        # MSMF (Media Foundation) associates its internal windows with the
+        # thread that opened the VideoCapture (the main thread).  When this
+        # window loses focus (user clicks GSPro), Windows stops dispatching
+        # messages to it, and MSMF throttles frame delivery to ~2 fps.
+        # Pumping messages here keeps MSMF fed even when backgrounded.
+        self._start_msmf_pump()
 
         # Run the tkinter main loop (blocks until window closes)
         self._window.mainloop()
@@ -398,6 +445,174 @@ class PuttingApp:
                 "from putting position through the gateway"
             )
 
+    def _on_dist_cal(self) -> None:
+        """Toggle distance calibration mode.
+
+        Guides the user through putting at approximate distances (~5ft, ~10ft).
+        After each putt, a dialog asks for the actual distance. This lets
+        the user putt naturally without needing to hit exact marks.
+        """
+        if self._dist_cal_active:
+            # Cancel
+            self._dist_cal_active = False
+            self._dist_cal_phase = 0
+            self._dist_cal_samples = []
+            self._dist_cal_pending_speed = 0.0
+            if self._window:
+                self._window.set_dist_cal_state(False)
+                with contextlib.suppress(RuntimeError):
+                    self._window.after(
+                        0, self._window.update_camera_status,
+                        "Calibration cancelled", "idle",
+                    )
+            logger.info("Distance calibration cancelled")
+            return
+
+        # Guard: don't start if another calibration is active
+        if self._angle_cal_active or getattr(self, "_calibrating", False):
+            logger.warning("Cannot start distance cal while another calibration is active")
+            return
+
+        self._dist_cal_active = True
+        self._dist_cal_phase = 0
+        self._dist_cal_samples = []
+        self._dist_cal_pending_speed = 0.0
+        self._tracker.reset()
+        if self._window:
+            self._window.set_dist_cal_state(True)
+            self._show_dist_cal_phase_prompt()
+        logger.info("Distance calibration started — putt %s", self._dist_cal_phase_labels[0])
+
+    def _show_dist_cal_phase_prompt(self) -> None:
+        """Update all UI elements to show the current calibration phase."""
+        if not self._window:
+            return
+        phase = self._dist_cal_phase
+        label = self._dist_cal_phase_labels[phase]
+        phase_start = phase * self._dist_cal_putts_per_phase
+        phase_n = len(self._dist_cal_samples) - phase_start
+        total_phases = len(self._dist_cal_phase_labels)
+
+        with contextlib.suppress(RuntimeError):
+            self._window.after(
+                0, self._window.show_cal_phase,
+                f"STEP {phase + 1} of {total_phases}",
+                f"Putt {label} ({phase_n}/{self._dist_cal_putts_per_phase})",
+            )
+            self._window.after(
+                0, self._window.update_camera_status,
+                f"CALIBRATING: Putt {label} — {phase_n}/{self._dist_cal_putts_per_phase} done",
+                "watching",
+            )
+
+    def _process_dist_cal_shot(self, speed_mph: float) -> None:
+        """Record a calibration putt and prompt user for actual distance."""
+        if speed_mph < 0.01:
+            return
+
+        self._dist_cal_pending_speed = speed_mph
+        phase_label = self._dist_cal_phase_labels[self._dist_cal_phase]
+
+        logger.info("Dist cal: putt measured %.2f MPH — prompting for distance", speed_mph)
+
+        if self._window:
+            with contextlib.suppress(RuntimeError):
+                self._window.after(0, self._show_dist_cal_dialog, phase_label)
+
+    def _show_dist_cal_dialog(self, phase_label: str) -> None:
+        """Show a dialog asking the user for the actual putt distance."""
+        import customtkinter as ctk
+
+        phase = self._dist_cal_phase + 1
+        total = len(self._dist_cal_phase_labels)
+
+        dialog = ctk.CTkInputDialog(
+            text=(
+                f"Step {phase}/{total}: How many feet did that putt roll?\n"
+                f"(aiming for {phase_label})"
+            ),
+            title=f"Distance Cal — Step {phase}/{total}",
+        )
+        result = dialog.get_input()
+
+        if result is None or not self._dist_cal_active:
+            return
+
+        try:
+            actual_ft = float(result)
+        except ValueError:
+            logger.warning("Dist cal: invalid input '%s', skipping putt", result)
+            return
+
+        if actual_ft <= 0:
+            logger.warning("Dist cal: distance must be positive, skipping")
+            return
+
+        self._dist_cal_samples.append((self._dist_cal_pending_speed, actual_ft))
+        self._dist_cal_pending_speed = 0.0
+
+        # Count putts in current phase
+        phase_start = self._dist_cal_phase * self._dist_cal_putts_per_phase
+        phase_n = len(self._dist_cal_samples) - phase_start
+
+        logger.info(
+            "Dist cal: recorded %.1f ft (measured %.2f MPH) — step %d putt %d/%d",
+            actual_ft, self._dist_cal_samples[-1][0],
+            self._dist_cal_phase + 1, phase_n, self._dist_cal_putts_per_phase,
+        )
+
+        if phase_n < self._dist_cal_putts_per_phase:
+            # More putts needed at this distance
+            self._show_dist_cal_phase_prompt()
+        elif self._dist_cal_phase + 1 < len(self._dist_cal_phase_labels):
+            # Advance to next phase
+            self._dist_cal_phase += 1
+            self._tracker.reset()
+            self._show_dist_cal_phase_prompt()
+            logger.info("Dist cal: advancing to step %d — %s",
+                        self._dist_cal_phase + 1,
+                        self._dist_cal_phase_labels[self._dist_cal_phase])
+        else:
+            # All phases complete
+            self._apply_dist_cal()
+
+    def _apply_dist_cal(self) -> None:
+        """Compute speed calibration factor from collected samples and save."""
+        stimp = self.config.shot.stimpmeter
+        factors: list[float] = []
+        for measured_speed, actual_ft in self._dist_cal_samples:
+            if measured_speed > 0.01 and actual_ft > 0:
+                needed_speed = target_speed_for_distance(actual_ft, stimp)
+                factors.append(needed_speed / measured_speed)
+
+        if not factors:
+            logger.error("Dist cal: no valid samples — aborting")
+            self._dist_cal_active = False
+            return
+
+        avg_factor = sum(factors) / len(factors)
+        avg_factor = max(0.5, min(3.0, avg_factor))  # Sanity clamp
+
+        self.config.shot.speed_calibration_factor = round(avg_factor, 3)
+        save_config(self.config)
+
+        self._dist_cal_active = False
+        self._dist_cal_phase = 0
+        self._dist_cal_samples = []
+
+        if self._window:
+            self._window.set_dist_cal_state(False)
+            with contextlib.suppress(RuntimeError):
+                self._window.after(
+                    0, self._window.update_camera_status,
+                    f"Cal done: speed factor = {avg_factor:.2f}", "ok",
+                )
+
+        logger.info(
+            "Distance calibration complete: factor=%.3f (from %d samples)",
+            avg_factor, len(factors),
+        )
+
     @staticmethod
     def _detect_line_angle(
         frame: np.ndarray,
@@ -573,19 +788,20 @@ class PuttingApp:
                 if elapsed > 0:
                     self._actual_fps = (len(self._fps_queue) - 1) / elapsed
 
-            # FPS watchdog: auto-reset if FPS stays critically low
+            # FPS watchdog: auto-reset tracker if FPS stays critically low
+            # (e.g. MSMF throttling when window is backgrounded).
+            # Only reset tracking state — preserve last_shot_positions so
+            # the trail stays visible through focus changes.
             if self._actual_fps > 0 and self._actual_fps < 10:
                 if self._fps_drop_start == 0.0:
                     self._fps_drop_start = frame_time
                 elif frame_time - self._fps_drop_start > 2.0:
                     logger.warning(
-                        "FPS watchdog: %.1f FPS for >2s — auto-resetting",
+                        "FPS watchdog: %.1f FPS for >2s — resetting tracker",
                         self._actual_fps,
                     )
                     self._tracker.reset()
-                    self._tracker.last_shot_positions.clear()
                     self._post_shot_tracking = False
-                    self._trail_clear_time = 0.0
                     self._fps_drop_start = 0.0
             else:
                 self._fps_drop_start = 0.0
@@ -672,12 +888,18 @@ class PuttingApp:
                 detect_x1 = zone.start_x1
                 detect_x2 = display_frame.shape[1]
 
-            # Relax detection (widen Y, disable circularity) only in ENTERED
+            # Widen Y range when ball is moving (STARTED or ENTERED) to handle
+            # vertical drift during roll.  The zone is only 48px tall — ball
+            # easily drifts out during a putt.
             if self._tracker.state == ShotState.ENTERED:
                 det_y1 = max(0, zone.y1 - 50)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 50)
                 saved_circ = self._detector.min_circularity
                 self._detector.min_circularity = 0.0
+            elif self._tracker.state == ShotState.STARTED:
+                det_y1 = max(0, zone.y1 - 30)
+                det_y2 = min(display_frame.shape[0], zone.y2 + 30)
+                saved_circ = None
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2
@@ -706,17 +928,14 @@ class PuttingApp:
                     expected_radius=expected_r,
                 )
                 if detection is None:
-                    # Ball not in start zone — search wider for gateway crossing
-                    if zone.direction == "right_to_left":
-                        wider_x1 = max(0, zone.start_x1 - 2 * zone.gateway_width)
-                        wider_x2 = zone.start_x2
-                    else:
-                        wider_x1 = zone.start_x1
-                        wider_x2 = zone.start_x2 + 2 * zone.gateway_width
+                    # Ball not in start zone — search full width for gateway
+                    # crossing.  A fast putt can jump past the gateway in one
+                    # frame, so we must search the entire frame, not just a
+                    # narrow band around the gateway.
                     detection = self._detector.detect(
                         frame=display_frame,
-                        zone_x1=wider_x1,
-                        zone_x2_limit=wider_x2,
+                        zone_x1=detect_x1,
+                        zone_x2_limit=detect_x2,
                         zone_y1=det_y1,
                         zone_y2=det_y2,
                         timestamp=frame_time,
@@ -974,6 +1193,20 @@ class PuttingApp:
             logger.warning("Shot physics calculation failed — trail shown but no data")
             return
 
+        # Distance calibration: record raw speed and skip GSPro send
+        if self._dist_cal_active:
+            self._process_dist_cal_shot(shot_data.speed_mph)
+            return
+
+        # Apply speed calibration factor (from Dist Cal wizard)
+        if self.config.shot.speed_calibration_factor != 1.0:
+            shot_data = ShotData(
+                speed_mph=round(shot_data.speed_mph * self.config.shot.speed_calibration_factor, 2),
+                hla_degrees=shot_data.hla_degrees,
+                distance_mm=shot_data.distance_mm,
+                elapsed_seconds=shot_data.elapsed_seconds,
+            )
+
         s = self.config.shot
         in_range = (s.min_speed_mph <= shot_data.speed_mph <= s.max_speed_mph
                     and abs(shot_data.hla_degrees) <= s.max_hla_degrees)
@@ -1172,6 +1405,10 @@ class PuttingApp:
                 det_y2 = min(display_frame.shape[0], zone.y2 + 50)
                 saved_circ = self._detector.min_circularity
                 self._detector.min_circularity = 0.0
+            elif self._tracker.state == ShotState.STARTED:
+                det_y1 = max(0, zone.y1 - 30)
+                det_y2 = min(display_frame.shape[0], zone.y2 + 30)
+                saved_circ = None
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2
@@ -1195,16 +1432,10 @@ class PuttingApp:
                     expected_radius=expected_r,
                 )
                 if detection is None:
-                    if zone.direction == "right_to_left":
-                        wider_x1 = max(0, zone.start_x1 - 2 * zone.gateway_width)
-                        wider_x2 = zone.start_x2
-                    else:
-                        wider_x1 = zone.start_x1
-                        wider_x2 = zone.start_x2 + 2 * zone.gateway_width
                     detection = self._detector.detect(
                         frame=display_frame,
-                        zone_x1=wider_x1,
-                        zone_x2_limit=wider_x2,
+                        zone_x1=detect_x1,
+                        zone_x2_limit=detect_x2,
                         zone_y1=det_y1,
                         zone_y2=det_y2,
                         timestamp=frame_time,
@@ -1368,11 +1599,17 @@ class PuttingApp:
     _CHIPPING_CLUBS = {"SW", "LW", "AW", "GW", "PW"}
     _last_club: str = ""  # Debounce duplicate club change messages
 
-    def _on_club_change(self, club: str) -> None:
+    _CHIPPING_MAX_YARDS: float = 20.0  # Only chip when closer than this to the hole
+
+    def _on_club_change(self, club: str, distance_to_target: float = 0.0) -> None:
         """Called when GSPro sends a club selection (code 201).
 
         Automatically switches OBS scenes and FS Golf PC swing mode.
         Debounces duplicate messages (GSPro often sends the same club twice).
+
+        Args:
+            club: Club code from GSPro (e.g. "PT", "SW", "DR").
+            distance_to_target: Distance to hole in yards (from GSPro).
         """
         club_upper = club.upper()
         if club_upper == self._last_club:
@@ -1398,14 +1635,26 @@ class PuttingApp:
                 self._obs.switch_to_main()
 
         # FS Golf PC chipping/full swing mode
+        # Only switch to chipping when using a wedge AND within 20 yards
+        # of the hole — farther out, wedges should use full swing.
         capture = getattr(self, "_mevo_capture", None)
         if capture is not None and not is_putter:
-            if club_upper in self._CHIPPING_CLUBS:
+            use_chipping = (
+                club_upper in self._CHIPPING_CLUBS
+                and 0 < distance_to_target <= self._CHIPPING_MAX_YARDS
+            )
+            if use_chipping:
                 capture.send_key("c")
-                logger.info("FS Golf PC → Chipping mode (%s)", club)
+                logger.info(
+                    "FS Golf PC → Chipping mode (%s, %.1f yds to target)",
+                    club, distance_to_target,
+                )
             else:
                 capture.send_key("f")
-                logger.info("FS Golf PC → Full Swing mode (%s)", club)
+                logger.info(
+                    "FS Golf PC → Full Swing mode (%s, %.1f yds to target)",
+                    club, distance_to_target,
+                )
 
     def _on_obs_idle(self) -> None:
         """Called when OBS transitions back to idle scene — clear trail."""

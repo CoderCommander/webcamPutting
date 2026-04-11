@@ -147,10 +147,29 @@ class BallTracker:
             gateway_x1 = self.zone.start_x2 + self.zone.gateway_width
             gateway_x2 = gateway_x1 + self.zone.gateway_width
 
-        # Timeout: if we're in ENTERED state and too much time passed, reset
+        # Timeout: if we're in ENTERED state and too much time passed,
+        # complete the shot with what we have rather than discarding it.
+        # The ball likely went off-screen (common with fast putts).
         if self._state == ShotState.ENTERED and self._entry_time > 0:
             elapsed = time.perf_counter() - self._entry_time
             if elapsed > self.shot_settings.min_time_seconds * 4:
+                if len(self._positions) >= 2:
+                    last = self._positions[-1]
+                    result = ShotResult(
+                        start_position=self._entry_pos,
+                        end_position=(last[0], last[1]),
+                        start_radius=self._start_circle[2],
+                        entry_time=self._entry_time,
+                        exit_time=last[2],
+                        px_mm_ratio=self._px_mm_ratio,
+                        positions=list(self._positions),
+                    )
+                    logger.info(
+                        "ENTERED timeout — completing shot with last pos (%d, %d)",
+                        last[0], last[1],
+                    )
+                    self.reset(cooldown=True)
+                    return result
                 logger.debug("Timeout in ENTERED state, resetting")
                 self.reset()
 
@@ -207,10 +226,44 @@ class BallTracker:
             entered = x <= gateway_x2 if self._is_rtl else x >= gateway_x1
             if entered and len(self._positions) < 2:
                 # Only start position recorded — ball hasn't been seen moving
-                # toward the gateway. This is likely a noise contour in the
-                # gateway area, not actual ball movement. Ignore it.
+                # toward the gateway.  Don't enter the gateway yet (could be
+                # noise), but still record the position so that the next frame
+                # can proceed once we have 2+ data points.
+                self._positions.append((x, y, detection.timestamp))
                 return None
             if entered:
+                # Check if ball jumped FAR past the gateway in one frame
+                # (e.g. x=204 → x=632).  If so, complete the shot immediately
+                # instead of entering ENTERED state and waiting for an exit
+                # that will never come (ball is at frame edge or off-screen).
+                min_dist = self.shot_settings.min_exit_distance_px
+                if self._is_rtl:
+                    past_gateway = x < gateway_x1 and self._start_pos[0] - x >= min_dist
+                else:
+                    past_gateway = x > gateway_x2 and x - self._start_pos[0] >= min_dist
+                if past_gateway and len(self._positions) >= 2:
+                    # Ball skipped the gateway entirely — complete shot now.
+                    # Use the start position (where ball was at rest) as entry,
+                    # not the second-to-last tracked position (which may be
+                    # the same jumped position from the previous frame).
+                    self._positions.append((x, y, detection.timestamp))
+                    self._state = ShotState.LEFT
+                    result = ShotResult(
+                        start_position=self._start_pos,
+                        end_position=(x, y),
+                        start_radius=self._start_circle[2],
+                        entry_time=self._positions[0][2],
+                        exit_time=detection.timestamp,
+                        px_mm_ratio=self._px_mm_ratio,
+                        positions=list(self._positions),
+                    )
+                    logger.info(
+                        "Ball jumped past gateway to (%d, %d), start=(%d,%d), shot complete",
+                        x, y, *self._start_pos,
+                    )
+                    self.reset(cooldown=True)
+                    return result
+
                 self._state = ShotState.ENTERED
                 self._entry_time = detection.timestamp
                 self._entry_pos = (x, y)

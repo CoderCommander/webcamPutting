@@ -99,6 +99,12 @@ class Camera:
         s = self._settings
         self._video_file = False
 
+        # Clear env var that may have been set by a previous failed attempt —
+        # OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS=0 can disable the entire
+        # MSMF backend on some OpenCV builds.
+        import os
+        os.environ.pop("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", None)
+
         # Try MJPEG/DirectShow first if configured
         if s.mjpeg and self._try_open_mjpeg():
                 if self._validate_frames():
@@ -217,10 +223,32 @@ class Camera:
             True if the capture device opened (frames not yet validated).
         """
         s = self._settings
-        self._cap = cv2.VideoCapture(s.webcam_index)
-        if self._cap is None or not self._cap.isOpened():
-            logger.error("Failed to open camera %d with default backend", s.webcam_index)
-            return False
+
+        # Try to disable MSMF D3D11 GPU acceleration to prevent throttling
+        # when GPU-intensive apps (GSPro) are in the foreground.
+        # Strategy: try params constructor first, then post-open set, then default.
+        self._cap = None
+        try:
+            self._cap = cv2.VideoCapture(
+                s.webcam_index,
+                cv2.CAP_ANY,
+                [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE],
+            )
+            if self._cap is not None and self._cap.isOpened():
+                logger.info("Camera opened with HW_ACCELERATION_NONE (CPU-only)")
+            else:
+                self._cap = None
+        except Exception:
+            self._cap = None
+
+        if self._cap is None:
+            self._cap = cv2.VideoCapture(s.webcam_index)
+            if self._cap is None or not self._cap.isOpened():
+                logger.error("Failed to open camera %d with default backend", s.webcam_index)
+                return False
+            # Try to disable HW acceleration after open
+            self._cap.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE)
+            logger.info("Camera opened with default backend (set HW_ACCEL_NONE post-open)")
 
         res_w = s.width if s.width > 0 else 1280
         res_h = s.height if s.height > 0 else 720
@@ -231,7 +259,7 @@ class Camera:
         self._cap.set(cv2.CAP_PROP_FPS, target_fps)
 
         logger.info(
-            "Default backend camera: %dx%d @ %d fps requested",
+            "Default backend camera (CPU-only): %dx%d @ %d fps requested",
             res_w, res_h, target_fps,
         )
         return True
@@ -426,10 +454,16 @@ class Camera:
 
         Reuses the VideoCapture already opened on the main thread.
         Reopening would reset Razer Kiyo Pro firmware → black frames.
+
+        NOTE: The MSMF message pump runs on the MAIN thread (via
+        PuttingApp._start_msmf_pump), not here.  MSMF's internal windows
+        are associated with the thread that opened the VideoCapture (main),
+        so pumping on this background thread would have no effect.
         """
         import sys
 
-        # Set this thread to highest priority and prevent timer throttling
+        # Aggressively prevent Windows from throttling this thread when
+        # the app is backgrounded (user clicks GSPro).
         if sys.platform == "win32":
             try:
                 import ctypes
@@ -439,6 +473,28 @@ class Camera:
                 )
                 # Set 1ms timer resolution to prevent background throttling
                 ctypes.windll.winmm.timeBeginPeriod(1)  # type: ignore[attr-defined]
+
+                # Prevent power/idle throttling on this thread
+                ES_CONTINUOUS = 0x80000000
+                ES_SYSTEM_REQUIRED = 0x00000001
+                kernel32.SetThreadExecutionState(
+                    ES_CONTINUOUS | ES_SYSTEM_REQUIRED,
+                )
+
+                # Register with Multimedia Class Scheduler for real-time
+                # priority that persists when the app is backgrounded.
+                try:
+                    avrt = ctypes.windll.avrt  # type: ignore[attr-defined]
+                    task_index = ctypes.c_ulong(0)
+                    handle = avrt.AvSetMmThreadCharacteristicsW(
+                        "Pro Audio", ctypes.byref(task_index),
+                    )
+                    if handle:
+                        logger.info("MMCSS: registered grab thread as 'Pro Audio'")
+                    else:
+                        logger.debug("MMCSS registration failed")
+                except Exception:
+                    pass  # avrt.dll not available on all editions
             except Exception:
                 pass
 
