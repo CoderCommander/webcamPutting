@@ -55,6 +55,7 @@ class MainWindow(ctk.CTk):
         on_reset_putt: Callable[[], None] | None = None,
         on_angle_cal: Callable[[], None] | None = None,
         on_reconnect_gspro: Callable[[], None] | None = None,
+        on_obs_calibrate: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -81,6 +82,7 @@ class MainWindow(ctk.CTk):
         self._on_reset_putt = on_reset_putt
         self._on_angle_cal = on_angle_cal
         self._on_reconnect_gspro = on_reconnect_gspro
+        self._on_obs_calibrate = on_obs_calibrate
         self._is_running = False
         self._edit_zone_active = False
         self._auto_zone_active = False
@@ -896,6 +898,16 @@ class MainWindow(ctk.CTk):
         )
         self._reconnect_btn.pack(side="left", padx=(8, 0))
 
+        # OBS Calibrate button (toggle crosshair grid)
+        self._obs_cal_active = False
+        self._obs_cal_btn = ctk.CTkButton(
+            parent, text="OBS Grid", command=self._on_obs_calibrate_clicked,
+            width=90, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
+        )
+        self._obs_cal_btn.pack(side="left", padx=(8, 0))
+
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
         self._mode_label = ctk.CTkLabel(
@@ -1298,6 +1310,20 @@ class MainWindow(ctk.CTk):
         """Handle Reset Putt button click."""
         if self._on_reset_putt:
             self._on_reset_putt()
+
+    def _on_obs_calibrate_clicked(self) -> None:
+        """Toggle OBS calibration grid."""
+        self._obs_cal_active = not self._obs_cal_active
+        if self._obs_cal_active:
+            self._obs_cal_btn.configure(
+                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
+            )
+        else:
+            self._obs_cal_btn.configure(
+                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            )
+        if self._on_obs_calibrate:
+            self._on_obs_calibrate()
 
     def _on_reconnect_clicked(self) -> None:
         """Handle GSPro Reconnect button click."""

@@ -108,6 +108,7 @@ class PuttingApp:
         # Calibration
         self._calibrator: AutoCalibrator | None = None
         self._calibrating: bool = False
+        self._obs_calibration_grid: bool = False
 
         # Mevo thread
         self._mevo_detector: MevoDetector | None = None
@@ -214,6 +215,7 @@ class PuttingApp:
             on_reset_putt=self.reset_putt,
             on_angle_cal=self._on_angle_cal,
             on_reconnect_gspro=self.reconnect_gspro,
+            on_obs_calibrate=self.toggle_obs_calibration,
         )
 
         # Auto-start if camera/video is available
@@ -331,6 +333,12 @@ class PuttingApp:
             logger.info("GSPro reconnect %s", "succeeded" if connected else "failed")
 
         _threading.Thread(target=_do_reconnect, daemon=True, name="gspro-reconnect").start()
+
+    def toggle_obs_calibration(self) -> None:
+        """Toggle the OBS calibration grid overlay on/off."""
+        self._obs_calibration_grid = not self._obs_calibration_grid
+        logger.info("OBS calibration grid: %s",
+                     "ON" if self._obs_calibration_grid else "OFF")
 
     def _on_auto_zone(self) -> None:
         """Handle Auto Zone button — toggle calibration mode."""
@@ -871,6 +879,7 @@ class PuttingApp:
                 last_shot_trail=self._tracker.last_shot_positions,
                 obs_overlay_mode=self.config.overlay.obs_overlay_mode,
                 obs_show_zones=self.config.overlay.obs_show_zones,
+                obs_calibration_grid=self._obs_calibration_grid,
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
             )
@@ -1309,6 +1318,7 @@ class PuttingApp:
                 last_shot_trail=self._tracker.last_shot_positions,
                 obs_overlay_mode=self.config.overlay.obs_overlay_mode,
                 obs_show_zones=self.config.overlay.obs_show_zones,
+                obs_calibration_grid=self._obs_calibration_grid,
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
                 headless=True,
