@@ -56,6 +56,7 @@ class MainWindow(ctk.CTk):
         on_angle_cal: Callable[[], None] | None = None,
         on_reconnect_gspro: Callable[[], None] | None = None,
         on_obs_calibrate: Callable[[], None] | None = None,
+        on_dist_cal: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -83,6 +84,7 @@ class MainWindow(ctk.CTk):
         self._on_angle_cal = on_angle_cal
         self._on_reconnect_gspro = on_reconnect_gspro
         self._on_obs_calibrate = on_obs_calibrate
+        self._on_dist_cal = on_dist_cal
         self._is_running = False
         self._edit_zone_active = False
         self._auto_zone_active = False
@@ -1346,6 +1348,11 @@ class MainWindow(ctk.CTk):
         """Handle Reset Putt button click."""
         if self._on_reset_putt:
             self._on_reset_putt()
+
+    def _on_dist_cal_clicked(self) -> None:
+        """Handle Distance Calibration button click."""
+        if self._on_dist_cal:
+            self._on_dist_cal()
 
     def _on_obs_calibrate_clicked(self) -> None:
         """Toggle OBS calibration grid."""
