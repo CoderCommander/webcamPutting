@@ -57,6 +57,11 @@ class GSProClient:
         self._shot_cooldown: int = 0  # Heartbeat cycles to skip after a shot
         self._on_club_change = on_club_change  # Called with club name on GSPro code 201
 
+    def set_shot_cooldown(self, cycles: int) -> None:
+        """Set the number of heartbeat cycles to skip after a shot (thread-safe)."""
+        with self._lock:
+            self._shot_cooldown = cycles
+
     @property
     def is_connected(self) -> bool:
         if self._settings.mode == ConnectionMode.HTTP_MIDDLEWARE.value:
@@ -463,7 +468,7 @@ class GSProClient:
                             else:
                                 logger.debug("GSPro message (code %d): %s", code, msg)
                         except json.JSONDecodeError:
-                            pass
+                            logger.debug("Failed to parse GSPro message: %s", part[:200])
             except OSError as e:
                 logger.error("GSPro listener error: %s", e)
                 self._connected.clear()

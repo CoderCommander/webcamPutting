@@ -80,9 +80,19 @@ class Camera:
         return self._cap is not None and self._cap.isOpened()
 
     @property
+    def is_grab_running(self) -> bool:
+        """Whether the grab thread is actively capturing frames."""
+        return self._grab_running
+
+    @property
     def status_message(self) -> str:
         """Human-readable status of the last open attempt."""
         return self._status_message
+
+    def update_settings(self, settings: CameraSettings) -> None:
+        """Replace camera settings and re-apply properties."""
+        self._settings = settings
+        self._apply_camera_properties()
 
     def open_webcam(self) -> bool:
         """Open the webcam with configured settings and frame validation.

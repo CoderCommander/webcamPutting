@@ -57,9 +57,10 @@ class BallTracker:
         shot_settings: ShotSettings,
         max_trail_points: int = 150,
     ):
-        self.zone = zone
         self.ball_settings = ball_settings
         self.shot_settings = shot_settings
+        self._zone = zone
+        self._update_gateway_coords()
 
         self._state = ShotState.IDLE
         self._start_candidates: deque[tuple[int, int]] = deque(
@@ -124,9 +125,23 @@ class BallTracker:
             )
 
     @property
-    def _is_rtl(self) -> bool:
-        """Whether the ball rolls right-to-left."""
-        return self.zone.direction == "right_to_left"
+    def zone(self) -> DetectionZone:
+        return self._zone
+
+    @zone.setter
+    def zone(self, value: DetectionZone) -> None:
+        self._zone = value
+        self._update_gateway_coords()
+
+    def _update_gateway_coords(self) -> None:
+        """Cache gateway coordinates from zone config."""
+        if self._zone.direction == "right_to_left":
+            self._gateway_x2 = self._zone.start_x1 - self._zone.gateway_width
+            self._gateway_x1 = self._gateway_x2 - self._zone.gateway_width
+        else:
+            self._gateway_x1 = self._zone.start_x2 + self._zone.gateway_width
+            self._gateway_x2 = self._gateway_x1 + self._zone.gateway_width
+        self._is_rtl = self._zone.direction == "right_to_left"
 
     def update(self, detection: BallDetection | None) -> ShotResult | None:
         """Process one frame's detection. Returns ShotResult when shot completes.
@@ -137,15 +152,8 @@ class BallTracker:
         Returns:
             ShotResult when a complete shot is detected, None otherwise.
         """
-        # Compute gateway coordinates based on direction
-        if self._is_rtl:
-            # Gateway is to the LEFT of the start zone
-            gateway_x2 = self.zone.start_x1 - self.zone.gateway_width
-            gateway_x1 = gateway_x2 - self.zone.gateway_width
-        else:
-            # Gateway is to the RIGHT of the start zone (original behavior)
-            gateway_x1 = self.zone.start_x2 + self.zone.gateway_width
-            gateway_x2 = gateway_x1 + self.zone.gateway_width
+        gateway_x1 = self._gateway_x1
+        gateway_x2 = self._gateway_x2
 
         # Timeout: if we're in ENTERED state and too much time passed, reset
         if self._state == ShotState.ENTERED and self._entry_time > 0:

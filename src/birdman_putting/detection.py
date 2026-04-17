@@ -208,7 +208,6 @@ class BallDetector:
         roi = frame[cy1:cy2, cx1:cx2]
         blurred = cv2.GaussianBlur(roi, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-        hsv = cv2.cvtColor(hsv, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, self._lower, self._upper)
         if self.morph_iterations > 0 and cv2.countNonZero(mask) > 0:
             mask = cv2.erode(mask, self._morph_kernel, iterations=1)

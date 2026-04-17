@@ -304,8 +304,7 @@ class PuttingApp:
         self._detector.update_hsv(self._hsv_range)
 
         # Update camera settings and re-apply properties (focus, exposure, etc.)
-        self._camera._settings = self.config.camera
-        self._camera.apply_properties()
+        self._camera.update_settings(self.config.camera)
 
         logger.info("Settings reloaded")
 
@@ -556,7 +555,7 @@ class PuttingApp:
             # Read frame
             frame = self._camera.read()
             if frame is None:
-                if self._camera._grab_running:
+                if self._camera.is_grab_running:
                     # Threaded grab: no new frame yet, wait briefly and retry
                     time.sleep(0.001)
                     continue
@@ -1524,7 +1523,7 @@ class PuttingApp:
 
         # Only relay to GSPro if configured (disable when LM connects directly)
         if self.config.mevo.send_to_gspro:
-            self._gspro._shot_cooldown = 3
+            self._gspro.set_shot_cooldown(3)
 
             def _send_mevo() -> None:
                 response = self._gspro.send_full_shot(
@@ -1590,5 +1589,11 @@ class PuttingApp:
         self._stop_obs()
         self._camera.release()
         self._gspro.disconnect()
+        # Drain frame queue to free numpy arrays
+        while not self._frame_queue.empty():
+            try:
+                self._frame_queue.get_nowait()
+            except queue.Empty:
+                break
         cv2.destroyAllWindows()
         logger.info("Putting app stopped")
