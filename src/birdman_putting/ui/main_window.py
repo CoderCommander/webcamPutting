@@ -899,8 +899,6 @@ class MainWindow(ctk.CTk):
         )
         self._angle_cal_btn.pack(side="left", padx=(8, 0))
 
-<<<<<<< Updated upstream
-=======
         # Distance Cal button
         self._dist_cal_btn = ctk.CTkButton(
             parent, text="Dist Cal", command=self._on_dist_cal_clicked,
@@ -921,8 +919,6 @@ class MainWindow(ctk.CTk):
             progress_color=theme.ACCENT_BLUE,
         )
         self._obs_toggle.pack(side="left", padx=(12, 0))
-
->>>>>>> Stashed changes
         # GSPro Reconnect button
         self._reconnect_btn = ctk.CTkButton(
             parent, text="Reconnect", command=self._on_reconnect_clicked,
