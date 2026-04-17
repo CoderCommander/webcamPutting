@@ -33,6 +33,7 @@ from birdman_putting.physics import (
     ShotData,
     calculate_shot,
     estimate_putt_distance_feet,
+    speed_from_visible_distance,
     target_speed_for_distance,
 )
 from birdman_putting.tracking import BallTracker, ShotState
@@ -113,6 +114,7 @@ class PuttingApp:
         # Calibration
         self._calibrator: AutoCalibrator | None = None
         self._calibrating: bool = False
+        self._obs_calibration_grid: bool = False
 
         # Mevo thread
         self._mevo_detector: MevoDetector | None = None
@@ -127,6 +129,8 @@ class PuttingApp:
         self._post_shot_deadline: float = 0.0
         self._post_shot_radius: int = 0
         self._trail_clear_time: float = 0.0  # When to auto-clear the last-shot trail
+        self._last_shot_time: float = 0.0  # When the last shot completed (for trail fade)
+        self._obs_window_visible = False  # Track separate OBS overlay window state
         self._last_state_change: float = 0.0  # For stuck-state auto-reset
 
         # Angle calibration: measure HLA of a "straight" putt to auto-set rotation
@@ -134,13 +138,13 @@ class PuttingApp:
         self._angle_cal_samples: list[float] = []
         self._angle_cal_bg: np.ndarray | None = None  # Background frame for subtraction
 
-        # Distance calibration: putt known distances to derive speed factor
+        # Distance calibration: putt known distances to derive pixels_per_foot
         self._dist_cal_active = False
         self._dist_cal_phase = 0  # 0 = ~5ft phase, 1 = ~10ft phase
         self._dist_cal_phase_labels = ["~5 ft", "~10 ft"]
-        self._dist_cal_samples: list[tuple[float, float]] = []  # (measured_speed, actual_ft)
+        self._dist_cal_samples: list[tuple[float, float]] = []  # (pixel_distance, actual_ft)
         self._dist_cal_putts_per_phase = 3
-        self._dist_cal_pending_speed: float = 0.0  # speed awaiting user distance input
+        self._dist_cal_pending_px: float = 0.0  # pixel distance awaiting user input
 
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
@@ -253,6 +257,7 @@ class PuttingApp:
             on_angle_cal=self._on_angle_cal,
             on_dist_cal=self._on_dist_cal,
             on_reconnect_gspro=self.reconnect_gspro,
+            on_obs_calibrate=self.toggle_obs_calibration,
         )
 
         # Auto-start if camera/video is available
@@ -379,6 +384,12 @@ class PuttingApp:
 
         _threading.Thread(target=_do_reconnect, daemon=True, name="gspro-reconnect").start()
 
+    def toggle_obs_calibration(self) -> None:
+        """Toggle the OBS calibration grid overlay on/off."""
+        self._obs_calibration_grid = not self._obs_calibration_grid
+        logger.info("OBS calibration grid: %s",
+                     "ON" if self._obs_calibration_grid else "OFF")
+
     def _on_auto_zone(self) -> None:
         """Handle Auto Zone button — toggle calibration mode."""
         if self._calibrating:
@@ -504,15 +515,15 @@ class PuttingApp:
                 "watching",
             )
 
-    def _process_dist_cal_shot(self, speed_mph: float) -> None:
+    def _process_dist_cal_shot(self, pixel_distance: float) -> None:
         """Record a calibration putt and prompt user for actual distance."""
-        if speed_mph < 0.01:
-            return
+        if pixel_distance < 5:
+            return  # Too small to be a real putt
 
-        self._dist_cal_pending_speed = speed_mph
+        self._dist_cal_pending_px = pixel_distance
         phase_label = self._dist_cal_phase_labels[self._dist_cal_phase]
 
-        logger.info("Dist cal: putt measured %.2f MPH — prompting for distance", speed_mph)
+        logger.info("Dist cal: putt traveled %.0f pixels — prompting for distance", pixel_distance)
 
         if self._window:
             with contextlib.suppress(RuntimeError):
@@ -547,24 +558,22 @@ class PuttingApp:
             logger.warning("Dist cal: distance must be positive, skipping")
             return
 
-        self._dist_cal_samples.append((self._dist_cal_pending_speed, actual_ft))
-        self._dist_cal_pending_speed = 0.0
+        self._dist_cal_samples.append((self._dist_cal_pending_px, actual_ft))
+        self._dist_cal_pending_px = 0.0
 
         # Count putts in current phase
         phase_start = self._dist_cal_phase * self._dist_cal_putts_per_phase
         phase_n = len(self._dist_cal_samples) - phase_start
 
         logger.info(
-            "Dist cal: recorded %.1f ft (measured %.2f MPH) — step %d putt %d/%d",
+            "Dist cal: recorded %.1f ft at %.0f px — step %d putt %d/%d",
             actual_ft, self._dist_cal_samples[-1][0],
             self._dist_cal_phase + 1, phase_n, self._dist_cal_putts_per_phase,
         )
 
         if phase_n < self._dist_cal_putts_per_phase:
-            # More putts needed at this distance
             self._show_dist_cal_phase_prompt()
         elif self._dist_cal_phase + 1 < len(self._dist_cal_phase_labels):
-            # Advance to next phase
             self._dist_cal_phase += 1
             self._tracker.reset()
             self._show_dist_cal_phase_prompt()
@@ -572,27 +581,25 @@ class PuttingApp:
                         self._dist_cal_phase + 1,
                         self._dist_cal_phase_labels[self._dist_cal_phase])
         else:
-            # All phases complete
             self._apply_dist_cal()
 
     def _apply_dist_cal(self) -> None:
-        """Compute speed calibration factor from collected samples and save."""
-        stimp = self.config.shot.stimpmeter
-        factors: list[float] = []
-        for measured_speed, actual_ft in self._dist_cal_samples:
-            if measured_speed > 0.01 and actual_ft > 0:
-                needed_speed = target_speed_for_distance(actual_ft, stimp)
-                factors.append(needed_speed / measured_speed)
+        """Compute pixels_per_foot from collected samples and save."""
+        ratios: list[float] = []
+        for pixel_dist, actual_ft in self._dist_cal_samples:
+            if pixel_dist > 5 and actual_ft > 0:
+                ratios.append(pixel_dist / actual_ft)
 
-        if not factors:
+        if not ratios:
             logger.error("Dist cal: no valid samples — aborting")
             self._dist_cal_active = False
             return
 
-        avg_factor = sum(factors) / len(factors)
-        avg_factor = max(0.5, min(3.0, avg_factor))  # Sanity clamp
+        avg_ppf = sum(ratios) / len(ratios)
 
-        self.config.shot.speed_calibration_factor = round(avg_factor, 3)
+        self.config.shot.pixels_per_foot = round(avg_ppf, 2)
+        # Reset speed_calibration_factor since pixels_per_foot replaces it
+        self.config.shot.speed_calibration_factor = 1.0
         save_config(self.config)
 
         self._dist_cal_active = False
@@ -604,12 +611,12 @@ class PuttingApp:
             with contextlib.suppress(RuntimeError):
                 self._window.after(
                     0, self._window.update_camera_status,
-                    f"Cal done: speed factor = {avg_factor:.2f}", "ok",
+                    f"Cal done: {avg_ppf:.1f} px/ft", "ok",
                 )
 
         logger.info(
-            "Distance calibration complete: factor=%.3f (from %d samples)",
-            avg_factor, len(factors),
+            "Distance calibration complete: pixels_per_foot=%.2f (from %d samples)",
+            avg_ppf, len(ratios),
         )
 
     @staticmethod
@@ -1008,13 +1015,14 @@ class PuttingApp:
                 # positions were stored — _handle_shot may return early)
                 if self._tracker.last_shot_positions:
                     self._post_shot_tracking = True
-                    self._post_shot_deadline = (
-                        frame_time + self.config.overlay.trail_duration
-                    )
+                    self._last_shot_time = frame_time
+                    ov = self.config.overlay
+                    total = ov.trail_peak_time + ov.trail_fade_time
+                    self._post_shot_deadline = frame_time + total
                     self._post_shot_radius = shot_result.start_radius
-                    # Auto-clear trail after duration (even without OBS idle)
+                    # Auto-clear trail after peak + fade
                     self._trail_clear_time = (
-                        frame_time + self.config.overlay.trail_duration
+                        frame_time + total
                     )
 
             # Post-shot trail extension
@@ -1072,8 +1080,21 @@ class PuttingApp:
             # Draw overlays onto display frame
             t_overlay = time.perf_counter()
             edit_mode = self._window.edit_zone_mode if self._window else False
-            draw_overlay(
-                frame=display_frame,
+
+            # Compute trail brightness based on peak + fade timing
+            trail_brightness = 1.0
+            if self._last_shot_time > 0 and self._tracker.last_shot_positions:
+                elapsed_since_shot = frame_time - self._last_shot_time
+                peak = self.config.overlay.trail_peak_time
+                fade = self.config.overlay.trail_fade_time
+                if elapsed_since_shot <= peak:
+                    trail_brightness = 1.0
+                elif fade > 0:
+                    trail_brightness = max(0.0, 1.0 - (elapsed_since_shot - peak) / fade)
+                else:
+                    trail_brightness = 0.0
+
+            overlay_kwargs = dict(
                 zone=self.config.detection_zone,
                 state=self._tracker.state,
                 detection=detection,
@@ -1088,11 +1109,19 @@ class PuttingApp:
                 edit_mode=edit_mode,
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
-                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
                 obs_show_zones=self.config.overlay.obs_show_zones,
+                obs_calibration_grid=self._obs_calibration_grid,
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
+                trail_brightness=trail_brightness,
             )
+
+            draw_overlay(
+                frame=display_frame,
+                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                **overlay_kwargs,
+            )
+            output_frame = display_frame
 
             # Log slow frames to diagnose FPS drops
             t_end = time.perf_counter()
@@ -1111,12 +1140,12 @@ class PuttingApp:
 
             # Put frame into queue (drop old frames if queue is full)
             try:
-                self._frame_queue.put_nowait(display_frame)
+                self._frame_queue.put_nowait(output_frame)
             except queue.Full:
                 with contextlib.suppress(queue.Empty):
                     self._frame_queue.get_nowait()
                 with contextlib.suppress(queue.Full):
-                    self._frame_queue.put_nowait(display_frame)
+                    self._frame_queue.put_nowait(output_frame)
 
             # Adaptive skip: if processing is slow, skip next frame(s)
             process_duration = time.perf_counter() - frame_time
@@ -1192,9 +1221,36 @@ class PuttingApp:
             logger.warning("Shot physics calculation failed — trail shown but no data")
             return
 
-        # Distance calibration: record raw speed and skip GSPro send
+        # Distance-based speed: if pixels_per_foot is calibrated, compute
+        # speed from visible pixel distance instead of time (PutTrak-style).
+        # This bypasses the timing problem where fast putts are undetectable
+        # during motion, making elapsed time unreliable.
+        ppf = self.config.shot.pixels_per_foot
+        if ppf > 0:
+            dx = shot_result.end_position[0] - shot_result.start_position[0]
+            dy = shot_result.end_position[1] - shot_result.start_position[1]
+            distance_px = math.sqrt(dx * dx + dy * dy)
+            dist_speed = speed_from_visible_distance(
+                distance_px, ppf, self.config.shot.stimpmeter,
+            )
+            if dist_speed > 0:
+                logger.info(
+                    "Distance-based speed: %.2f MPH (%.0fpx / %.1f px/ft = %.1f ft)",
+                    dist_speed, distance_px, ppf, distance_px / ppf,
+                )
+                shot_data = ShotData(
+                    speed_mph=round(dist_speed, 2),
+                    hla_degrees=shot_data.hla_degrees,
+                    distance_mm=shot_data.distance_mm,
+                    elapsed_seconds=shot_data.elapsed_seconds,
+                )
+
+        # Distance calibration: record pixel distance and skip GSPro send
         if self._dist_cal_active:
-            self._process_dist_cal_shot(shot_data.speed_mph)
+            dx = shot_result.end_position[0] - shot_result.start_position[0]
+            dy = shot_result.end_position[1] - shot_result.start_position[1]
+            pixel_dist = math.sqrt(dx * dx + dy * dy)
+            self._process_dist_cal_shot(pixel_dist)
             return
 
         # Apply speed calibration factor (from Dist Cal wizard)
@@ -1523,8 +1579,7 @@ class PuttingApp:
             if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
                 active_trail = [(x, y) for x, y, _t in self._tracker.positions]
 
-            draw_overlay(
-                frame=display_frame,
+            overlay_kwargs_hl = dict(
                 zone=zone,
                 state=self._tracker.state,
                 detection=detection,
@@ -1538,11 +1593,17 @@ class PuttingApp:
                 shot_count=self._tracker.shot_count,
                 active_trail=active_trail,
                 last_shot_trail=self._tracker.last_shot_positions,
-                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
                 obs_show_zones=self.config.overlay.obs_show_zones,
+                obs_calibration_grid=self._obs_calibration_grid,
                 trail_color_name=self.config.overlay.trail_color,
                 active_trail_color_name=self.config.overlay.active_trail_color,
                 headless=True,
+            )
+
+            draw_overlay(
+                frame=display_frame,
+                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                **overlay_kwargs_hl,
             )
 
             if self._pick_mode:
@@ -1634,13 +1695,14 @@ class PuttingApp:
                 self._obs.switch_to_main()
 
         # FS Golf PC chipping/full swing mode
-        # Only switch to chipping when using a wedge AND within 20 yards
-        # of the hole — farther out, wedges should use full swing.
+        # Switch to chipping when using a wedge AND close to the hole.
+        # If GSPro doesn't provide distance (0.0), default to chipping
+        # for wedges since that's the most common scenario.
         capture = getattr(self, "_mevo_capture", None)
         if capture is not None and not is_putter:
             use_chipping = (
                 club_upper in self._CHIPPING_CLUBS
-                and 0 < distance_to_target <= self._CHIPPING_MAX_YARDS
+                and (distance_to_target <= 0 or distance_to_target <= self._CHIPPING_MAX_YARDS)
             )
             if use_chipping:
                 capture.send_key("c")

@@ -60,6 +60,35 @@ def target_speed_for_distance(distance_ft: float, stimpmeter: float = 10.0) -> f
     return v_fps / _MPH_TO_FPS
 
 
+def speed_from_visible_distance(
+    distance_px: float,
+    pixels_per_foot: float,
+    stimpmeter: float = 10.0,
+) -> float:
+    """Compute ball speed from visible pixel distance (PutTrak-style).
+
+    Instead of measuring speed from time (unreliable when the ball is only
+    visible for 1-2 frames), compute the visible on-camera distance in feet
+    and derive speed from stimpmeter physics.
+
+    The visible distance is how far the ball traveled on camera from its
+    rest position.  This correlates with launch speed because faster putts
+    cover more camera pixels before exiting the frame.
+
+    Args:
+        distance_px: Pixel distance from ball rest to last-seen position.
+        pixels_per_foot: Calibrated pixels-per-foot ratio.
+        stimpmeter: Green speed rating.
+
+    Returns:
+        Ball speed in MPH.
+    """
+    if pixels_per_foot <= 0 or distance_px <= 0:
+        return 0.0
+    visible_ft = distance_px / pixels_per_foot
+    return target_speed_for_distance(visible_ft, stimpmeter)
+
+
 def pixel_to_mm_ratio(ball_radius_px: int) -> float:
     """Calculate pixels-per-mm ratio from detected ball radius.
 

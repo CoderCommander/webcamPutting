@@ -181,17 +181,24 @@ def draw_ball_trail(
     positions: list[tuple[int, int]],
     color: tuple[int, int, int] = COLOR_CYAN,
     max_points: int = 150,
+    brightness: float = 1.0,
 ) -> None:
     """Draw a smooth streaking trail with taper and fade.
 
     Renders connected line segments that taper from thin (oldest) to thick
     (newest) with brightness fade. Uses a two-pass approach (wide dim + narrow
     bright) drawn directly on the frame — no frame.copy() needed.
+
+    Args:
+        brightness: Overall brightness multiplier (0.0–1.0). Used for
+            time-based fade-out after a shot.
     """
     # Snapshot to prevent race condition with trail clearing on another thread
     pts = list(positions)
-    if len(pts) < 2:
+    if len(pts) < 2 or brightness <= 0.0:
         return
+
+    b = max(0.0, min(1.0, brightness))
 
     # Subsample to max_points evenly-spaced points
     if len(pts) > max_points:
@@ -210,7 +217,7 @@ def draw_ball_trail(
     # Glow pass: wider, dim lines drawn directly (no frame copy)
     for i in range(1, n):
         t = i / (n - 1)  # 0.0 (oldest) → 1.0 (newest)
-        alpha = 0.1 + 0.3 * t
+        alpha = (0.1 + 0.3 * t) * b
         thickness = max(2, int(3 + 8 * t))
         c = (int(color[0] * alpha), int(color[1] * alpha), int(color[2] * alpha))
         cv2.line(frame, sampled[i - 1], sampled[i], c, thickness, cv2.LINE_AA)
@@ -218,10 +225,57 @@ def draw_ball_trail(
     # Main trail: tapering, bright line segments
     for i in range(1, n):
         t = i / (n - 1)
-        alpha = 0.2 + 0.8 * t
+        alpha = (0.2 + 0.8 * t) * b
         thickness = max(1, int(1 + 5 * t))
         c = (int(color[0] * alpha), int(color[1] * alpha), int(color[2] * alpha))
         cv2.line(frame, sampled[i - 1], sampled[i], c, thickness, cv2.LINE_AA)
+
+
+def draw_calibration_grid(frame: np.ndarray, grid_divisions: int = 4) -> None:
+    """Draw a crosshair + grid overlay for projector alignment.
+
+    Renders center crosshair lines (bright) and evenly spaced grid lines
+    (dim) on a black background so you can align the OBS output with
+    a physical putting surface via an overhead projector.
+
+    Args:
+        frame: BGR image (typically already blacked out in OBS mode).
+        grid_divisions: Number of grid divisions per axis (default 4).
+    """
+    h, w = frame.shape[:2]
+    cx, cy = w // 2, h // 2
+
+    # Dim grid lines
+    grid_color = (60, 60, 60)
+    for i in range(1, grid_divisions):
+        # Vertical
+        gx = int(w * i / grid_divisions)
+        cv2.line(frame, (gx, 0), (gx, h), grid_color, 1, cv2.LINE_AA)
+        # Horizontal
+        gy = int(h * i / grid_divisions)
+        cv2.line(frame, (0, gy), (w, gy), grid_color, 1, cv2.LINE_AA)
+
+    # Bright center crosshair
+    cross_color = (0, 200, 200)  # Cyan-ish
+    cv2.line(frame, (cx, 0), (cx, h), cross_color, 2, cv2.LINE_AA)
+    cv2.line(frame, (0, cy), (w, cy), cross_color, 2, cv2.LINE_AA)
+
+    # Center dot
+    cv2.circle(frame, (cx, cy), 5, cross_color, -1, cv2.LINE_AA)
+
+    # Corner markers for edge alignment
+    marker_len = 20
+    for corner_x, corner_y in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+        dx = 1 if corner_x == 0 else -1
+        dy = 1 if corner_y == 0 else -1
+        cv2.line(frame, (corner_x, corner_y),
+                 (corner_x + dx * marker_len, corner_y), cross_color, 2)
+        cv2.line(frame, (corner_x, corner_y),
+                 (corner_x, corner_y + dy * marker_len), cross_color, 2)
+
+    # Label
+    cv2.putText(frame, "CALIBRATION", (cx - 55, 20),
+                FONT, 0.5, cross_color, 1, cv2.LINE_AA)
 
 
 def draw_overlay(
@@ -242,8 +296,10 @@ def draw_overlay(
     last_shot_trail: list[tuple[int, int]] | None = None,
     obs_overlay_mode: bool = False,
     obs_show_zones: bool = False,
+    obs_calibration_grid: bool = False,
     trail_color_name: str = "cyan",
     active_trail_color_name: str = "green",
+    trail_brightness: float = 1.0,
     headless: bool = False,
 ) -> None:
     """Draw the complete HUD overlay onto a frame.
@@ -260,10 +316,12 @@ def draw_overlay(
     if obs_overlay_mode:
         # Black background — tracer only (no ball circle)
         frame[:] = 0
+        if obs_calibration_grid:
+            draw_calibration_grid(frame)
         if obs_show_zones:
             draw_detection_zones(frame, zone, state)
         if last_shot_trail:
-            draw_ball_trail(frame, last_shot_trail, color=trail_c)
+            draw_ball_trail(frame, last_shot_trail, color=trail_c, brightness=trail_brightness)
         if active_trail:
             draw_ball_trail(frame, active_trail, color=active_c)
         # No ball detection circle in OBS mode
@@ -284,7 +342,7 @@ def draw_overlay(
 
     # Ball trails (golf simulator stripe style)
     if last_shot_trail:
-        draw_ball_trail(frame, last_shot_trail, color=trail_c)
+        draw_ball_trail(frame, last_shot_trail, color=trail_c, brightness=trail_brightness)
     if active_trail:
         draw_ball_trail(frame, active_trail, color=active_c)
 

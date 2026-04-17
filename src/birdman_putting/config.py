@@ -100,6 +100,7 @@ class ShotSettings:
     stimpmeter: float = 10.0  # Green speed rating for putt distance estimation
     post_shot_cooldown: float = 2.5  # Seconds to wait after shot before re-arming
     speed_calibration_factor: float = 1.0  # Multiplier applied to measured speed (from Dist Cal)
+    pixels_per_foot: float = 0.0  # Calibrated px/ft ratio (0=use time-based speed instead)
 
 
 @dataclass
@@ -165,6 +166,8 @@ class OverlaySettings:
     projected_trail: bool = False  # Use calculated trajectory instead of camera tracking
     max_trail_points: int = 150  # Max ball positions stored for trail rendering
     trail_duration: float = 5.0  # Seconds to keep the last-shot trail visible
+    trail_peak_time: float = 2.0  # Seconds at full brightness before fade begins
+    trail_fade_time: float = 3.0  # Seconds to fade from full brightness to gone
     trail_color: str = "cyan"  # Named color for last-shot trail (from ZONE_COLOR_PALETTE)
     active_trail_color: str = "green"  # Named color for in-flight trail
 
