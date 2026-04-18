@@ -101,12 +101,21 @@ class MainWindow(ctk.CTk):
 
     def _build_ui(self) -> None:
         """Construct all UI elements using grid for proper resize behavior."""
-        # Root grid: row 0 = main content (expands), row 1 = control bar (fixed)
-        self.grid_rowconfigure(0, weight=1)
+        # Root grid: row 0 = control bar (fixed), row 1 = main content (expands)
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
+        # Top: control bar (fixed height) — built first so it's at the top
+        control_bar = ctk.CTkFrame(
+            self, height=44, fg_color=theme.BG_PANEL,
+            corner_radius=theme.CORNER_RADIUS,
+            border_width=1, border_color=theme.BORDER_SUBTLE,
+        )
+        control_bar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+        self._build_control_bar(control_bar)
+
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+        main_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
 
         # Main frame grid: col 0 = video (expands), col 1 = right panel (fixed)
         main_frame.grid_rowconfigure(0, weight=1)
@@ -192,14 +201,6 @@ class MainWindow(ctk.CTk):
         self._settings_visible = False
         self._main_frame = main_frame
 
-        # Bottom: control bar (fixed height)
-        control_bar = ctk.CTkFrame(
-            self, height=44, fg_color=theme.BG_PANEL,
-            corner_radius=theme.CORNER_RADIUS,
-            border_width=1, border_color=theme.BORDER_SUBTLE,
-        )
-        control_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        self._build_control_bar(control_bar)
 
     def _build_status_panel(self, parent: ctk.CTkFrame) -> None:
         """Build the status panel content (always visible)."""
