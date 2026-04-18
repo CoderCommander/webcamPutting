@@ -306,6 +306,43 @@ class BallTracker:
 
         # --- ENTERED: Ball crossed gateway, waiting for exit ---
         if self._state == ShotState.ENTERED:
+            # Continuity check: reject detections that contradict real
+            # ball motion.  Once the real ball exits the frame, the
+            # detector often latches onto orange noise at random
+            # positions — we filter these by direction and Y drift.
+            # We do NOT reject large X jumps because fast putts can
+            # legitimately skip 200+px per frame.
+            if self._positions:
+                last_x, last_y, _ = self._positions[-1]
+                dx = x - last_x
+                dy = y - last_y
+
+                # Reject positions moving against the putt direction.
+                # For LTR, x must not decrease significantly; for RTL,
+                # x must not increase significantly.  Small wobble OK.
+                if self._is_rtl and dx > 20:
+                    logger.debug(
+                        "ENTERED: rejecting backward motion (%d,%d)->(%d,%d)",
+                        last_x, last_y, x, y,
+                    )
+                    return None
+                if not self._is_rtl and dx < -20:
+                    logger.debug(
+                        "ENTERED: rejecting backward motion (%d,%d)->(%d,%d)",
+                        last_x, last_y, x, y,
+                    )
+                    return None
+
+                # Reject large Y deviations — real ball rolls mostly
+                # horizontally during a putt; a 60px vertical jump is
+                # almost certainly noise.
+                if abs(dy) > 60:
+                    logger.debug(
+                        "ENTERED: rejecting large Y drift (%d,%d)->(%d,%d)",
+                        last_x, last_y, x, y,
+                    )
+                    return None
+
             self._positions.append((x, y, detection.timestamp))
 
             # Check if ball has exited past the gateway with enough travel
