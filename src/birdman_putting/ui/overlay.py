@@ -231,37 +231,54 @@ def draw_ball_trail(
         cv2.line(frame, sampled[i - 1], sampled[i], c, thickness, cv2.LINE_AA)
 
 
-def draw_calibration_grid(frame: np.ndarray, grid_divisions: int = 4) -> None:
-    """Draw a crosshair + grid overlay for projector alignment.
+def draw_calibration_grid(
+    frame: np.ndarray,
+    zone: DetectionZone,
+    grid_divisions: int = 4,
+) -> None:
+    """Draw a calibration overlay centered on the putting zone.
 
-    Renders center crosshair lines (bright) and evenly spaced grid lines
-    (dim) on a black background so you can align the OBS output with
-    a physical putting surface via an overhead projector.
+    The main horizontal line runs through the vertical center of the
+    detection zone (y1+y2)/2 across the full frame width — this is the
+    ball's expected roll path.  A vertical line marks the zone's
+    horizontal center.  Grid lines and corner markers help with full
+    projector alignment.
 
     Args:
         frame: BGR image (typically already blacked out in OBS mode).
+        zone: Detection zone — the center line follows its Y midpoint.
         grid_divisions: Number of grid divisions per axis (default 4).
     """
     h, w = frame.shape[:2]
-    cx, cy = w // 2, h // 2
+
+    # Zone center = the ball's roll path
+    zone_cy = (zone.y1 + zone.y2) // 2
+    zone_cx = (zone.start_x1 + zone.start_x2) // 2
 
     # Dim grid lines
     grid_color = (60, 60, 60)
     for i in range(1, grid_divisions):
-        # Vertical
         gx = int(w * i / grid_divisions)
         cv2.line(frame, (gx, 0), (gx, h), grid_color, 1, cv2.LINE_AA)
-        # Horizontal
         gy = int(h * i / grid_divisions)
         cv2.line(frame, (0, gy), (w, gy), grid_color, 1, cv2.LINE_AA)
 
-    # Bright center crosshair
-    cross_color = (0, 200, 200)  # Cyan-ish
-    cv2.line(frame, (cx, 0), (cx, h), cross_color, 2, cv2.LINE_AA)
-    cv2.line(frame, (0, cy), (w, cy), cross_color, 2, cv2.LINE_AA)
+    # Bright horizontal line through zone center (ball roll path)
+    cross_color = (0, 200, 200)  # Cyan
+    cv2.line(frame, (0, zone_cy), (w, zone_cy), cross_color, 2, cv2.LINE_AA)
 
-    # Center dot
-    cv2.circle(frame, (cx, cy), 5, cross_color, -1, cv2.LINE_AA)
+    # Vertical line through zone center
+    cv2.line(frame, (zone_cx, 0), (zone_cx, h), cross_color, 1, cv2.LINE_AA)
+
+    # Zone boundary markers (show detection zone edges)
+    edge_color = (0, 120, 120)  # Dim cyan
+    cv2.line(frame, (0, zone.y1), (w, zone.y1), edge_color, 1, cv2.LINE_AA)
+    cv2.line(frame, (0, zone.y2), (w, zone.y2), edge_color, 1, cv2.LINE_AA)
+    cv2.line(frame, (zone.start_x1, 0), (zone.start_x1, h), edge_color, 1, cv2.LINE_AA)
+    cv2.line(frame, (zone.start_x2, 0), (zone.start_x2, h), edge_color, 1, cv2.LINE_AA)
+
+    # Center dot on the roll path
+    cv2.circle(frame, (zone_cx, zone_cy), 5, cross_color, -1, cv2.LINE_AA)
 
     # Corner markers for edge alignment
     marker_len = 20
@@ -274,7 +291,7 @@ def draw_calibration_grid(frame: np.ndarray, grid_divisions: int = 4) -> None:
                  (corner_x, corner_y + dy * marker_len), cross_color, 2)
 
     # Label
-    cv2.putText(frame, "CALIBRATION", (cx - 55, 20),
+    cv2.putText(frame, "CALIBRATION", (zone_cx - 55, zone_cy - 15),
                 FONT, 0.5, cross_color, 1, cv2.LINE_AA)
 
 
@@ -317,7 +334,7 @@ def draw_overlay(
         # Black background — tracer only (no ball circle)
         frame[:] = 0
         if obs_calibration_grid:
-            draw_calibration_grid(frame)
+            draw_calibration_grid(frame, zone)
         if obs_show_zones:
             draw_detection_zones(frame, zone, state)
         if last_shot_trail:
