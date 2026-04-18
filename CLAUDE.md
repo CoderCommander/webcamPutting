@@ -10,6 +10,17 @@ This repo contains two versions:
 - `cam-putting-py/` — Original upstream single-file application (reference only)
 - `src/birdman_putting/` — Modernized modular rewrite (active development)
 
+## Hardware Setup (Greg's Rig)
+
+- **Webcam**: Razer Kiyo Pro at webcam index 1 — 60fps YUY2 via MSMF backend. DirectShow causes black frames (firmware reset) so MSMF is used. Razer Synapse configures the camera firmware (turn OFF HDR for 60fps).
+- **Launch monitor for full swings**: Flightscope Mevo Gen 2. Birdman reads shot data by OCR'ing the FS Golf PC app window via `src/birdman_putting/mevo/` (pytesseract + ROI config per metric). Mevo is *not* a Mevo+ — Springbok's Mevo+ integration does not apply.
+- **Simulator**: GSPro (Open Connect v1 TCP, port 921) running on the same PC as birdman.
+- **OBS**: Used for scene switching between Putt Data / Mevo Shot Data / Main, and for overhead-projector overlay output.
+
+## Club-Gated Putting
+
+The webcam putt tracker only runs when the GSPro-selected club is a putter (`PT`) or no club has been reported yet. On non-putter clubs (driver, wedges, etc.), the tracker is reset and skipped so that full-swing motion in the camera's field of view cannot register as false putts. Mevo OCR handles those shots. See `is_putting_mode` in `app.py`.
+
 ## Webcam Putting App 
 
 When fixing bugs in the webcam putting app, always verify camera feed still works after changes. Never modify camera backend/capture pipeline without testing that frames are still being received and displayed correctly.

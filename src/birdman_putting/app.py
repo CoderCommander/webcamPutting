@@ -961,16 +961,26 @@ class PuttingApp:
             if saved_circ is not None:
                 self._detector.min_circularity = saved_circ
 
-            # Track ball (with state transition logging)
-            prev_state = self._tracker.state
-            shot_result = self._tracker.update(detection)
-            if self._tracker.state != prev_state:
-                logger.info(
-                    "Tracker: %s → %s", prev_state.value, self._tracker.state.value,
-                )
-                self._last_state_change = frame_time
-            if shot_result is not None:
-                logger.info("Shot result received from tracker")
+            # Skip tracker updates when a non-putter club is selected.
+            # Prevents false putt detections from full-swing motion in
+            # or near the detection zone.  Mevo handles those shots.
+            if not self.is_putting_mode:
+                if self._tracker.state != ShotState.IDLE:
+                    self._tracker.reset()
+                detection = None  # Clear for downstream rendering
+                shot_result = None
+                prev_state = self._tracker.state
+            else:
+                # Track ball (with state transition logging)
+                prev_state = self._tracker.state
+                shot_result = self._tracker.update(detection)
+                if self._tracker.state != prev_state:
+                    logger.info(
+                        "Tracker: %s → %s", prev_state.value, self._tracker.state.value,
+                    )
+                    self._last_state_change = frame_time
+                if shot_result is not None:
+                    logger.info("Shot result received from tracker")
 
             # Auto-reset if stuck in STARTED for >10s (no shot progress)
             # or stuck in BALL_DETECTED for >10s (can't stabilize)
@@ -1510,7 +1520,13 @@ class PuttingApp:
             if saved_circ is not None:
                 self._detector.min_circularity = saved_circ
 
-            shot_result = self._tracker.update(detection)
+            # Skip tracker updates when a non-putter club is selected
+            if not self.is_putting_mode:
+                if self._tracker.state != ShotState.IDLE:
+                    self._tracker.reset()
+                shot_result = None
+            else:
+                shot_result = self._tracker.update(detection)
 
             # Signal GSPro when ball is detected and ready
             if not self._mevo_detector:
@@ -1657,7 +1673,22 @@ class PuttingApp:
 
     # GSPro club codes that should use FS Golf PC chipping mode
     _CHIPPING_CLUBS = {"SW", "LW", "AW", "GW", "PW"}
+    _PUTTER_CODES = ("PT", "PUTTER")
     _last_club: str = ""  # Debounce duplicate club change messages
+
+    @property
+    def is_putting_mode(self) -> bool:
+        """Whether webcam putt tracking should be active.
+
+        True when the GSPro-selected club is a putter, OR when no club
+        has been reported yet (safe default so the user can still putt
+        before touching the sim).  False for all non-putter clubs — the
+        webcam tracker is paused during full swings so that motion near
+        the putting zone does not register as false putts.
+        """
+        if not self._last_club:
+            return True  # No club selected yet — allow putting
+        return self._last_club.upper() in self._PUTTER_CODES
 
     _CHIPPING_MAX_YARDS: float = 20.0  # Only chip when closer than this to the hole
 

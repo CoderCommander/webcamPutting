@@ -1,0 +1,1196 @@
+18:21:58 birdman_putting.app INFO: Process priority set to HIGH
+18:21:58 birdman_putting.app INFO: EcoQoS power throttling disabled
+18:21:58 birdman_putting.ui.theme INFO: Loaded font: Space Grotesk
+18:22:12 birdman_putting.camera INFO: Camera opened with HW_ACCELERATION_NONE (CPU-only)
+18:22:50 birdman_putting.camera INFO: Default backend camera (CPU-only): 1280x720 @ 60 fps requested
+18:22:51 birdman_putting.camera DEBUG: Frame validation passed on attempt 1 (mean=134.6)
+18:22:51 birdman_putting.camera INFO: Camera properties: 1280x720 @ 60.0 fps
+18:22:51 birdman_putting.camera DEBUG: Set camera saturation = 255.0
+18:22:51 birdman_putting.camera DEBUG: Set camera exposure = -3.0
+18:22:51 birdman_putting.camera DEBUG: Set camera auto_wb = 1.0
+18:22:51 birdman_putting.camera DEBUG: Set camera white_balance_blue = 6571.0
+18:22:51 birdman_putting.camera DEBUG: Set camera white_balance_red = 7857.0
+18:22:51 birdman_putting.camera DEBUG: Set camera brightness = 255.0
+18:22:51 birdman_putting.camera DEBUG: Set camera contrast = 255.0
+18:22:51 birdman_putting.camera DEBUG: Set camera hue = 64.0
+18:22:51 birdman_putting.camera DEBUG: Set camera gain = 186.0
+18:22:51 birdman_putting.camera DEBUG: Set camera sharpness = 224.0
+18:22:51 birdman_putting.camera DEBUG: Set camera auto_exposure = 3.0
+18:22:51 birdman_putting.camera DEBUG: Set camera gamma = 386.0
+18:22:51 birdman_putting.camera INFO: Attempting DirectShow upgrade for higher FPS...
+18:22:55 birdman_putting.camera DEBUG: Set camera saturation = 255.0
+18:22:55 birdman_putting.camera DEBUG: Set camera exposure = -3.0
+18:22:55 birdman_putting.camera DEBUG: Set camera auto_wb = 1.0
+18:22:55 birdman_putting.camera DEBUG: Set camera white_balance_blue = 6571.0
+18:22:55 birdman_putting.camera DEBUG: Set camera white_balance_red = 7857.0
+18:22:55 birdman_putting.camera DEBUG: Set camera brightness = 255.0
+18:22:55 birdman_putting.camera DEBUG: Set camera contrast = 255.0
+18:22:56 birdman_putting.camera DEBUG: Set camera hue = 64.0
+18:22:56 birdman_putting.camera DEBUG: Set camera gain = 186.0
+18:22:56 birdman_putting.camera DEBUG: Set camera sharpness = 224.0
+18:22:56 birdman_putting.camera DEBUG: Set camera auto_exposure = 3.0
+18:22:56 birdman_putting.camera DEBUG: Set camera gamma = 386.0
+18:22:59 birdman_putting.camera WARNING: DirectShow produced black frames, falling back to MSMF
+18:23:12 birdman_putting.camera INFO: Camera opened with HW_ACCELERATION_NONE (CPU-only)
+18:23:50 birdman_putting.camera INFO: Default backend camera (CPU-only): 1280x720 @ 60 fps requested
+18:23:51 birdman_putting.camera INFO: Camera properties: 1280x720 @ 60.0 fps
+18:23:51 birdman_putting.camera DEBUG: Set camera saturation = 255.0
+18:23:51 birdman_putting.camera DEBUG: Set camera exposure = -3.0
+18:23:51 birdman_putting.camera DEBUG: Set camera auto_wb = 1.0
+18:23:51 birdman_putting.camera DEBUG: Set camera white_balance_blue = 6571.0
+18:23:51 birdman_putting.camera DEBUG: Set camera white_balance_red = 7857.0
+18:23:51 birdman_putting.camera DEBUG: Set camera brightness = 255.0
+18:23:51 birdman_putting.camera DEBUG: Set camera contrast = 255.0
+18:23:51 birdman_putting.camera DEBUG: Set camera hue = 64.0
+18:23:51 birdman_putting.camera DEBUG: Set camera gain = 186.0
+18:23:51 birdman_putting.camera DEBUG: Set camera sharpness = 224.0
+18:23:51 birdman_putting.camera DEBUG: Set camera auto_exposure = 3.0
+18:23:51 birdman_putting.camera DEBUG: Set camera gamma = 386.0
+18:23:51 birdman_putting.camera INFO: Camera ready: Connected (default 1280x720 @ 60fps)
+18:23:51 birdman_putting.camera INFO: Camera grab thread started
+18:23:51 birdman_putting.camera INFO: MMCSS: registered grab thread as 'Pro Audio'
+18:23:51 birdman_putting.camera INFO: Grab thread reading from existing capture
+18:23:51 birdman_putting.gspro_client INFO: Connected to GSPro at 127.0.0.1:921
+18:23:51 birdman_putting.gspro_client INFO: Shot sent to GSPro (shot #0, 386 bytes)
+18:23:51 birdman_putting.gspro_client DEBUG: GSPro payload: {"DeviceID": "BirdmanPutting", "Units": "Yards", "ShotNumber": 0, "APIversion": "1", "BallData": {"Speed": 0.0, "SpinAxis": 0.0, "TotalSpin": 0.0, "HLA": 0.0, "VLA": 0.0, "Backspin": 0.0, "SideSpin": 0.0, "CarryDistance": 0}, "ShotDataOptions": {"ContainsBallData": false, "ContainsClubData": false, "LaunchMonitorIsReady": true, "LaunchMonitorBallDetected": true, "IsHeartBeat": true}}
+18:23:51 birdman_putting.gspro_client INFO: Sent ready signal to GSPro
+18:23:51 obsws_python.baseclient.ObsClient INFO: Connecting with parameters: host='localhost' port=4455 password='Fatbear1' subs=0 timeout=None
+18:23:51 obsws_python.reqs.ReqClient INFO: Successfully identified ReqClient with the server using RPC version:1
+18:23:51 birdman_putting.obs_controller INFO: Connected to OBS at localhost:4455
+18:23:51 obsws_python.baseclient.ObsClient DEBUG: Sending request {'op': 6, 'd': {'requestType': 'GetSceneList', 'requestId': 307}}
+18:23:51 obsws_python.baseclient.ObsClient DEBUG: Response received {'d': {'requestId': 307, 'requestStatus': {'code': 100, 'result': True}, 'requestType': 'GetSceneList', 'responseData': {'currentPreviewSceneName': None, 'currentPreviewSceneUuid': None, 'currentProgramSceneName': 'Putt Data', 'currentProgramSceneUuid': '1f598694-92c9-4552-9155-ff3bdb9a97de', 'scenes': [{'sceneIndex': 0, 'sceneName': 'Mevo Shot Data', 'sceneUuid': '1a6e3774-679b-488e-aa4e-0c2fbd1f45e1'}, {'sceneIndex': 1, 'sceneName': 'Calibration', 'sceneUuid': '3ed9ce56-ae0f-4d46-adaa-94685ee4bc9c'}, {'sceneIndex': 2, 'sceneName': 'Putt Data', 'sceneUuid': '1f598694-92c9-4552-9155-ff3bdb9a97de'}, {'sceneIndex': 3, 'sceneName': 'Main', 'sceneUuid': 'c2b49ba2-812c-4c96-95e0-797a43a06a4f'}]}}, 'op': 7}
+18:23:51 birdman_putting.obs_controller INFO: OBS scenes available: ['Mevo Shot Data', 'Calibration', 'Putt Data', 'Main']
+18:23:51 birdman_putting.mevo.screenshot INFO: Found window 'FS Golf PC' (hwnd=591224)
+18:23:51 birdman_putting.camera INFO: Grab thread: discarded 15 settle frames
+18:23:52 birdman_putting.mevo.screenshot INFO: Widened window 'FS Golf PC' from 1440 to 1920 px (screen=1920)
+18:23:52 birdman_putting.app INFO: Mevo OCR thread started (window='FS Golf PC')
+18:23:52 birdman_putting.app INFO: Processing thread priority set to HIGHEST
+18:23:52 birdman_putting.app INFO: Processing started
+18:23:52 birdman_putting.app INFO: SetThreadExecutionState: anti-throttle active
+18:23:52 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_v_zf703k_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_v_zf703k', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_iw3pvnca_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_iw3pvnca', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess__k8eto2c_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess__k8eto2c', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_mtulm12l_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_mtulm12l', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'spin_rate': raw='1299' \u2192 1299.00
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'launch_direction': raw='4.8R' \u2192 4.80
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_h4wk1n3g_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_h4wk1n3g', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'launch_angle': raw='15.3' \u2192 15.30
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_iwb4vr80_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_iwb4vr80', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_gzyn2k32_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_gzyn2k32', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'ball_speed': raw='92.6' \u2192 92.60
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_1qklbb_i_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_1qklbb_i', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'spin_axis': raw='21.1R' \u2192 21.10
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_sevdtdkd_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_sevdtdkd', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'club_speed': raw='88.8' \u2192 88.80
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_na7yrp6i_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_na7yrp6i', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'smash_factor': raw='1.04' \u2192 1.04
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_bzx_lsu4_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_bzx_lsu4', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'carry_distance': raw='107.7' \u2192 107.70
+18:23:52 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_vyx2ceaq_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_vyx2ceaq', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:52 birdman_putting.mevo.ocr DEBUG: ROI 'total_distance': raw='164.9' \u2192 164.90
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'flight_time': raw='3.0' \u2192 3.00
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'apex_height': raw='26.4' \u2192 26.40
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_chnd4_7g_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_chnd4_7g', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_pzmc7wju_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_pzmc7wju', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_7kz7hxw3_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_7kz7hxw3', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'descent_angle': raw='20.6' \u2192 20.60
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_ehk6puck_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_ehk6puck', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'curve': raw='5.0R' \u2192 5.00
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_l6m4ureh_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_l6m4ureh', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'roll_distance': raw='57.2' \u2192 57.20
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'aoa': raw='-0.2' \u2192 -0.20
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_bm2tlhsf_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_bm2tlhsf', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_q60h60i__input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_q60h60i_', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:23:53 birdman_putting.tracking INFO: New start found at (207, 170) r=8
+18:23:53 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:23:53 birdman_putting.mevo.ocr INFO: ROI 'club_path': raw='41L' has no decimal ù correcting -41.0 to -4.10
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'club_path': raw='41L' \u2192 -4.10
+18:23:53 pytesseract DEBUG: ['tesseract', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_5vk7qy15_input.PNG', 'C:\\Users\\gregd\\AppData\\Local\\Temp\\tess_5vk7qy15', '--psm', '7', '-c', 'tessedit_char_whitelist=0123456789.-RL', 'txt']
+18:23:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'dynamic_loft': raw='19.6' \u2192 19.60
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'face_to_target': raw='6.8R' \u2192 6.80
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'lateral_impact': raw='0.48' \u2192 0.48
+18:23:53 birdman_putting.mevo.ocr DEBUG: ROI 'vertical_impact': raw='0.20' \u2192 0.20
+18:23:53 birdman_putting.mevo.detector INFO: Mevo baseline captured (stale): 92.6 mph ù waiting for new shot
+18:23:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:54 birdman_putting.tracking INFO: Re-start at (206, 170) r=8
+18:23:54 birdman_putting.tracking INFO: Re-start at (206, 170) r=8
+18:23:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=9
+18:23:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=9
+18:23:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:23:56 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:23:56 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:23:56 birdman_putting.tracking INFO: Re-start at (208, 170) r=9
+18:23:57 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:23:57 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:23:57 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:23:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:23:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:23:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:23:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:23:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:23:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:23:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:23:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:02 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:02 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:03 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:03 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:24:03 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:24:03 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:24:03 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:24:03 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:24:03 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:03 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:04 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:04 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:05 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:06 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:06 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:06 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:06 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:07 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:07 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:07 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:08 birdman_putting.tracking INFO: Re-start at (208, 170) r=7
+18:24:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:09 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:12 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:12 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:13 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:13 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:13 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:24:13 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:24:13 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:24:13 birdman_putting.tracking INFO: New start found at (207, 170) r=8
+18:24:13 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:24:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:18 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:19 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:21 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:21 birdman_putting.camera INFO: Grab thread FPS: 60.0
+18:24:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:22 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:23 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:24:23 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:24:24 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:24:24 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:24:24 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:24:24 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:27 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:27 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:27 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:28 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:30 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:32 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:32 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:34 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:24:34 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:24:34 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:24:34 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:24:34 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:24:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:36 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:36 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:37 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:37 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:24:37 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:39 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:39 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:39 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:39 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:40 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:40 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:41 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:42 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:43 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:43 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:44 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:44 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:24:44 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:24:44 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:24:44 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:24:44 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:24:44 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:45 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:45 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:47 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:47 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:47 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:47 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:50 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:50 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:50 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:50 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:51 birdman_putting.camera INFO: Grab thread FPS: 60.0
+18:24:51 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:52 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:52 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:54 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:54 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:54 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:24:54 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:24:54 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:24:54 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:24:54 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:24:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:56 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:56 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:24:57 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:24:57 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:57 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:58 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:58 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:58 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:24:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:24:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:00 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:00 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:00 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:00 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:01 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:01 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:03 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:03 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:03 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:03 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:04 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:25:04 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:25:05 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:25:05 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:25:05 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:25:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:06 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:07 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:07 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:08 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:08 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:10 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:10 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:11 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:12 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:15 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:25:15 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:25:15 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:25:15 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:25:15 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:25:15 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:15 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:16 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:16 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:17 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:17 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:18 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:19 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:19 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:20 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:25:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:21 birdman_putting.camera INFO: Grab thread FPS: 59.9
+18:25:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:21 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:23 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:23 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:23 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:23 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:24 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:25 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:25:25 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:25:25 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:25:25 birdman_putting.tracking DEBUG: Stability: (207,169) candidates=10 matching=10/10 tol=5
+18:25:25 birdman_putting.tracking INFO: New start found at (207, 169) r=7
+18:25:25 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:25:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:26 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:27 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:27 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:31 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:25:31 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:25:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:35 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:25:35 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:25:35 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:25:35 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:25:35 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:25:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:37 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:37 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:39 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:39 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:39 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:39 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:40 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:25:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:41 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:41 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:41 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:43 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:43 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:43 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:25:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:44 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:25:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:25:45 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:45 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:25:45 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:25:46 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:25:46 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:25:46 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:25:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:47 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:47 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:47 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:48 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:49 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:25:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:51 birdman_putting.camera INFO: Grab thread FPS: 60.0
+18:25:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:55 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:25:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:56 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:25:56 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:25:56 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:25:56 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:25:56 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:25:56 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:56 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:25:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:25:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:59 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:25:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:25:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:00 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:02 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:02 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:02 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:03 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:03 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:06 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:26:06 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:26:06 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:26:06 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:26:06 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:26:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:07 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:10 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:26:10 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:11 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:12 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:16 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:26:16 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:26:16 birdman_putting.tracking DEBUG: Stability: (208,170) candidates=10 matching=10/10 tol=5
+18:26:16 birdman_putting.tracking INFO: New start found at (208, 170) r=7
+18:26:16 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:26:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:21 birdman_putting.camera INFO: Grab thread FPS: 59.9
+18:26:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:22 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:24 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:24 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:25 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:26 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:26:26 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:26:26 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:26:26 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:26:26 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:26:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:27 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:28 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:30 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:30 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:31 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:31 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:32 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:33 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:33 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:33 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:33 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:34 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:36 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:26:36 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:26:37 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:26:37 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:26:37 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:26:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:39 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:39 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:39 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:40 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:41 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:26:41 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:42 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:42 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:26:42 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:42 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:43 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:43 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:44 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:45 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:46 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:46 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:47 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:47 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:26:47 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:26:47 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:26:47 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:26:47 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:26:47 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:48 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:49 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:50 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:50 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:50 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:51 birdman_putting.camera INFO: Grab thread FPS: 59.8
+18:26:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:51 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:51 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:52 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:52 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:53 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:53 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:54 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:55 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:55 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:56 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:26:56 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:26:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:57 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:57 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:26:57 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:26:57 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:26:57 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:26:57 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:26:57 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:58 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:58 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:59 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:26:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:26:59 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:00 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:00 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:00 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:01 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:01 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:01 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:01 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:02 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:02 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:03 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:03 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:03 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:03 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:04 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:04 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:04 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:04 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:05 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:05 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:06 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:07 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:07 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:27:07 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:27:07 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:27:07 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:27:07 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:27:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:08 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:09 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:10 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:11 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:11 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:12 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:13 birdman_putting.tracking INFO: Re-start at (207, 169) r=7
+18:27:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:13 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:14 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:14 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:15 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:15 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:15 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:15 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:15 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:16 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:16 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:17 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:17 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:18 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:27:18 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:27:18 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:27:18 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:27:18 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:27:18 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:18 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:19 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:19 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:20 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:21 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:27:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:21 birdman_putting.camera INFO: Grab thread FPS: 60.0
+18:27:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:21 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:22 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:22 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:22 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:22 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:23 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:24 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:24 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:25 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:25 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:25 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:25 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:26 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:26 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:27 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:28 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:27:28 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:27:28 birdman_putting.tracking DEBUG: Stability: (207,170) candidates=10 matching=10/10 tol=5
+18:27:28 birdman_putting.tracking INFO: New start found at (207, 170) r=7
+18:27:28 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:27:28 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:29 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:30 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:31 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:32 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:32 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:32 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:32 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:33 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:33 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:33 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:34 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:34 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:34 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:35 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:35 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:36 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:37 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:27:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:37 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:38 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:38 birdman_putting.app WARNING: Auto-reset: stuck in started for >10s
+18:27:38 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:27:38 birdman_putting.tracking DEBUG: Stability: (209,170) candidates=10 matching=10/10 tol=5
+18:27:38 birdman_putting.tracking INFO: New start found at (209, 170) r=9
+18:27:38 birdman_putting.app INFO: Tracker: ball_detected \u2192 started
+18:27:38 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:39 birdman_putting.tracking INFO: Re-start at (209, 170) r=8
+18:27:39 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:27:39 birdman_putting.tracking INFO: Re-start at (208, 171) r=8
+18:27:39 birdman_putting.tracking INFO: Re-start at (207, 170) r=8
+18:27:40 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:40 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:40 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:40 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:27:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:41 birdman_putting.tracking INFO: Re-start at (207, 170) r=6
+18:27:41 birdman_putting.tracking INFO: Re-start at (208, 171) r=9
+18:27:41 birdman_putting.tracking INFO: Re-start at (208, 171) r=9
+18:27:41 birdman_putting.tracking INFO: Re-start at (208, 170) r=8
+18:27:42 birdman_putting.tracking INFO: Re-start at (208, 171) r=8
+18:27:42 birdman_putting.tracking INFO: Re-start at (208, 171) r=8
+18:27:42 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:42 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:43 birdman_putting.tracking INFO: Re-start at (207, 170) r=7
+18:27:44 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:44 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:44 birdman_putting.tracking INFO: Re-start at (208, 171) r=8
+18:27:44 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:45 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:46 birdman_putting.tracking INFO: Re-start at (208, 171) r=7
+18:27:46 birdman_putting.tracking INFO: Re-start at (207, 171) r=7
+18:27:46 birdman_putting.tracking INFO: Re-start at (207, 171) r=8
+18:27:46 birdman_putting.tracking INFO: Re-start at (207, 172) r=8
+18:27:46 birdman_putting.tracking INFO: Re-start at (207, 172) r=9
+18:27:47 birdman_putting.tracking INFO: Re-start at (207, 172) r=8
+18:27:47 birdman_putting.tracking INFO: Re-start at (207, 172) r=9
+18:27:48 birdman_putting.tracking INFO: Re-start at (209, 177) r=13
+18:27:48 birdman_putting.tracking INFO: Re-start at (213, 173) r=13
+18:27:48 birdman_putting.tracking INFO: Ball entered gateway at (300, 171)
+18:27:48 birdman_putting.app INFO: Tracker: started \u2192 entered
+18:27:50 birdman_putting.tracking INFO: ENTERED timeout ù completing shot with last pos (212, 85)
+18:27:50 birdman_putting.app INFO: Tracker: entered \u2192 idle
+18:27:50 birdman_putting.app INFO: Shot result received from tracker
+18:27:50 birdman_putting.app INFO: Shot captured: 65 trail points, start=(300,171), end=(212,85), px_mm=0.3750, elapsed=1.9459s
+18:27:50 birdman_putting.app INFO: Shot #23: 0.99 MPH, HLA: 22.12, Dist: 328.1 mm, Time: 1.946 s
+18:27:50 birdman_putting.app INFO: Scheduling GUI update: 1.0 MPH, 22.1 HLA, ~1 ft, shot #23
+18:27:50 birdman_putting.gspro_client INFO: Shot sent to GSPro (shot #1, 389 bytes)
+18:27:50 birdman_putting.gspro_client DEBUG: GSPro payload: {"DeviceID": "BirdmanPutting", "Units": "Yards", "ShotNumber": 1, "APIversion": "1", "BallData": {"Speed": 0.99, "SpinAxis": 0.0, "TotalSpin": 0.0, "HLA": 22.12, "VLA": 0.0, "Backspin": 0.0, "SideSpin": 0.0, "CarryDistance": 0}, "ShotDataOptions": {"ContainsBallData": true, "ContainsClubData": false, "LaunchMonitorIsReady": true, "LaunchMonitorBallDetected": true, "IsHeartBeat": false}}
+18:27:51 birdman_putting.camera INFO: Grab thread FPS: 59.9
+18:27:57 birdman_putting.app INFO: Tracker: idle \u2192 ball_detected
+18:28:07 birdman_putting.app WARNING: Auto-reset: stuck in ball_detected for >10s
+18:28:10 birdman_putting.mevo.screenshot INFO: Restored window 'FS Golf PC' to original size
+18:28:10 birdman_putting.obs_controller INFO: Disconnected from OBS
+18:28:11 birdman_putting.camera INFO: Camera released
+18:28:12 birdman_putting.gspro_client INFO: GSPro listener thread exiting
+18:28:12 birdman_putting.gspro_client INFO: Disconnected from GSPro
+18:28:12 birdman_putting.app INFO: Putting app stopped
