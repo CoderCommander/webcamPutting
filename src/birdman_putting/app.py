@@ -1696,21 +1696,24 @@ class PuttingApp:
         """Called when GSPro sends a club selection (code 201).
 
         Automatically switches OBS scenes and FS Golf PC swing mode.
-        Debounces duplicate messages (GSPro often sends the same club twice).
+        OBS/Mevo changes are debounced on duplicate clubs, but the FSG
+        key send always fires — the user may manually toggle FSG between
+        shots, and birdman has no way to observe that.  Re-sending the
+        same key is a no-op if FSG is already in the right mode.
 
         Args:
             club: Club code from GSPro (e.g. "PT", "SW", "DR").
             distance_to_target: Distance to hole in yards (from GSPro).
         """
         club_upper = club.upper()
-        if club_upper == self._last_club:
-            return  # Duplicate — skip
+        club_changed = club_upper != self._last_club
         self._last_club = club_upper
 
         is_putter = club_upper in ("PT", "PUTTER")
 
-        # Pause/resume Mevo OCR — no point running Tesseract during putting
-        if self._mevo_detector:
+        # Pause/resume Mevo OCR — no point running Tesseract during putting.
+        # Only act on actual club changes to avoid log spam.
+        if club_changed and self._mevo_detector:
             if is_putter and not self._mevo_paused:
                 self._mevo_paused = True
                 logger.info("Mevo OCR paused (putter selected)")
@@ -1718,8 +1721,8 @@ class PuttingApp:
                 self._mevo_paused = False
                 logger.info("Mevo OCR resumed (%s selected)", club)
 
-        # OBS scene switching
-        if self._obs is not None and self.config.obs.auto_scene_switch:
+        # OBS scene switching — only on actual club changes
+        if club_changed and self._obs is not None and self.config.obs.auto_scene_switch:
             if is_putter:
                 self._obs.switch_to_putt()
             else:
@@ -1731,14 +1734,13 @@ class PuttingApp:
         # for wedges since that's the most common scenario.
         capture = getattr(self, "_mevo_capture", None)
         if capture is not None and not is_putter:
-            # Chipping only when we have a positive distance AND it's short.
-            # Previously defaulted to chipping when distance was 0, but
-            # GSPro reports 0.0 on par 3 tee shots before the distance is
-            # resolved — causing FSG to be in Chipping when the player
-            # wants Full Swing.  Default is now Full Swing.
+            # GSPro reports DistanceToTarget=0.0 on par 3 tee shots
+            # before the distance is resolved.  On par 3s with a wedge,
+            # the user wants Chipping mode.  So we default to Chipping
+            # when distance is unknown (0.0) AND the club is a wedge.
             use_chipping = (
                 club_upper in self._CHIPPING_CLUBS
-                and 0 < distance_to_target <= self._CHIPPING_MAX_YARDS
+                and (distance_to_target <= 0 or distance_to_target <= self._CHIPPING_MAX_YARDS)
             )
             if use_chipping:
                 capture.send_key("c")
