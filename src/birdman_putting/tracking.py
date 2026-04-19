@@ -318,15 +318,21 @@ class BallTracker:
                 dy = y - last_y
 
                 # Reject positions moving against the putt direction.
-                # For LTR, x must not decrease significantly; for RTL,
-                # x must not increase significantly.  Small wobble OK.
-                if self._is_rtl and dx > 20:
+                # Tolerance scales with time gap — a slow putt detected
+                # every 0.5s can have a larger dx from natural roll
+                # wobble than one detected every 0.016s.  Base tolerance
+                # is 30px; we also accept larger backward motion if the
+                # ball is still near the start (hasn't traveled far yet).
+                start_x = self._start_pos[0]
+                traveled = abs(x - start_x)
+                backward_tol = 30
+                if self._is_rtl and dx > backward_tol:
                     logger.debug(
                         "ENTERED: rejecting backward motion (%d,%d)->(%d,%d)",
                         last_x, last_y, x, y,
                     )
                     return None
-                if not self._is_rtl and dx < -20:
+                if not self._is_rtl and dx < -backward_tol:
                     logger.debug(
                         "ENTERED: rejecting backward motion (%d,%d)->(%d,%d)",
                         last_x, last_y, x, y,
@@ -334,12 +340,16 @@ class BallTracker:
                     return None
 
                 # Reject large Y deviations — real ball rolls mostly
-                # horizontally during a putt; a 60px vertical jump is
-                # almost certainly noise.
-                if abs(dy) > 60:
+                # horizontally during a putt, but a slow/curving putt
+                # with sparse detection can legitimately drift 80+px
+                # vertically over the full roll.  Threshold scales with
+                # how far the ball has traveled: 60px for close-in
+                # jumps, up to 100px once ball is far from start.
+                y_tol = 60 + min(40, traveled // 10)
+                if abs(dy) > y_tol:
                     logger.debug(
-                        "ENTERED: rejecting large Y drift (%d,%d)->(%d,%d)",
-                        last_x, last_y, x, y,
+                        "ENTERED: rejecting large Y drift (%d,%d)->(%d,%d) tol=%d",
+                        last_x, last_y, x, y, y_tol,
                     )
                     return None
 

@@ -1731,9 +1731,14 @@ class PuttingApp:
         # for wedges since that's the most common scenario.
         capture = getattr(self, "_mevo_capture", None)
         if capture is not None and not is_putter:
+            # Chipping only when we have a positive distance AND it's short.
+            # Previously defaulted to chipping when distance was 0, but
+            # GSPro reports 0.0 on par 3 tee shots before the distance is
+            # resolved — causing FSG to be in Chipping when the player
+            # wants Full Swing.  Default is now Full Swing.
             use_chipping = (
                 club_upper in self._CHIPPING_CLUBS
-                and (distance_to_target <= 0 or distance_to_target <= self._CHIPPING_MAX_YARDS)
+                and 0 < distance_to_target <= self._CHIPPING_MAX_YARDS
             )
             if use_chipping:
                 capture.send_key("c")
