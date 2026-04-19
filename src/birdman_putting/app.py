@@ -894,9 +894,12 @@ class PuttingApp:
                 detect_x1 = zone.start_x1
                 detect_x2 = display_frame.shape[1]
 
-            # Widen Y range when ball is moving (STARTED or ENTERED) to handle
-            # vertical drift during roll.  The zone is only 48px tall — ball
-            # easily drifts out during a putt.
+            # Widen Y range + disable circularity when ball is moving (STARTED
+            # or ENTERED) to handle motion blur during roll.  The original
+            # cam-putting-py (which Springbok uses) doesn't use a circularity
+            # filter at all — motion blur drops circularity to 0.3-0.5, which
+            # was causing birdman to reject valid in-flight detections and
+            # leave the tracker with only sparse trail points.
             if self._tracker.state == ShotState.ENTERED:
                 det_y1 = max(0, zone.y1 - 50)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 50)
@@ -905,7 +908,8 @@ class PuttingApp:
             elif self._tracker.state == ShotState.STARTED:
                 det_y1 = max(0, zone.y1 - 30)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 30)
-                saved_circ = None
+                saved_circ = self._detector.min_circularity
+                self._detector.min_circularity = 0.0
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2
@@ -1473,7 +1477,8 @@ class PuttingApp:
             elif self._tracker.state == ShotState.STARTED:
                 det_y1 = max(0, zone.y1 - 30)
                 det_y2 = min(display_frame.shape[0], zone.y2 + 30)
-                saved_circ = None
+                saved_circ = self._detector.min_circularity
+                self._detector.min_circularity = 0.0
             else:
                 det_y1 = zone.y1
                 det_y2 = zone.y2

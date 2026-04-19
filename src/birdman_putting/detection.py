@@ -39,7 +39,7 @@ class BallDetector:
     def __init__(
         self,
         hsv_range: HSVRange,
-        blur_kernel: tuple[int, int] = (7, 7),
+        blur_kernel: tuple[int, int] = (11, 11),
         min_radius: int = 5,
         min_circularity: float = 0.5,
         morph_iterations: int = 5,
