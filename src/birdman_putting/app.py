@@ -1671,8 +1671,10 @@ class PuttingApp:
             logger.warning("OBS connection failed — overlay disabled")
             self._obs = None
 
-    # GSPro club codes that should use FS Golf PC chipping mode
-    _CHIPPING_CLUBS = {"SW", "LW", "AW", "GW", "PW"}
+    # LW is always Chipping regardless of distance
+    _ALWAYS_CHIPPING_CLUBS = {"LW"}
+    # Other wedges use Chipping only when within _CHIPPING_MAX_YARDS
+    _DISTANCE_CHIPPING_CLUBS = {"SW", "AW", "GW", "PW"}
     _PUTTER_CODES = ("PT", "PUTTER")
     _last_club: str = ""  # Debounce duplicate club change messages
 
@@ -1690,7 +1692,7 @@ class PuttingApp:
             return True  # No club selected yet — allow putting
         return self._last_club.upper() in self._PUTTER_CODES
 
-    _CHIPPING_MAX_YARDS: float = 20.0  # Only chip when closer than this to the hole
+    _CHIPPING_MAX_YARDS: float = 30.0  # Chip when within this distance with a wedge (not LW)
 
     def _on_club_change(self, club: str, distance_to_target: float = 0.0) -> None:
         """Called when GSPro sends a club selection (code 201).
@@ -1728,20 +1730,20 @@ class PuttingApp:
             else:
                 self._obs.switch_to_main()
 
-        # FS Golf PC chipping/full swing mode
-        # Switch to chipping when using a wedge AND close to the hole.
-        # If GSPro doesn't provide distance (0.0), default to chipping
-        # for wedges since that's the most common scenario.
+        # FS Golf PC chipping/full swing mode:
+        # - LW (lob wedge): always Chipping regardless of distance
+        # - SW/AW/GW/PW: Chipping only when within _CHIPPING_MAX_YARDS
+        # - All other non-putter clubs: Full Swing
         capture = getattr(self, "_mevo_capture", None)
         if capture is not None and not is_putter:
-            # GSPro reports DistanceToTarget=0.0 on par 3 tee shots
-            # before the distance is resolved.  On par 3s with a wedge,
-            # the user wants Chipping mode.  So we default to Chipping
-            # when distance is unknown (0.0) AND the club is a wedge.
-            use_chipping = (
-                club_upper in self._CHIPPING_CLUBS
-                and (distance_to_target <= 0 or distance_to_target <= self._CHIPPING_MAX_YARDS)
-            )
+            if club_upper in self._ALWAYS_CHIPPING_CLUBS:
+                use_chipping = True
+            elif club_upper in self._DISTANCE_CHIPPING_CLUBS:
+                # Require a known, short distance.  distance=0 means
+                # GSPro hasn't resolved it yet — default to Full Swing.
+                use_chipping = 0 < distance_to_target <= self._CHIPPING_MAX_YARDS
+            else:
+                use_chipping = False
             if use_chipping:
                 capture.send_key("c")
                 logger.info(
