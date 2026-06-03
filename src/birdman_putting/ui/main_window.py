@@ -57,6 +57,9 @@ class MainWindow(ctk.CTk):
         on_reconnect_gspro: Callable[[], None] | None = None,
         on_obs_calibrate: Callable[[], None] | None = None,
         on_dist_cal: Callable[[], None] | None = None,
+        on_auto_cal: Callable[[], None] | None = None,
+        on_obs_auto_cal: Callable[[], None] | None = None,
+        on_cork_cal: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -85,6 +88,9 @@ class MainWindow(ctk.CTk):
         self._on_reconnect_gspro = on_reconnect_gspro
         self._on_obs_calibrate = on_obs_calibrate
         self._on_dist_cal = on_dist_cal
+        self._on_auto_cal = on_auto_cal
+        self._on_obs_auto_cal = on_obs_auto_cal
+        self._on_cork_cal = on_cork_cal
         self._is_running = False
         self._edit_zone_active = False
         self._auto_zone_active = False
@@ -614,6 +620,19 @@ class MainWindow(ctk.CTk):
             font=theme.font(9), text_color=theme.TEXT_MUTED,
         ).pack(anchor="w", pady=(0, 2))
 
+        self._mevo_putt_fallback_var = self._add_live_checkbox(
+            scroll, "Use Mevo as putt fallback",
+            self._config.mevo.putt_fallback,
+            lambda v: setattr(self._config.mevo, "putt_fallback", v),
+            live=False,
+        )
+        ctk.CTkLabel(
+            scroll,
+            text="Keeps OCR running during putts and substitutes Mevo data\n"
+                 "if the webcam misses a hard putt (Gen 2 rarely locks below 20 MPH)",
+            font=theme.font(9), text_color=theme.TEXT_MUTED, justify="left",
+        ).pack(anchor="w", pady=(0, 2))
+
         self._mevo_window_entry = self._add_entry(
             scroll, "Window:", self._config.mevo.window_title, width=140,
         )
@@ -910,6 +929,36 @@ class MainWindow(ctk.CTk):
             corner_radius=theme.CORNER_RADIUS,
         )
         self._dist_cal_btn.pack(side="left", padx=(8, 0))
+
+        # Auto Cal button — one-click ppf calibration from ball radius
+        self._auto_cal_btn = ctk.CTkButton(
+            parent, text="Auto Cal", command=self._on_auto_cal_clicked,
+            width=80, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
+        )
+        self._auto_cal_btn.pack(side="left", padx=(8, 0))
+
+        # OBS Cal button — projects 1-ft markers via OBS, measures their
+        # spacing in the camera frame.  More accurate than ball-radius
+        # cal for wide-angle / off-axis cameras.
+        self._obs_cal_button = ctk.CTkButton(
+            parent, text="OBS Cal", command=self._on_obs_auto_cal_clicked,
+            width=80, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
+        )
+        self._obs_cal_button.pack(side="left", padx=(8, 0))
+
+        # Cork Cal button — physical bright markers (corks/white tape) at
+        # 1-ft intervals.  Use when projector doesn't cover full FOV.
+        self._cork_cal_button = ctk.CTkButton(
+            parent, text="Cork Cal", command=self._on_cork_cal_clicked,
+            width=80, font=theme.font(11),
+            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            corner_radius=theme.CORNER_RADIUS,
+        )
+        self._cork_cal_button.pack(side="left", padx=(8, 0))
 
         # OBS Overlay toggle
         self._obs_overlay_var = ctk.BooleanVar(value=self._config.overlay.obs_overlay_mode)
@@ -1355,6 +1404,21 @@ class MainWindow(ctk.CTk):
         if self._on_dist_cal:
             self._on_dist_cal()
 
+    def _on_auto_cal_clicked(self) -> None:
+        """Handle Auto Cal button click — ppf from ball radius."""
+        if self._on_auto_cal:
+            self._on_auto_cal()
+
+    def _on_obs_auto_cal_clicked(self) -> None:
+        """Handle OBS Cal button click — ppf from projected 1-ft markers."""
+        if self._on_obs_auto_cal:
+            self._on_obs_auto_cal()
+
+    def _on_cork_cal_clicked(self) -> None:
+        """Handle Cork Cal button click — ppf from physical 1-ft markers."""
+        if self._on_cork_cal:
+            self._on_cork_cal()
+
     def _on_obs_calibrate_clicked(self) -> None:
         """Toggle OBS calibration grid."""
         self._obs_cal_active = not self._obs_cal_active
@@ -1411,6 +1475,28 @@ class MainWindow(ctk.CTk):
                 text="Angle Cal",
                 fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
+
+    def set_dist_cal_state(self, active: bool) -> None:
+        """Update Distance Cal button appearance."""
+        if active:
+            self._dist_cal_btn.configure(
+                text="Cancel Cal.",
+                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
+            )
+        else:
+            self._dist_cal_btn.configure(
+                text="Dist Cal",
+                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
+            )
+
+    def show_cal_phase(self, step_label: str, detail_label: str) -> None:
+        """Display the current calibration step (informational).
+
+        The matching update_camera_status call provides the user-visible
+        status-strip text; this method is a hook for future prominent
+        overlays. Implemented as a no-op to keep the callback chain alive.
+        """
+        logger.debug("Cal phase: %s — %s", step_label, detail_label)
 
     def _on_tab_changed(self, value: str) -> None:
         """Switch between Status and Settings views in the right panel."""

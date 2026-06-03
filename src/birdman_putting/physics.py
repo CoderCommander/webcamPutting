@@ -89,6 +89,334 @@ def speed_from_visible_distance(
     return target_speed_for_distance(visible_ft, stimpmeter)
 
 
+# Launch-velocity measurement tunables
+_LAUNCH_MOVE_THRESHOLD_PX = 8    # Distance from rest to declare "moving"
+_LAUNCH_WINDOW_FRAMES = 6        # Max frames after motion onset for the window
+_LAUNCH_WINDOW_MAX_SECONDS = 0.15  # Cap window duration regardless of frame count
+                                 # — at 60fps, 6 frames = 100ms (this allows it).
+                                 # At 13fps, 6 frames = 460ms (this clips to 150ms).
+                                 # Without this clip, low processing FPS averages
+                                 # in deceleration and underestimates launch speed.
+_LAUNCH_MIN_WINDOW_SECONDS = 0.005  # 5ms — guards only against frame-dup/jitter
+_LAUNCH_MAX_MPH = 20.0           # Any reading above this is almost certainly
+                                 # a dropped-frame artifact (~60ft putt)
+
+
+def speed_from_launch_velocity(
+    positions: list[tuple[int, int, float]],
+    pixels_per_foot: float,
+) -> tuple[float, dict]:
+    """Compute launch speed from the first frames of ball motion.
+
+    Unlike speed_from_visible_distance (which saturates once the ball
+    exits the frame), this measures true velocity during the early
+    motion window. A 30-ft putt and a 15-ft putt both cover the full
+    visible frame — but the 30-ft putt covers it faster. Measuring
+    pixels-per-second across the launch transition reads that velocity
+    directly, independent of where the ball exits.
+
+    Algorithm:
+      1. Find motion onset: first frame > LAUNCH_MOVE_THRESHOLD_PX from rest.
+      2. Anchor at the LAST REST frame immediately before motion onset
+         (critical for hard putts that jump the gateway in one frame —
+         we always get at least a 2-point velocity measurement).
+      3. Include up to LAUNCH_WINDOW_FRAMES additional moving samples.
+      4. Compute velocity = (pixels / pixels_per_foot) / dt.
+      5. Reject readings above LAUNCH_MAX_MPH (dropped-frame artifacts).
+
+    Args:
+        positions: List of (x, y, timestamp) tuples, earliest first.
+        pixels_per_foot: Calibrated pixels-per-foot ratio.
+
+    Returns:
+        (speed_mph, debug_info). speed_mph is 0.0 if the measurement is
+        unreliable. debug_info is a dict with 'num_pos', 'num_moving',
+        'window_px', 'window_dt' so callers can diagnose.
+    """
+    debug: dict = {
+        "num_pos": len(positions) if positions else 0,
+        "num_moving": 0,
+        "window_px": 0.0,
+        "window_dt": 0.0,
+        "reason": "",
+    }
+
+    if pixels_per_foot <= 0:
+        debug["reason"] = "ppf<=0"
+        return 0.0, debug
+    if not positions or len(positions) < 2:
+        debug["reason"] = "need 2+ positions"
+        return 0.0, debug
+
+    # Find motion onset: first frame > threshold from rest (positions[0])
+    rest_x, rest_y = float(positions[0][0]), float(positions[0][1])
+    move_start = None
+    for i, (px, py, _t) in enumerate(positions):
+        if math.hypot(px - rest_x, py - rest_y) > _LAUNCH_MOVE_THRESHOLD_PX:
+            move_start = i
+            break
+
+    if move_start is None:
+        debug["reason"] = "no motion detected"
+        return 0.0, debug
+
+    debug["num_moving"] = len(positions) - move_start
+
+    # Window selection.  Prefer motion-only frames — they give the
+    # cleanest launch velocity reading.  Only fall back to including the
+    # rest frame as anchor when we don't have 2 motion frames (rare hard
+    # putts that jump the gateway in a single detection).
+    #
+    # Why the rest frame is bad as a normal anchor: positions[0]'s
+    # timestamp comes from the most recent re-start, which can be up to
+    # 0.5 s before actual motion begins.  Furthermore, ball motion
+    # through the start zone is not appended (only frames *outside* the
+    # start zone are), so positions[1] is already 0.1-0.2 s after
+    # motion onset.  Using the rest frame as anchor adds that pre-motion
+    # gap to window_dt without contributing to dx → velocity underread.
+    motion_window = positions[move_start:move_start + _LAUNCH_WINDOW_FRAMES]
+    if len(motion_window) >= 2:
+        window = list(motion_window)
+    else:
+        # Sparse detection: include rest as 2nd point so we have a
+        # velocity measurement at all.
+        anchor_idx = max(0, move_start - 1)
+        window = list(positions[anchor_idx:anchor_idx + _LAUNCH_WINDOW_FRAMES + 1])
+
+    if len(window) < 2:
+        debug["reason"] = "window too small"
+        return 0.0, debug
+
+    # Time-cap the window so low processing FPS doesn't dilute the
+    # launch reading with deceleration. Trim trailing frames whose
+    # timestamp exceeds anchor_t + LAUNCH_WINDOW_MAX_SECONDS, but
+    # always keep at least 2 points for a velocity calculation.
+    anchor_t = window[0][2]
+    capped: list[tuple[int, int, float]] = [window[0]]
+    for entry in window[1:]:
+        if entry[2] - anchor_t <= _LAUNCH_WINDOW_MAX_SECONDS:
+            capped.append(entry)
+        else:
+            # Always keep one frame past the cap so we have 2 points
+            # even if the cap fires immediately.
+            if len(capped) < 2:
+                capped.append(entry)
+            break
+    window = capped
+
+    x0, y0, t0 = window[0]
+    x1, y1, t1 = window[-1]
+    dx = float(x1 - x0)
+    dy = float(y1 - y0)
+    dt = float(t1 - t0)
+
+    debug["window_px"] = math.hypot(dx, dy)
+    debug["window_dt"] = dt
+
+    if dt < _LAUNCH_MIN_WINDOW_SECONDS:
+        debug["reason"] = "dt too small"
+        return 0.0, debug
+
+    distance_px = math.hypot(dx, dy)
+    if distance_px <= 0:
+        debug["reason"] = "no pixel travel"
+        return 0.0, debug
+
+    launch_ft_per_sec = (distance_px / pixels_per_foot) / dt
+    mph = launch_ft_per_sec / _MPH_TO_FPS
+
+    if mph > _LAUNCH_MAX_MPH:
+        # Likely a dropped-frame artifact: big dx with small dt because
+        # intermediate detections were lost during motion blur.
+        debug["reason"] = f"above {_LAUNCH_MAX_MPH} MPH cap"
+        return 0.0, debug
+
+    debug["reason"] = "ok"
+    return mph, debug
+
+
+# Trajectory-fit launch-velocity tunables
+_FIT_MOTION_THRESHOLD_PX = 5.0   # px from rest to count as "moving"
+_FIT_MIN_FRAMES = 4              # need at least this many motion samples
+_FIT_MIN_TAU_SECONDS = 0.05      # smallest time-span over which to fit
+_FIT_MAX_MPH = 25.0              # sanity cap (above any real putt)
+
+
+def pixel_x_to_feet(
+    x: float,
+    markers: list[float] | None,
+    fallback_ppf: float,
+) -> float:
+    """Convert a pixel X-coordinate to feet using per-x calibration.
+
+    When `markers` is a list of N pixel X-positions at known 1-foot
+    spacing (markers[0]=0ft, markers[1]=1ft, ..., markers[N-1]=(N-1)ft),
+    this returns the position in feet along the putt line via
+    piecewise-linear interpolation.  Outside the calibrated range, the
+    nearest segment's local ppf is used to extrapolate.
+
+    With markers=None or len<2, falls back to a flat `fallback_ppf`
+    scale.  Returns ft = x / fallback_ppf in that case.
+
+    This corrects for fisheye / off-axis distortion where pixels-per-foot
+    varies across the frame.  Greg's Kiyo Pro setup, for example, has
+    ~57 px/ft near the start zone but only ~46 px/ft at the right edge.
+    """
+    if markers and len(markers) >= 2:
+        m_sorted = sorted(markers)
+        if x <= m_sorted[0]:
+            # Before the first marker — extrapolate using the leftmost segment
+            local_ppf = m_sorted[1] - m_sorted[0]
+            if local_ppf > 0:
+                return -(m_sorted[0] - x) / local_ppf
+            return 0.0
+        if x >= m_sorted[-1]:
+            # After the last marker — extrapolate with the rightmost segment
+            local_ppf = m_sorted[-1] - m_sorted[-2]
+            if local_ppf > 0:
+                return (len(m_sorted) - 1) + (x - m_sorted[-1]) / local_ppf
+            return float(len(m_sorted) - 1)
+        # Within range — find the segment via binary search
+        for i in range(len(m_sorted) - 1):
+            if m_sorted[i] <= x <= m_sorted[i + 1]:
+                local_ppf = m_sorted[i + 1] - m_sorted[i]
+                if local_ppf > 0:
+                    return i + (x - m_sorted[i]) / local_ppf
+                return float(i)
+    # No markers — flat ppf scale
+    if fallback_ppf > 0:
+        return x / fallback_ppf
+    return 0.0
+
+
+def speed_from_trajectory_fit(
+    positions: list[tuple[int, int, float]],
+    pixels_per_foot: float,
+    stimpmeter: float = 11.0,
+    calibration_markers: list[float] | None = None,
+) -> tuple[float, dict]:
+    """Estimate launch velocity by fitting all motion samples to the
+    decelerating trajectory model.
+
+    Model: travel(τ) = v0·τ − ½·a·τ²
+
+    where τ is time since the first observed motion frame, travel is
+    Euclidean distance from that first motion position (in feet), and
+    `a = v_ramp² / (2·stimp)` is the constant deceleration on a level
+    green at the configured stimp.
+
+    When `calibration_markers` is provided (a list of pixel X-positions
+    at known 1-ft spacing along the putt line), travel is computed via
+    piecewise-linear interpolation between markers — this corrects for
+    fisheye / off-axis distortion where pixels-per-foot varies across
+    the frame.  Without markers, falls back to flat `pixels_per_foot`
+    scaling.
+
+    Reformulation as a linear least-squares problem in v0:
+        y_i := travel_i + ½·a·τ_i²
+        y_i = v0 · τ_i  (best-fit v0 = Σ(y·τ) / Σ(τ²))
+
+    Returns:
+        (speed_mph, debug_info).  speed_mph is 0.0 if the fit fails.
+    """
+    debug: dict = {
+        "n_motion": 0,
+        "tau_max": 0.0,
+        "travel_max_ft": 0.0,
+        "uses_markers": bool(calibration_markers and len(calibration_markers) >= 2),
+        "reason": "",
+    }
+
+    use_markers = bool(calibration_markers and len(calibration_markers) >= 2)
+    if not use_markers and pixels_per_foot <= 0:
+        debug["reason"] = "ppf<=0 and no markers"
+        return 0.0, debug
+    if not positions or len(positions) < 2:
+        debug["reason"] = "need 2+ positions"
+        return 0.0, debug
+
+    rest_x, rest_y = float(positions[0][0]), float(positions[0][1])
+    motion_start = None
+    for i, (px, py, _t) in enumerate(positions):
+        if math.hypot(px - rest_x, py - rest_y) > _FIT_MOTION_THRESHOLD_PX:
+            motion_start = i
+            break
+
+    if motion_start is None:
+        debug["reason"] = "no motion detected"
+        return 0.0, debug
+
+    motion = list(positions[motion_start:])
+    if len(motion) < _FIT_MIN_FRAMES:
+        debug["reason"] = f"only {len(motion)} motion frames (need {_FIT_MIN_FRAMES}+)"
+        return 0.0, debug
+
+    debug["n_motion"] = len(motion)
+    x0, y0, t0 = float(motion[0][0]), float(motion[0][1]), motion[0][2]
+
+    a_fps2 = _STIMP_RAMP_SPEED_FPS ** 2 / (2.0 * stimpmeter)
+
+    # Anchor X position in feet (ground plane).  For per-x calibration
+    # we use the markers; otherwise just zero (anchor everything to
+    # the first motion frame).
+    if use_markers:
+        x0_ft = pixel_x_to_feet(x0, calibration_markers, pixels_per_foot)
+    else:
+        x0_ft = 0.0  # not used in flat-ppf branch (we compute Euclidean directly)
+
+    sum_y_tau = 0.0
+    sum_tau_sq = 0.0
+    last_tau = 0.0
+    travel_max_ft = 0.0
+    for px, py, t in motion:
+        tau = float(t - t0)
+        if tau < 0:
+            continue
+        last_tau = tau
+
+        if use_markers:
+            # Per-x ppf: signed travel along putt line.  The fit assumes
+            # the ball moves monotonically in one direction; we take
+            # the absolute travel from the anchor.  Y-axis travel is
+            # ignored (small relative to X for a putt).
+            x_ft = pixel_x_to_feet(float(px), calibration_markers, pixels_per_foot)
+            travel_ft = abs(x_ft - x0_ft)
+        else:
+            # Flat ppf — use Euclidean pixel distance (preserves prior behavior)
+            travel_px = math.hypot(float(px) - x0, float(py) - y0)
+            travel_ft = travel_px / pixels_per_foot
+
+        if travel_ft > travel_max_ft:
+            travel_max_ft = travel_ft
+        # y_i = travel + ½·a·τ²; fit y = v0·τ
+        y_i = travel_ft + 0.5 * a_fps2 * tau * tau
+        sum_y_tau += y_i * tau
+        sum_tau_sq += tau * tau
+
+    debug["tau_max"] = last_tau
+    debug["travel_max_ft"] = travel_max_ft
+
+    if last_tau < _FIT_MIN_TAU_SECONDS:
+        debug["reason"] = "tau range too small"
+        return 0.0, debug
+    if sum_tau_sq <= 0:
+        debug["reason"] = "zero tau²"
+        return 0.0, debug
+
+    v0_fps = sum_y_tau / sum_tau_sq
+    v0_mph = v0_fps / _MPH_TO_FPS
+
+    if v0_mph > _FIT_MAX_MPH:
+        debug["reason"] = f"above {_FIT_MAX_MPH} MPH cap"
+        return 0.0, debug
+    if v0_mph <= 0:
+        debug["reason"] = "non-positive velocity"
+        return 0.0, debug
+
+    debug["reason"] = "ok"
+    return v0_mph, debug
+
+
 def pixel_to_mm_ratio(ball_radius_px: int) -> float:
     """Calculate pixels-per-mm ratio from detected ball radius.
 
@@ -98,6 +426,35 @@ def pixel_to_mm_ratio(ball_radius_px: int) -> float:
     if ball_radius_px <= 0:
         return 0.0
     return ball_radius_px / GOLF_BALL_RADIUS_MM
+
+
+# 304.8 mm per foot / 21.335 mm per ball-radius ≈ 14.286 ft-scale per radius-px.
+# i.e. ppf_from_radius(r_px) = r_px × 14.286.
+_MM_PER_FOOT = 304.8
+_PPF_PER_RADIUS_PX = _MM_PER_FOOT / GOLF_BALL_RADIUS_MM  # ≈ 14.286
+
+
+def ppf_from_ball_radius(ball_radius_px: float) -> float:
+    """Derive pixels_per_foot from the detected ball radius.
+
+    Uses the known 21.335mm golf ball radius as an in-frame reference
+    object. For a perpendicular camera, this yields the true ground-plane
+    scale directly. For a tilted camera, it is off by cos(tilt_angle) —
+    a small error for shallow tilts (cos(10°) = 0.98, cos(20°) = 0.94).
+
+    Critically, this is independent of the user's putting distance
+    estimates and independent of the shot-completion pixel saturation
+    that breaks the roll-based Dist Cal wizard.
+
+    Args:
+        ball_radius_px: Detected ball radius in pixels.
+
+    Returns:
+        pixels_per_foot, or 0.0 if input is invalid.
+    """
+    if ball_radius_px <= 0:
+        return 0.0
+    return ball_radius_px * _PPF_PER_RADIUS_PX
 
 
 def calculate_angle(p1: tuple[int, int], p2: tuple[int, int], flip: bool = False) -> float:

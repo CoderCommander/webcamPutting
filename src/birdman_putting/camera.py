@@ -149,19 +149,18 @@ class Camera:
         self._read_properties()
         self._apply_camera_properties()
 
-        # Try upgrading to DirectShow for higher FPS.
-        # Release MSMF, open DirectShow, validate it still works.
-        # If it fails, fall back to reopening MSMF.
-        if self._try_upgrade_to_dshow():
-            self._status_message = (
-                f"Connected (DirectShow {self._frame_width}x{self._frame_height}"
-                f" @ {self._fps:.0f}fps)"
-            )
-        else:
-            self._status_message = (
-                f"Connected (default {self._frame_width}x{self._frame_height}"
-                f" @ {self._fps:.0f}fps)"
-            )
+        # NOTE: We used to try a DirectShow upgrade here for higher FPS.
+        # Disabled — DirectShow resets the Razer Kiyo Pro firmware, causing
+        # black frames (per CLAUDE.md).  It also wastes ~10-20s of startup
+        # time, AND has been observed to leave MSMF in a state where the
+        # subsequent fallback re-open ends up bound to a different device
+        # (e.g., the laptop's integrated webcam at the same MSMF slot).
+        # Keep MSMF only.  If DirectShow upgrade ever becomes useful for
+        # a non-Kiyo camera, add a config flag to re-enable it.
+        self._status_message = (
+            f"Connected (MSMF {self._frame_width}x{self._frame_height}"
+            f" @ {self._fps:.0f}fps)"
+        )
 
         logger.info("Camera ready: %s", self._status_message)
         return True

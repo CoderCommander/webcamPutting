@@ -72,6 +72,18 @@ def main() -> None:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)",
     )
+    parser.add_argument(
+        "--watch-only", action="store_true",
+        help="Connect to GSPro for OBS scene switching only — skip camera, "
+             "Mevo OCR, webcam tracking. Use this when another launch monitor "
+             "(e.g. the Flightscope API tool) is sending shots to GSPro and "
+             "you only want birdman to drive OBS.",
+    )
+    parser.add_argument(
+        "--calibrate-gspro-club", action="store_true",
+        help="Interactive calibration of the GSPro window region that shows "
+             "the current club name. Sets [gspro_watcher].club_roi.",
+    )
 
     args = parser.parse_args()
 
@@ -125,7 +137,19 @@ def main() -> None:
         run_calibration(config)
         sys.exit(0)
 
+    if args.calibrate_gspro_club:
+        from birdman_putting.gspro_calibrate import run_gspro_club_calibration
+
+        run_gspro_club_calibration(config)
+        sys.exit(0)
+
     # Run app
+    if args.watch_only:
+        from birdman_putting.watch_only import run_watch_only
+
+        run_watch_only(config)
+        sys.exit(0)
+
     from birdman_putting.app import PuttingApp
 
     app = PuttingApp(

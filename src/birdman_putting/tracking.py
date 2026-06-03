@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -74,6 +75,13 @@ class BallTracker:
         self._positions: deque[tuple[int, int, float]] = deque(maxlen=max_trail_points)
         self._shot_count: int = 0
         self._post_shot_cooldown_until: float = 0.0
+        # Full-traversal tracking: once exit threshold is met, keep
+        # accumulating positions until the ball is no longer detected
+        # (or ENTERED-state timeout fires).  This gives the trajectory
+        # fitter many more data points for a robust launch-velocity
+        # estimate, instead of stopping at exit_x + min_exit_distance.
+        self._exit_threshold_met: bool = False
+        self._no_detection_streak: int = 0
 
         # Last shot data for UI display
         self.last_shot_speed: float = 0.0
@@ -119,6 +127,8 @@ class BallTracker:
         self._entry_time = 0.0
         self._px_mm_ratio = 0.0
         self._positions.clear()
+        self._exit_threshold_met = False
+        self._no_detection_streak = 0
         if cooldown and self.shot_settings.post_shot_cooldown > 0:
             self._post_shot_cooldown_until = (
                 time.perf_counter() + self.shot_settings.post_shot_cooldown
@@ -155,11 +165,43 @@ class BallTracker:
         gateway_x1 = self._gateway_x1
         gateway_x2 = self._gateway_x2
 
-        # Timeout: if we're in ENTERED state and too much time passed,
-        # complete the shot with what we have rather than discarding it.
-        # The ball likely went off-screen (common with fast putts).
+        # Timeout / completion checks for ENTERED state.
+        # We have two completion paths:
+        #   1. Ball lost after exit threshold met — most common; ball
+        #      rolled off-frame.  Complete after 3 consecutive None
+        #      detections, ~50ms at 60fps.  Gives us all the trajectory
+        #      data the camera could see.
+        #   2. Hard timeout at 4× min_time_seconds — fallback for stuck
+        #      states (e.g., ball stops in frame and detector keeps
+        #      seeing it).
         if self._state == ShotState.ENTERED and self._entry_time > 0:
             elapsed = time.perf_counter() - self._entry_time
+
+            # (1) Detection lost after exit threshold was met
+            if (detection is None
+                    and self._exit_threshold_met
+                    and len(self._positions) >= 2):
+                self._no_detection_streak += 1
+                if self._no_detection_streak >= 3:
+                    last = self._positions[-1]
+                    result = ShotResult(
+                        start_position=self._entry_pos,
+                        end_position=(last[0], last[1]),
+                        start_radius=self._start_circle[2],
+                        entry_time=self._entry_time,
+                        exit_time=last[2],
+                        px_mm_ratio=self._px_mm_ratio,
+                        positions=list(self._positions),
+                    )
+                    logger.info(
+                        "Ball left frame after exit — shot complete with "
+                        "%d trail points, last pos (%d, %d)",
+                        len(self._positions), last[0], last[1],
+                    )
+                    self.reset(cooldown=True)
+                    return result
+
+            # (2) Hard timeout — ball never reached exit OR tracker stuck
             if elapsed > self.shot_settings.min_time_seconds * 4:
                 if len(self._positions) >= 2:
                     last = self._positions[-1]
@@ -278,26 +320,83 @@ class BallTracker:
                 self._positions.append((x, y, detection.timestamp))
                 logger.info("Ball entered gateway at (%d, %d)", x, y)
             elif self.zone.start_x1 <= x <= self.zone.start_x2:
-                # Ball still in start zone — check for repositioning (new stable pos)
-                self._start_candidates.append((x, y))
-                max_candidates = self.ball_settings.start_stability_frames * 2
-                if len(self._start_candidates) > max_candidates:
-                    self._start_candidates.pop(0)
-                if len(self._start_candidates) >= self.ball_settings.start_stability_frames:
-                    tolerance = self.ball_settings.start_position_tolerance
-                    matching = sum(
-                        1 for cx, cy in self._start_candidates
-                        if abs(cx - x) <= tolerance and abs(cy - y) <= tolerance
-                    )
-                    if matching >= self.ball_settings.start_stability_frames:
-                        logger.info("Re-start at (%d, %d) r=%d", x, y, detection.radius)
-                        self._start_circle = (x, y, detection.radius)
-                        self._start_pos = (x, y)
-                        self._positions.clear()
-                        self._positions.append((x, y, detection.timestamp))
-                        self._start_candidates.clear()
-                        radius = self.ball_settings.fixed_radius or detection.radius
-                        self._px_mm_ratio = pixel_to_mm_ratio(radius)
+                # Ball is INSIDE start zone.  Two sub-cases that need
+                # different handling:
+                #
+                #  (a) Ball is currently in motion (frame-to-frame
+                #      displacement > threshold) — this is the launch
+                #      phase of a putt traversing the start zone.
+                #      Append the position so launch-velocity can read
+                #      it.  Without this, we miss the highest-velocity
+                #      portion of the trail.
+                #
+                #  (b) Ball is stationary (or nearly so) at its current
+                #      location — could be the original rest, or the
+                #      user repositioning to a new spot in the zone.
+                #      Run the stability check; on convergence, treat
+                #      it as a new resting position (re-start).
+                # Use a tight motion threshold so we catch the FIRST
+                # frame of slow-stroke putts.  A higher threshold (e.g. 6
+                # px) misses the 1-2 launch frames of slow strokes,
+                # causing the window to start at already-decelerated
+                # motion and under-read by ~30%.
+                _IN_ZONE_FRAME_MOTION_THRESHOLD = 3  # px frame-to-frame
+
+                # Use the LAST APPENDED POSITION (or rest_pos as fallback)
+                # for frame-to-frame motion calc — NOT _start_candidates,
+                # which we may have just cleared during motion.  Without
+                # this dedicated reference, alternating frames get dropped:
+                # frame-A appends + clears candidates, frame-B sees empty
+                # candidates → frame_motion=0 → not appended, frame-C sees
+                # candidate from B → appended, etc.
+                if self._positions:
+                    last_x, last_y, _ = self._positions[-1]
+                else:
+                    last_x, last_y = self._start_pos
+                frame_motion = math.hypot(x - last_x, y - last_y)
+
+                if frame_motion > _IN_ZONE_FRAME_MOTION_THRESHOLD:
+                    # Active motion.  If this is the first motion frame,
+                    # pull in the immediately-preceding stability candidate
+                    # too — it may have been just-under-threshold motion
+                    # rather than rest.  This gives launch-velocity an
+                    # extra anchor frame that's closer to motion onset.
+                    if (len(self._positions) == 1
+                            and self._start_candidates):
+                        prev_cx, prev_cy = self._start_candidates[-1]
+                        # Only include if it's between rest and current —
+                        # i.e. it was already-moving (not noise jitter)
+                        rest_x, rest_y = self._start_pos
+                        prev_dist = math.hypot(prev_cx - rest_x, prev_cy - rest_y)
+                        if prev_dist > 1.5:  # 1+ px of motion from rest
+                            # Use a timestamp halfway between rest and now
+                            # — we don't have the exact prev timestamp, but
+                            # half the current dt is a reasonable estimate
+                            prev_t = (self._positions[0][2] + detection.timestamp) / 2
+                            self._positions.append((int(prev_cx), int(prev_cy), prev_t))
+                    self._positions.append((x, y, detection.timestamp))
+                    self._start_candidates.clear()
+                else:
+                    # Stationary / settling — usual stability / re-start logic
+                    self._start_candidates.append((x, y))
+                    max_candidates = self.ball_settings.start_stability_frames * 2
+                    if len(self._start_candidates) > max_candidates:
+                        self._start_candidates.pop(0)
+                    if len(self._start_candidates) >= self.ball_settings.start_stability_frames:
+                        tolerance = self.ball_settings.start_position_tolerance
+                        matching = sum(
+                            1 for cx, cy in self._start_candidates
+                            if abs(cx - x) <= tolerance and abs(cy - y) <= tolerance
+                        )
+                        if matching >= self.ball_settings.start_stability_frames:
+                            logger.info("Re-start at (%d, %d) r=%d", x, y, detection.radius)
+                            self._start_circle = (x, y, detection.radius)
+                            self._start_pos = (x, y)
+                            self._positions.clear()
+                            self._positions.append((x, y, detection.timestamp))
+                            self._start_candidates.clear()
+                            radius = self.ball_settings.fixed_radius or detection.radius
+                            self._px_mm_ratio = pixel_to_mm_ratio(radius)
             else:
                 # Ball in transit between start zone and gateway — track, stay STARTED
                 self._positions.append((x, y, detection.timestamp))
@@ -354,45 +453,30 @@ class BallTracker:
                     return None
 
             self._positions.append((x, y, detection.timestamp))
+            # Reset no-detection counter — we just got a fresh detection
+            self._no_detection_streak = 0
 
-            # Check if ball has exited past the gateway with enough travel
+            # Mark exit threshold once met (ball past gateway with min
+            # travel).  We DON'T complete the shot here — we keep
+            # tracking until the ball is no longer detected (handled in
+            # the timeout block at the top of update()).  This gives
+            # the trajectory fitter all visible motion frames, not just
+            # the early portion.
             min_dist = self.shot_settings.min_exit_distance_px
             if self._is_rtl:
-                exited = x < gateway_x1 and len(self._positions) >= 2
-                if exited:
-                    travel = self._entry_pos[0] - x
-                    if travel >= min_dist:
-                        self._state = ShotState.LEFT
-                        result = ShotResult(
-                            start_position=self._entry_pos,
-                            end_position=(x, y),
-                            start_radius=self._start_circle[2],
-                            entry_time=self._entry_time,
-                            exit_time=detection.timestamp,
-                            px_mm_ratio=self._px_mm_ratio,
-                            positions=list(self._positions),
-                        )
-                        logger.info("Ball left at (%d, %d), shot complete", x, y)
-                        self.reset(cooldown=True)
-                        return result
+                exit_met = (x < gateway_x1
+                            and (self._entry_pos[0] - x) >= min_dist
+                            and len(self._positions) >= 2)
             else:
-                exited = x > gateway_x2 and len(self._positions) >= 2
-                if exited:
-                    travel = x - self._entry_pos[0]
-                    if travel >= min_dist:
-                        self._state = ShotState.LEFT
-                        result = ShotResult(
-                            start_position=self._entry_pos,
-                            end_position=(x, y),
-                            start_radius=self._start_circle[2],
-                            entry_time=self._entry_time,
-                            exit_time=detection.timestamp,
-                            px_mm_ratio=self._px_mm_ratio,
-                            positions=list(self._positions),
-                        )
-                        logger.info("Ball left at (%d, %d), shot complete", x, y)
-                        self.reset(cooldown=True)
-                        return result
+                exit_met = (x > gateway_x2
+                            and (x - self._entry_pos[0]) >= min_dist
+                            and len(self._positions) >= 2)
+            if exit_met and not self._exit_threshold_met:
+                self._exit_threshold_met = True
+                logger.debug(
+                    "ENTERED: exit threshold met at (%d,%d), continuing "
+                    "for trajectory data", x, y,
+                )
 
             return None
 

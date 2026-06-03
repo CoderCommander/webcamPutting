@@ -71,9 +71,16 @@ class TestStateTransitions:
         tracker.update(_det(gateway_x1 + 5, 300, t + 0.5))
         assert tracker.state == ShotState.ENTERED
 
-        # Exit well past gateway (min_exit_distance_px=50)
+        # Exit well past gateway (min_exit_distance_px=50).  With the
+        # full-traversal change, shot doesn't complete on the exit
+        # frame — it completes when detection is lost (ball leaves
+        # frame).  Send the exit-frame detection, then 3 None frames.
         gateway_x2 = gateway_x1 + zone.gateway_width
-        result = tracker.update(_det(gateway_x2 + 200, 295, t + 0.6))
+        tracker.update(_det(gateway_x2 + 200, 295, t + 0.6))
+        # Ball has now left the frame — feed Nones to trigger completion
+        result = None
+        for i in range(3):
+            result = tracker.update(None)
 
         assert result is not None
         assert result.start_position[0] == gateway_x1 + 5
@@ -139,8 +146,12 @@ class TestGradualMovement:
         # Should have entered gateway
         assert tracker.state == ShotState.ENTERED
 
-        # Exit past gateway (gateway_x2=210, need 50px travel past entry)
-        result = tracker.update(_det(300, 298, t + frame * 0.016))
+        # Exit past gateway (gateway_x2=210, need 50px travel past entry).
+        # Send exit detection, then 3 None frames for completion.
+        tracker.update(_det(300, 298, t + frame * 0.016))
+        result = None
+        for _ in range(3):
+            result = tracker.update(None)
         assert result is not None
         assert result.end_position[0] == 300
 
@@ -175,8 +186,12 @@ class TestGradualMovement:
 
         assert tracker.state == ShotState.ENTERED
 
-        # Exit well past gateway (gateway_x1 = 385 - 15 = 370)
-        result = tracker.update(_det(200, 298, t + frame * 0.016))
+        # Exit well past gateway (gateway_x1 = 385 - 15 = 370).
+        # Send exit detection, then 3 None frames for completion.
+        tracker.update(_det(200, 298, t + frame * 0.016))
+        result = None
+        for _ in range(3):
+            result = tracker.update(None)
         assert result is not None
 
     def test_repositioning_updates_start(self, tracker: BallTracker) -> None:
@@ -199,6 +214,41 @@ class TestGradualMovement:
         # Start position should have updated
         assert tracker.start_circle[:2] == (100, 300)
 
+    def test_in_zone_motion_appended(self, tracker: BallTracker) -> None:
+        """Ball moving rapidly through start zone (frame-to-frame > 6px)
+        should be appended to positions, even before exiting the zone.
+
+        Without this, the launch-velocity window misses the highest-
+        velocity portion of the trail (ball decelerates as it traverses
+        the start zone), causing a ~30% under-read on real putts.
+        """
+        t = time.perf_counter()
+
+        # Stabilize at x=50 (rest)
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+        rest_count = len(tracker.positions)
+
+        # Simulate a putt: ball moves 15 px per frame through the start
+        # zone (x=50 -> 65 -> 80 -> 95 -> 110 -> 125 -> 140 -> 155 -> 170)
+        # All within start zone (start_x2=180 in fixture).
+        base = t + 0.5
+        for i in range(8):
+            x = 65 + i * 15
+            tracker.update(_det(x, 300, base + i * 0.016))
+
+        # Each in-zone motion frame should have been appended (not just
+        # the last one before zone exit).
+        positions = tracker.positions
+        # We expect rest_count + 8 motion frames (some, all, or near all
+        # depending on threshold — at minimum >2 motion frames captured)
+        in_zone_motion_xs = [p[0] for p in positions if 50 < p[0] <= 180]
+        assert len(in_zone_motion_xs) >= 4, (
+            f"only {len(in_zone_motion_xs)} in-zone motion frames captured; "
+            f"positions: {list(positions)}"
+        )
+
     def test_transit_positions_tracked(self, tracker: BallTracker) -> None:
         """Positions in transit zone (between start and gateway) are recorded."""
         t = time.perf_counter()
@@ -219,7 +269,11 @@ class TestGradualMovement:
         # Enter and exit gateway to complete shot
         tracker.update(_det(195, 300, t + 0.6))
         assert tracker.state == ShotState.ENTERED
-        result = tracker.update(_det(300, 298, t + 0.7))
+        # Exit detection — but completion now requires lost detections
+        tracker.update(_det(300, 298, t + 0.7))
+        result = None
+        for _ in range(3):
+            result = tracker.update(None)
         assert result is not None
         # Transit position should be in the result
         assert any(p[0] == 185 for p in result.positions)
@@ -282,8 +336,12 @@ class TestRightToLeft:
         rtl_tracker.update(_det(gateway_x2 - 5, 300, t + 0.5))
         assert rtl_tracker.state == ShotState.ENTERED
 
-        # Exit well past gateway to the left
-        result = rtl_tracker.update(_det(gateway_x1 - 200, 295, t + 0.6))
+        # Exit well past gateway to the left.  Send exit detection,
+        # then 3 None frames to trigger post-traversal completion.
+        rtl_tracker.update(_det(gateway_x1 - 200, 295, t + 0.6))
+        result = None
+        for _ in range(3):
+            result = rtl_tracker.update(None)
 
         assert result is not None
         assert result.end_position[0] == gateway_x1 - 200
@@ -308,7 +366,11 @@ class TestPostShotCooldown:
         tracker.update(_det(195, 300, t + 0.5))
         assert tracker.state == ShotState.ENTERED
         gateway_x2 = detection_zone.start_x2 + 2 * detection_zone.gateway_width
-        result = tracker.update(_det(gateway_x2 + 200, 295, t + 0.6))
+        # Send exit detection, then None frames to complete shot
+        tracker.update(_det(gateway_x2 + 200, 295, t + 0.6))
+        result = None
+        for _ in range(3):
+            result = tracker.update(None)
         assert result is not None
         assert tracker.state == ShotState.IDLE
 

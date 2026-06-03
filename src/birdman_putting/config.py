@@ -101,6 +101,14 @@ class ShotSettings:
     post_shot_cooldown: float = 2.5  # Seconds to wait after shot before re-arming
     speed_calibration_factor: float = 1.0  # Multiplier applied to measured speed (from Dist Cal)
     pixels_per_foot: float = 0.0  # Calibrated px/ft ratio (0=use time-based speed instead)
+    # Per-x ppf calibration: list of detected marker X-positions (in
+    # 640-px display space) at known 1-foot spacing along the putt line.
+    # When non-empty, the trajectory fitter uses piecewise-linear
+    # interpolation between markers to convert pixel travel to feet —
+    # corrects for fisheye / off-axis camera where ppf varies across the
+    # frame.  Set by OBS Auto Cal (which runs cork/marker detection).
+    # When empty, falls back to flat `pixels_per_foot` scale.
+    calibration_markers: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -140,6 +148,14 @@ class MevoSettings:
     # ROI format: {"ball_speed": [x, y, w, h], "launch_angle": [x, y, w, h], ...}
     cal_width: int = 0  # Capture width when ROIs were calibrated (0 = unknown)
     cal_height: int = 0  # Capture height when ROIs were calibrated (0 = unknown)
+    # If True, keep Mevo OCR running during putting and use a recent
+    # reading as a fallback when the webcam putt fails or is low-confidence
+    # (e.g., hit the 20 MPH velocity cap or insufficient detections).
+    # Mevo Gen 2 rarely registers putts, so expect this to help only on
+    # very hard putts that have enough energy for the radar to lock.
+    putt_fallback: bool = False
+    # Max age (seconds) of a stashed Mevo reading for fallback use.
+    putt_fallback_max_age_s: float = 3.0
 
 
 @dataclass
@@ -153,8 +169,38 @@ class OBSSettings:
     mevo_scene: str = "Mevo Shot Data"
     putt_scene: str = "Putt Data"
     idle_scene: str = "Main"
+    # Scene that projects evenly-spaced 1-ft markers along the putt line
+    # for OBS Auto Cal.  When the user clicks OBS Auto Cal, Birdman
+    # switches to this scene, captures a frame, detects the projected
+    # markers, computes pixels_per_foot from their median spacing, and
+    # then switches back to the previous scene.
+    calibration_scene: str = "Calibration"
     display_duration: float = 18.0  # Seconds to show shot data before returning to idle
     auto_scene_switch: bool = True  # Auto-switch scenes on GSPro club change (putter ↔ other)
+
+
+@dataclass
+class GSProWatcherSettings:
+    """OCR-based GSPro window watcher for OBS scene-switching.
+
+    Used as a fallback when GSPro Open Connect v1 (port 921) is not
+    available — for example, when another launch monitor (Flightscope
+    API tool) owns the connection and GSPro doesn't broadcast club-change
+    events to other clients. The watcher takes screenshots of the GSPro
+    window, OCRs a configurable region for the current club name, and
+    drives OBS scene switching like the GSPro listener would.
+
+    Calibrate the ROI with `--calibrate-gspro-club`.
+    """
+
+    enabled: bool = False
+    window_title: str = "GSPro"  # Substring match against window titles
+    poll_interval: float = 1.0  # Seconds between OCR polls
+    # ROI [x, y, w, h] for the area that displays the current club name.
+    club_roi: list[int] = field(default_factory=list)
+    tessdata_dir: str = ""  # Path to tessdata directory (empty = system default)
+    cal_width: int = 0  # Window width when ROI was calibrated (0 = unknown)
+    cal_height: int = 0  # Window height when ROI was calibrated (0 = unknown)
 
 
 @dataclass
@@ -185,6 +231,7 @@ class AppConfig:
     mevo: MevoSettings = field(default_factory=MevoSettings)
     obs: OBSSettings = field(default_factory=OBSSettings)
     overlay: OverlaySettings = field(default_factory=OverlaySettings)
+    gspro_watcher: GSProWatcherSettings = field(default_factory=GSProWatcherSettings)
 
 
 def _dataclass_to_dict(obj: Any) -> dict[str, Any]:

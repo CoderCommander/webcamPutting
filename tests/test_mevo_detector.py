@@ -240,3 +240,17 @@ class TestMevoDetector:
             "launch_direction": 1.5,
         }
         assert detector.poll() is None
+
+
+class TestPuttFallbackConfig:
+    """Sanity-check the putt-fallback config flags the detector depends on."""
+
+    def test_defaults(self) -> None:
+        settings = MevoSettings()
+        assert settings.putt_fallback is False
+        assert settings.putt_fallback_max_age_s == 3.0
+
+    def test_enable(self) -> None:
+        settings = MevoSettings(putt_fallback=True, putt_fallback_max_age_s=5.0)
+        assert settings.putt_fallback is True
+        assert settings.putt_fallback_max_age_s == 5.0

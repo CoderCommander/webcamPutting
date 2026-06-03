@@ -185,6 +185,40 @@ class OBSController:
         if self._on_idle:
             self._on_idle()
 
+    @property
+    def is_connected(self) -> bool:
+        return self._client is not None
+
+    def current_scene(self) -> str | None:
+        """Return the active program scene name, or None on failure."""
+        if self._client is None:
+            return None
+        try:
+            import obsws_python as obs  # noqa: F811
+
+            cl: obs.ReqClient = self._client  # type: ignore[assignment]
+            resp = cl.get_current_program_scene()
+            return getattr(resp, "current_program_scene_name", None) or getattr(
+                resp, "scene_name", None,
+            )
+        except Exception:
+            return None
+
+    def switch_to_scene(self, scene_name: str) -> bool:
+        """Switch OBS to the named scene. Returns True on success."""
+        if self._client is None or not scene_name:
+            return False
+        try:
+            import obsws_python as obs  # noqa: F811
+
+            cl: obs.ReqClient = self._client  # type: ignore[assignment]
+            cl.set_current_program_scene(scene_name)
+            logger.info("OBS: Switched to scene '%s'", scene_name)
+            return True
+        except Exception as e:
+            logger.error("OBS: Failed to switch to scene '%s': %s", scene_name, e)
+            return False
+
     def switch_to_putt(self) -> None:
         """Switch to putt scene (no idle timer — stays until club changes)."""
         if self._client is None:

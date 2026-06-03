@@ -33,6 +33,9 @@ from birdman_putting.physics import (
     ShotData,
     calculate_shot,
     estimate_putt_distance_feet,
+    ppf_from_ball_radius,
+    speed_from_launch_velocity,
+    speed_from_trajectory_fit,
     speed_from_visible_distance,
     target_speed_for_distance,
 )
@@ -120,6 +123,11 @@ class PuttingApp:
         self._mevo_detector: MevoDetector | None = None
         self._mevo_thread: threading.Thread | None = None
         self._mevo_paused: bool = False  # Pause OCR during putting to free CPU
+        # Most recent Mevo reading stashed for putt-fallback use.
+        # Tuple of (timestamp, ball_speed_mph, hla_deg). None when no
+        # reading has been captured during the current session.
+        self._mevo_last: tuple[float, float, float] | None = None
+        self._mevo_last_lock = threading.Lock()
 
         # OBS controller
         self._obs: OBSController | None = None
@@ -256,6 +264,9 @@ class PuttingApp:
             on_reset_putt=self.reset_putt,
             on_angle_cal=self._on_angle_cal,
             on_dist_cal=self._on_dist_cal,
+            on_auto_cal=self._on_auto_cal,
+            on_obs_auto_cal=self._on_obs_auto_cal,
+            on_cork_cal=self._on_cork_cal,
             on_reconnect_gspro=self.reconnect_gspro,
             on_obs_calibrate=self.toggle_obs_calibration,
         )
@@ -492,6 +503,365 @@ class PuttingApp:
             self._window.set_dist_cal_state(True)
             self._show_dist_cal_phase_prompt()
         logger.info("Distance calibration started — putt %s", self._dist_cal_phase_labels[0])
+
+    def _on_auto_cal(self) -> None:
+        """Compute pixels_per_foot from the detected ball radius.
+
+        Unlike the roll-based Dist Cal wizard (which depends on the user
+        correctly estimating each putt's roll distance AND is biased by
+        the constant pixel distance at which shots complete), this reads
+        the in-frame ball radius and uses the known 21.335mm golf ball
+        radius as a physical reference. One click, no putting required.
+
+        Requires the ball to be detected and resting in the start zone.
+        """
+        if self._angle_cal_active or self._dist_cal_active:
+            logger.warning("Cannot run Auto Cal while another calibration is active")
+            if self._window:
+                with contextlib.suppress(RuntimeError):
+                    self._window.after(
+                        0, self._window.update_camera_status,
+                        "Auto Cal: cancel other cal first", "error",
+                    )
+            return
+
+        # Pull the ball radius the tracker has locked onto at rest. This
+        # is the radius from the stable start-position detection, so it
+        # is the ball sitting on the mat — the correct reference object.
+        # Only populated once the tracker reaches STARTED state (ball
+        # stable for `start_stability_frames` consecutive frames).
+        start_circle = self._tracker.start_circle  # (x, y, radius)
+        radius_px = start_circle[2] if start_circle else 0
+
+        if radius_px <= 0:
+            logger.warning(
+                "Auto Cal: no stable ball lock — place ball in start zone "
+                "and wait for the detection ring to appear first",
+            )
+            if self._window:
+                with contextlib.suppress(RuntimeError):
+                    self._window.after(
+                        0, self._window.update_camera_status,
+                        "Auto Cal: place ball & wait for lock", "error",
+                    )
+            return
+
+        ppf = ppf_from_ball_radius(float(radius_px))
+        self.config.shot.pixels_per_foot = round(ppf, 2)
+        self.config.shot.speed_calibration_factor = 1.0
+        # Clear any stale per-x markers — radius-based ppf is a single
+        # global value, so leftover markers from a prior OBS Cal would
+        # contradict it.
+        self.config.shot.calibration_markers = []
+        save_config(self.config)
+
+        logger.info(
+            "Auto Cal complete: ball radius=%dpx → pixels_per_foot=%.2f",
+            radius_px, ppf,
+        )
+        if self._window:
+            with contextlib.suppress(RuntimeError):
+                self._window.after(
+                    0, self._window.update_camera_status,
+                    f"Auto Cal: ppf={ppf:.1f} (r={radius_px}px)", "ok",
+                )
+
+    def _on_obs_auto_cal(self) -> None:
+        """Calibrate pixels_per_foot from a projected 1-ft marker scene.
+
+        Workflow:
+          1. Switch OBS to the configured calibration scene (which projects
+             evenly-spaced bright markers along the putt line at 1-ft intervals)
+          2. Wait briefly for the projection to settle
+          3. Capture a fresh frame from the camera, applying the same resize
+             and rotation the tracker uses
+          4. Detect the projected markers via brightness threshold
+          5. Median inter-marker pixel distance == pixels_per_foot
+          6. Save config and switch OBS back to the prior scene
+
+        This is the only calibration method that's accurate for the Kiyo
+        Pro (or any wide-angle / non-perpendicular camera): it measures
+        the ground-plane scale directly, instead of inferring it from the
+        ball radius (which assumes a perpendicular overhead view).
+        """
+        from birdman_putting.detection import resize_with_aspect_ratio
+        from birdman_putting.ppf_calibration import detect_calibration_markers
+
+        if self._angle_cal_active or self._dist_cal_active:
+            self._notify_cam_status("Auto Cal: cancel other cal first", "error")
+            return
+
+        if self._obs is None or not self._obs.is_connected:
+            self._notify_cam_status(
+                "OBS Auto Cal needs OBS connected — enable [obs]", "error",
+            )
+            logger.warning("OBS Auto Cal: OBS controller not connected")
+            return
+
+        if not self._running or self._camera is None:
+            self._notify_cam_status("Start the camera first", "error")
+            return
+
+        cal_scene = self.config.obs.calibration_scene
+        prior_scene = self._obs.current_scene()
+        logger.info(
+            "OBS Auto Cal: switching to '%s' (will restore '%s')",
+            cal_scene, prior_scene,
+        )
+
+        if not self._obs.switch_to_scene(cal_scene):
+            self._notify_cam_status(
+                f"OBS Auto Cal: scene '{cal_scene}' not found", "error",
+            )
+            return
+
+        # Settle: give projector + camera + auto-exposure a moment
+        time.sleep(0.6)
+
+        # Capture a frame from the live grab thread (avoid touching the
+        # capture device directly) and run the tracker's normal preprocess
+        try:
+            frame = self._camera.read()
+            if frame is None:
+                self._notify_cam_status(
+                    "OBS Auto Cal: no frame from camera", "error",
+                )
+                self._obs.switch_to_scene(prior_scene or self.config.obs.idle_scene)
+                return
+            display = resize_with_aspect_ratio(frame, width=640)
+            display = self._camera.apply_rotation(display)
+
+            zone = self.config.detection_zone
+            band_y_center = (zone.y1 + zone.y2) // 2
+            # Cyan hue-range filter: the projector renders calibration
+            # markers in cyan, so we ignore the orange ball + any orange
+            # OBS overlays (shot trails, etc.) that might be in frame.
+            result = detect_calibration_markers(
+                display,
+                band_y_center=band_y_center,
+                band_half_height=60,
+                hue_range=(75, 105),
+                min_saturation=80,
+            )
+            # Drop any detections that fall inside the start zone X range
+            # (extra safety — the ball lives there during calibration).
+            filtered = [
+                (cx, cy) for (cx, cy) in result.centers
+                if not (zone.start_x1 <= cx <= zone.start_x2)
+            ]
+            if len(filtered) != len(result.centers):
+                logger.info(
+                    "OBS Auto Cal: filtered %d detections inside start zone",
+                    len(result.centers) - len(filtered),
+                )
+                from birdman_putting.ppf_calibration import MarkerDetectionResult
+                import numpy as _np
+                diffs = [
+                    filtered[i + 1][0] - filtered[i][0]
+                    for i in range(len(filtered) - 1)
+                ]
+                result = MarkerDetectionResult(
+                    centers=filtered,
+                    median_spacing_px=float(_np.median(diffs)) if diffs else None,
+                    mean_spacing_px=float(_np.mean(diffs)) if diffs else None,
+                    diffs=diffs,
+                )
+        finally:
+            # Always restore the prior scene, even on error
+            self._obs.switch_to_scene(prior_scene or self.config.obs.idle_scene)
+
+        if result.median_spacing_px is None or len(result.centers) < 2:
+            # Save the analyzed frame to disk so the failure can be
+            # diagnosed visually (wrong band Y? markers too dim? scene
+            # didn't switch in time?).
+            import cv2 as _cv2
+            debug_path = "obs_cal_debug.png"
+            try:
+                # Mark the detection band on a copy
+                annotated = display.copy()
+                _cv2.rectangle(
+                    annotated,
+                    (0, max(0, band_y_center - 60)),
+                    (annotated.shape[1] - 1, min(annotated.shape[0] - 1, band_y_center + 60)),
+                    (0, 255, 255), 1,
+                )
+                _cv2.line(
+                    annotated, (0, band_y_center),
+                    (annotated.shape[1] - 1, band_y_center),
+                    (255, 0, 255), 1,
+                )
+                _cv2.imwrite(debug_path, annotated)
+                logger.info("OBS Auto Cal: saved debug frame to %s", debug_path)
+            except Exception:
+                logger.exception("Failed to save debug frame")
+
+            self._notify_cam_status(
+                f"OBS Auto Cal: only {len(result.centers)} markers found — "
+                "check projection",
+                "error",
+            )
+            logger.warning(
+                "OBS Auto Cal: %d markers detected (need 2+) — "
+                "see obs_cal_debug.png",
+                len(result.centers),
+            )
+            return
+
+        ppf = result.median_spacing_px
+        self.config.shot.pixels_per_foot = round(ppf, 2)
+        self.config.shot.speed_calibration_factor = 1.0
+
+        # Filter out outlier-spacing markers — same logic the OBS-Cal
+        # detector applies to the median.  Drop the first marker if the
+        # gap to the next marker is >2x the median (i.e., we picked up a
+        # straggler from outside the calibration row, like the orange
+        # ball near the start zone).  Then store the marker X-positions
+        # for per-x ppf interpolation in the trajectory fit.
+        marker_xs = [float(cx) for (cx, _cy) in result.centers]
+        # Drop leading/trailing markers that are way out of pattern
+        if len(marker_xs) >= 3 and result.diffs:
+            median_d = result.median_spacing_px or 0
+            if median_d > 0:
+                # Walk inward, dropping endpoints whose spacing is >2x median
+                while (len(marker_xs) >= 3
+                       and (marker_xs[1] - marker_xs[0]) > 2.0 * median_d):
+                    marker_xs.pop(0)
+                while (len(marker_xs) >= 3
+                       and (marker_xs[-1] - marker_xs[-2]) > 2.0 * median_d):
+                    marker_xs.pop()
+
+        self.config.shot.calibration_markers = [round(x, 2) for x in marker_xs]
+        save_config(self.config)
+
+        diffs_str = ", ".join(f"{d:.0f}" for d in result.diffs)
+        logger.info(
+            "OBS Auto Cal: %d markers, spacings=[%s], median=%.2f -> "
+            "pixels_per_foot=%.2f, calibration_markers=%s",
+            len(result.centers), diffs_str, ppf, ppf,
+            [round(x, 1) for x in marker_xs],
+        )
+        self._notify_cam_status(
+            f"OBS Cal: ppf={ppf:.1f} ({len(result.centers)} markers, per-x cal stored)",
+            "ok",
+        )
+
+    def _on_cork_cal(self) -> None:
+        """Calibrate pixels_per_foot from physical bright markers
+        (corks, white tape, anything bright) placed at 1-ft intervals
+        along the putt line.  Works without a projector — useful when
+        the projector doesn't cover the camera's full FOV.
+
+        Workflow:
+          1. User places 6-8 white/bright markers at exactly 1 ft
+             intervals along the putt path
+          2. User clicks Cork Cal
+          3. Birdman captures a frame, detects bright spots in the
+             detection-zone Y band (white-luma threshold, no hue filter)
+          4. Saves marker X-positions to config for per-x ppf interp
+        """
+        from birdman_putting.detection import resize_with_aspect_ratio
+        from birdman_putting.ppf_calibration import detect_calibration_markers
+
+        if self._angle_cal_active or self._dist_cal_active:
+            self._notify_cam_status("Cork Cal: cancel other cal first", "error")
+            return
+        if not self._running or self._camera is None:
+            self._notify_cam_status("Cork Cal: start the camera first", "error")
+            return
+
+        # Retry briefly — grab thread may not have a new frame ready yet.
+        frame = None
+        for _ in range(50):
+            frame = self._camera.read()
+            if frame is not None:
+                break
+            time.sleep(0.02)
+        if frame is None:
+            self._notify_cam_status("Cork Cal: no frame from camera", "error")
+            return
+        display = resize_with_aspect_ratio(frame, width=640)
+        display = self._camera.apply_rotation(display)
+
+        zone = self.config.detection_zone
+        band_y_center = (zone.y1 + zone.y2) // 2
+        # No hue filter — accept any bright (white/cork) marker.
+        result = detect_calibration_markers(
+            display,
+            band_y_center=band_y_center,
+            band_half_height=60,
+            luma_threshold=180,
+        )
+        # Drop detections inside the start zone (the ball itself is
+        # there during cal and would be picked up as a marker).
+        filtered = [
+            (cx, cy) for (cx, cy) in result.centers
+            if not (zone.start_x1 <= cx <= zone.start_x2)
+        ]
+        if len(filtered) != len(result.centers):
+            logger.info(
+                "Cork Cal: filtered %d detections inside start zone",
+                len(result.centers) - len(filtered),
+            )
+
+        if len(filtered) < 2:
+            # Save debug frame for visual inspection
+            import cv2 as _cv2
+            try:
+                annotated = display.copy()
+                _cv2.rectangle(
+                    annotated,
+                    (0, max(0, band_y_center - 60)),
+                    (annotated.shape[1] - 1,
+                     min(annotated.shape[0] - 1, band_y_center + 60)),
+                    (0, 255, 255), 1,
+                )
+                _cv2.imwrite("cork_cal_debug.png", annotated)
+                logger.info("Cork Cal: saved debug frame to cork_cal_debug.png")
+            except Exception:
+                pass
+            self._notify_cam_status(
+                f"Cork Cal: only {len(filtered)} markers found — "
+                "check corks/lighting",
+                "error",
+            )
+            return
+
+        # Compute spacings, pick median ppf
+        marker_xs = sorted(float(cx) for (cx, _cy) in filtered)
+        diffs = [marker_xs[i + 1] - marker_xs[i]
+                 for i in range(len(marker_xs) - 1)]
+        # Robust median: drop spacings >2x the smallest plausible one
+        # (handles corks placed at non-uniform spacing or stray detections)
+        sorted_diffs = sorted(diffs)
+        p25 = sorted_diffs[len(sorted_diffs) // 4] if sorted_diffs else 0
+        kept = [d for d in diffs if d <= p25 * 1.5] if p25 > 0 else diffs
+        median_d = float(np.median(kept)) if kept else float(np.median(diffs))
+
+        self.config.shot.pixels_per_foot = round(median_d, 2)
+        self.config.shot.speed_calibration_factor = 1.0
+        self.config.shot.calibration_markers = [round(x, 2) for x in marker_xs]
+        save_config(self.config)
+
+        diffs_str = ", ".join(f"{d:.0f}" for d in diffs)
+        logger.info(
+            "Cork Cal: %d markers, spacings=[%s], median=%.2f -> "
+            "pixels_per_foot=%.2f, calibration_markers=%s",
+            len(filtered), diffs_str, median_d, median_d,
+            [round(x, 1) for x in marker_xs],
+        )
+        self._notify_cam_status(
+            f"Cork Cal: ppf={median_d:.1f} ({len(filtered)} markers, full-FOV cal)",
+            "ok",
+        )
+
+    def _notify_cam_status(self, status: str, state: str) -> None:
+        """Push a status update to the camera-status strip if the GUI exists."""
+        if self._window is None:
+            return
+        with contextlib.suppress(RuntimeError):
+            self._window.after(
+                0, self._window.update_camera_status, status, state,
+            )
 
     def _show_dist_cal_phase_prompt(self) -> None:
         """Update all UI elements to show the current calibration phase."""
@@ -757,7 +1127,11 @@ class PuttingApp:
     def _processing_loop(self) -> None:
         """Background thread: capture → detect → track → annotate → queue."""
         # Raise this thread's priority so camera capture isn't starved
-        # when Birdman is in the background
+        # when Birdman is in the background.  THREAD_PRIORITY_HIGHEST alone
+        # is not enough — Windows EcoQoS / background throttling can still
+        # drop a HIGHEST-priority thread to ~5-9fps when the window loses
+        # focus.  MMCSS "Pro Audio" gives real-time priority that survives
+        # background throttling, matching what the grab thread already does.
         import sys
         if sys.platform == "win32":
             try:
@@ -767,6 +1141,25 @@ class PuttingApp:
                 handle = kernel32.GetCurrentThread()
                 kernel32.SetThreadPriority(handle, THREAD_PRIORITY_HIGHEST)
                 logger.info("Processing thread priority set to HIGHEST")
+
+                # Register with Multimedia Class Scheduler for real-time
+                # priority that survives Windows EcoQoS / background
+                # throttling.  Without this, processing FPS collapses to
+                # single digits whenever Birdman loses window focus.
+                try:
+                    avrt = ctypes.windll.avrt  # type: ignore[attr-defined]
+                    task_index = ctypes.c_ulong(0)
+                    mmcss_handle = avrt.AvSetMmThreadCharacteristicsW(
+                        "Pro Audio", ctypes.byref(task_index),
+                    )
+                    if mmcss_handle:
+                        logger.info(
+                            "MMCSS: registered processing thread as 'Pro Audio'",
+                        )
+                    else:
+                        logger.debug("MMCSS registration failed for processing")
+                except Exception:
+                    pass  # avrt.dll not available on all editions
             except Exception:
                 pass
 
@@ -795,19 +1188,33 @@ class PuttingApp:
                     self._actual_fps = (len(self._fps_queue) - 1) / elapsed
 
             # FPS watchdog: auto-reset tracker if FPS stays critically low
-            # (e.g. MSMF throttling when window is backgrounded).
-            # Only reset tracking state — preserve last_shot_positions so
-            # the trail stays visible through focus changes.
-            if self._actual_fps > 0 and self._actual_fps < 10:
-                if self._fps_drop_start == 0.0:
-                    self._fps_drop_start = frame_time
-                elif frame_time - self._fps_drop_start > 2.0:
-                    logger.warning(
-                        "FPS watchdog: %.1f FPS for >2s — resetting tracker",
-                        self._actual_fps,
-                    )
-                    self._tracker.reset()
-                    self._post_shot_tracking = False
+            # AND the tracker is stuck in a non-IDLE state for an extended
+            # period.  We do NOT reset from IDLE/BALL_DETECTED/STARTED — the
+            # user may be in the middle of placing a ball, and resetting
+            # mid-stability-accumulation prevents detection from ever
+            # locking on a slow CPU.  Only ENTERED-stuck is suspicious;
+            # the ENTERED state already has its own 2s timeout (tracker.py)
+            # so the watchdog is now mostly belt-and-suspenders for
+            # genuinely degenerate cases.
+            _WATCHDOG_FPS_THRESHOLD = 3.0   # was 10 — only react to severe drops
+            _WATCHDOG_HOLD_SECONDS = 30.0   # was 2 — give detection time to settle
+            if self._actual_fps > 0 and self._actual_fps < _WATCHDOG_FPS_THRESHOLD:
+                tracker_stuck_state = self._tracker.state in (
+                    ShotState.ENTERED,
+                )
+                if tracker_stuck_state:
+                    if self._fps_drop_start == 0.0:
+                        self._fps_drop_start = frame_time
+                    elif frame_time - self._fps_drop_start > _WATCHDOG_HOLD_SECONDS:
+                        logger.warning(
+                            "FPS watchdog: %.1f FPS for >%ds while stuck in "
+                            "ENTERED — resetting tracker",
+                            self._actual_fps, int(_WATCHDOG_HOLD_SECONDS),
+                        )
+                        self._tracker.reset()
+                        self._post_shot_tracking = False
+                        self._fps_drop_start = 0.0
+                else:
                     self._fps_drop_start = 0.0
             else:
                 self._fps_drop_start = 0.0
@@ -1235,35 +1642,170 @@ class PuttingApp:
             logger.warning("Shot physics calculation failed — trail shown but no data")
             return
 
-        # Distance-based speed: if pixels_per_foot is calibrated, compute
-        # speed from visible pixel distance instead of time (PutTrak-style).
-        # This bypasses the timing problem where fast putts are undetectable
-        # during motion, making elapsed time unreliable.
+        # Calibrated-speed path: if pixels_per_foot is set, derive MPH
+        # using the ground-plane scale instead of ball-radius timing.
+        # Two estimators:
+        #   - speed_from_launch_velocity: measures pixels/sec during the
+        #     first ~6 frames of motion. Doesn't saturate on long putts,
+        #     so 30/50-ft putts read correctly.
+        #   - speed_from_visible_distance: PutTrak-style. Reads the full
+        #     visible pixel distance as "feet rolled" — saturates at the
+        #     frame edge, so long putts read low.
+        # We take max(launch, dist): for short putts they agree; for
+        # long putts launch wins (dist-based is clipped). If the launch
+        # window is too short to be trustworthy, launch returns 0 and
+        # dist-based owns the result (preserves today's behavior for
+        # very fast 1-2-frame putts).
         ppf = self.config.shot.pixels_per_foot
         if ppf > 0:
             dx = shot_result.end_position[0] - shot_result.start_position[0]
             dy = shot_result.end_position[1] - shot_result.start_position[1]
             distance_px = math.sqrt(dx * dx + dy * dy)
-            dist_speed = speed_from_visible_distance(
-                distance_px, ppf, self.config.shot.stimpmeter,
+            stimp = self.config.shot.stimpmeter
+
+            # Trajectory fit: solves x(t) = v0·t − ½·a·t² over ALL
+            # motion samples, where a is the stimp deceleration.  Far
+            # more robust than picking a launch window — uses the full
+            # post-exit traversal (now ~20-30 frames instead of ~6).
+            # When per-x calibration markers are available (from OBS
+            # Cal), they're used for piecewise-linear pixel→ft mapping
+            # to correct fisheye / off-axis ppf variation.
+            cal_markers = self.config.shot.calibration_markers or None
+            fit_speed, fit_dbg = speed_from_trajectory_fit(
+                list(shot_result.positions), ppf, stimp,
+                calibration_markers=cal_markers,
             )
-            if dist_speed > 0:
+            launch_speed, launch_dbg = speed_from_launch_velocity(
+                list(shot_result.positions), ppf,
+            )
+            dist_speed = speed_from_visible_distance(distance_px, ppf, stimp)
+
+            # Prefer trajectory fit when we have enough data; fall back
+            # to max(launch, dist) for sparse trails (1-2 motion frames).
+            if fit_speed > 0:
+                final_speed = fit_speed
+                speed_source = "fit"
+            else:
+                final_speed = max(launch_speed, dist_speed)
+                speed_source = "launch/dist"
+
+            if final_speed > 0:
+                est_ft = estimate_putt_distance_feet(final_speed, stimp)
                 logger.info(
-                    "Distance-based speed: %.2f MPH (%.0fpx / %.1f px/ft = %.1f ft)",
-                    dist_speed, distance_px, ppf, distance_px / ppf,
+                    "Calibrated speed: %.2f MPH (source=%s, fit=%.2f, "
+                    "launch=%.2f, dist=%.2f; visible=%.0fpx, est_roll=%.1fft) "
+                    "[fit_n=%d fit_tau=%.3fs fit_travel=%.2fft "
+                    "fit_per_x=%s fit_reason=%s | "
+                    "launch_window_dt=%.3fs launch_reason=%s]",
+                    final_speed, speed_source, fit_speed, launch_speed, dist_speed,
+                    distance_px, est_ft,
+                    fit_dbg["n_motion"], fit_dbg["tau_max"],
+                    fit_dbg["travel_max_ft"],
+                    fit_dbg.get("uses_markers", False), fit_dbg["reason"],
+                    launch_dbg["window_dt"], launch_dbg["reason"],
                 )
                 shot_data = ShotData(
-                    speed_mph=round(dist_speed, 2),
+                    speed_mph=round(final_speed, 2),
                     hla_degrees=shot_data.hla_degrees,
                     distance_mm=shot_data.distance_mm,
                     elapsed_seconds=shot_data.elapsed_seconds,
                 )
+
+            # Mevo putt-fallback: when both fit and launch fail (no
+            # motion / dropped-frame artifact / etc.), we may have
+            # nothing useful from the webcam. If Mevo radar caught the
+            # shot, prefer that.
+            cap_hit = "cap" in launch_dbg.get("reason", "")
+            no_launch = fit_speed <= 0 and launch_speed <= 0
+            under_min = final_speed < self.config.shot.min_speed_mph
+            low_confidence = cap_hit or (no_launch and under_min)
+            if low_confidence:
+                mevo_reading = self._recent_mevo_reading()
+                if mevo_reading is not None:
+                    mevo_mph, mevo_hla = mevo_reading
+                    logger.info(
+                        "Mevo putt fallback engaged: webcam=%.2f MPH "
+                        "(reason: cap_hit=%s, no_launch=%s, under_min=%s) "
+                        "-> using Mevo %.2f MPH, HLA=%.2f",
+                        final_speed, cap_hit, no_launch, under_min,
+                        mevo_mph, mevo_hla,
+                    )
+                    shot_data = ShotData(
+                        speed_mph=round(mevo_mph, 2),
+                        hla_degrees=round(mevo_hla, 2),
+                        distance_mm=shot_data.distance_mm,
+                        elapsed_seconds=shot_data.elapsed_seconds,
+                    )
+                    # Clear the cached reading so the same shot isn't
+                    # reused if another webcam event fires shortly after.
+                    with self._mevo_last_lock:
+                        self._mevo_last = None
 
         # Distance calibration: record pixel distance and skip GSPro send
         if self._dist_cal_active:
             dx = shot_result.end_position[0] - shot_result.start_position[0]
             dy = shot_result.end_position[1] - shot_result.start_position[1]
             pixel_dist = math.sqrt(dx * dx + dy * dy)
+
+            # Reject saturated samples.  The tracker has TWO completion
+            # paths and they yield different start_position values:
+            #
+            #   1. ENTERED → exit:  start_position = gateway entry pos.
+            #      Exit triggers when travel_from_entry >= min_exit_distance_px,
+            #      so end_x ≈ entry_x + min_exit. Saturated.
+            #
+            #   2. past_gateway:    start_position = ball-rest pos.
+            #      Triggers when ball jumps past gateway in one frame.
+            #      Saturated unless ball ROLLED to a stop in-frame
+            #      (which would have completed via ENTERED-timeout, not
+            #      via exit trigger — those have actual end positions).
+            #
+            # The robust check: any shot that completed via an exit
+            # trigger (vs. timeout / ball-stop detection) is saturated
+            # for calibration purposes, because end_x is pinned at the
+            # threshold not at the ball's rest. We detect this by
+            # checking whether end_x is approximately at (entry_x + min_exit)
+            # OR (start_x_rest + (gateway_x - start_x_rest) + min_exit) —
+            # both reduce to "end_x is near a fixed offset from gateway".
+            min_exit = float(self.config.shot.min_exit_distance_px)
+            z = self.config.detection_zone
+            if z.direction == "left_to_right":
+                gateway_x = z.start_x2 + z.gateway_width
+                # Saturation band: end_x within ~15% of (gateway_x + min_exit)
+                expected_satur_end_x = gateway_x + min_exit
+                end_x_distance_from_satur = abs(
+                    shot_result.end_position[0] - expected_satur_end_x,
+                )
+            else:
+                gateway_x = z.start_x1 - z.gateway_width
+                expected_satur_end_x = gateway_x - min_exit
+                end_x_distance_from_satur = abs(
+                    shot_result.end_position[0] - expected_satur_end_x,
+                )
+            saturation_margin = min_exit * 0.30  # ±15 px for min_exit=50
+            travel = abs(shot_result.end_position[0] - shot_result.start_position[0])
+            if end_x_distance_from_satur <= saturation_margin:
+                logger.warning(
+                    "Dist Cal: rejecting saturated sample "
+                    "(end_x=%d ≈ saturation band %d±%d, travel=%dpx). "
+                    "Shot completed at the exit trigger — end position is "
+                    "fixed at (gateway+%dpx), so this sample tells us nothing "
+                    "about the real putt distance. Use Auto Cal for "
+                    "ball-radius-based calibration, OR putt softer so the "
+                    "ball stops inside the frame.",
+                    int(shot_result.end_position[0]),
+                    int(expected_satur_end_x), int(saturation_margin),
+                    int(travel), int(min_exit),
+                )
+                if self._window:
+                    with contextlib.suppress(RuntimeError):
+                        self._window.after(
+                            0, self._window.update_camera_status,
+                            "Sample rejected (saturated) — putt softer or use Auto Cal",
+                            "error",
+                        )
+                return
+
             self._process_dist_cal_shot(pixel_dist)
             return
 
@@ -1718,15 +2260,19 @@ class PuttingApp:
 
         is_putter = club_upper in ("PT", "PUTTER")
 
-        # Pause/resume Mevo OCR — no point running Tesseract during putting.
+        # Pause/resume Mevo OCR — no point running Tesseract during putting
+        # UNLESS putt_fallback is enabled (then we want fresh readings
+        # available when the webcam misses a fast putt).
         # Only act on actual club changes to avoid log spam.
         if club_changed and self._mevo_detector:
-            if is_putter and not self._mevo_paused:
+            want_pause = is_putter and not self.config.mevo.putt_fallback
+            if want_pause and not self._mevo_paused:
                 self._mevo_paused = True
                 logger.info("Mevo OCR paused (putter selected)")
-            elif not is_putter and self._mevo_paused:
+            elif not want_pause and self._mevo_paused:
                 self._mevo_paused = False
-                logger.info("Mevo OCR resumed (%s selected)", club)
+                reason = "putt_fallback on" if is_putter else f"{club} selected"
+                logger.info("Mevo OCR resumed (%s)", reason)
 
         # OBS scene switching — only on actual club changes
         if club_changed and self._obs is not None and self.config.obs.auto_scene_switch:
@@ -1864,6 +2410,24 @@ class PuttingApp:
             remaining = max(0.01, interval - elapsed)
             time.sleep(remaining)
 
+    def _recent_mevo_reading(self) -> tuple[float, float] | None:
+        """Return (ball_speed_mph, hla_deg) if a fresh Mevo reading exists.
+
+        Freshness is governed by ``mevo.putt_fallback_max_age_s``.
+        Returns None if no reading, expired, or fallback disabled.
+        """
+        if not self.config.mevo.putt_fallback:
+            return None
+        with self._mevo_last_lock:
+            reading = self._mevo_last
+        if reading is None:
+            return None
+        ts, mph, hla = reading
+        age = time.perf_counter() - ts
+        if age > self.config.mevo.putt_fallback_max_age_s:
+            return None
+        return mph, hla
+
     def _handle_mevo_shot(self, shot: object) -> None:
         """Process a Mevo shot — send full data to GSPro, update UI."""
         from birdman_putting.mevo.detector import MevoShotData
@@ -1876,6 +2440,22 @@ class PuttingApp:
             shot.ball_speed, shot.launch_angle, shot.launch_direction,
             int(shot.spin_rate),
         )
+
+        # Stash the reading for potential putt-fallback use. Always store,
+        # regardless of mode — we'll use it only when webcam asks.
+        with self._mevo_last_lock:
+            self._mevo_last = (
+                time.perf_counter(),
+                float(shot.ball_speed),
+                float(shot.launch_direction),
+            )
+
+        # In putting mode with fallback enabled, DON'T forward to GSPro here —
+        # the webcam path will decide whether to use this reading. Forwarding
+        # twice would cause duplicate/conflicting shots.
+        if self.is_putting_mode and self.config.mevo.putt_fallback:
+            logger.debug("Mevo reading stashed for putt fallback (not forwarded)")
+            return
 
         # Only relay to GSPro if configured (disable when LM connects directly)
         if self.config.mevo.send_to_gspro:
