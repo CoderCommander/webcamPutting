@@ -115,10 +115,13 @@ class BallDetector:
         # explicit tolerance.  This keeps the no-expectation path untouched and
         # honors callers (and tests) that pass a specific tolerance.
         if radius_tolerance is None:
-            if expected_radius is not None:
-                eff_radius_tol = max(6, int(round(expected_radius * 0.40)))
-            else:
-                eff_radius_tol = 50  # legacy default (unused when no expected_radius)
+            # Loose gate BY DESIGN: a motion-blurred rolling ball's
+            # minEnclosingCircle radius balloons well beyond its rest radius,
+            # so a tight tolerance drops nearly every moving frame (this
+            # regressed live putt capture from ~40-80 motion frames to 1-2).
+            # Keep the gate loose so blurred balls survive; _score_candidate's
+            # radius term still gently prefers the rest-sized ball among them.
+            eff_radius_tol = 50
         else:
             eff_radius_tol = radius_tolerance
         # Crop to detection zone + margin BEFORE expensive operations.

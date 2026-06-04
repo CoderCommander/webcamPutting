@@ -291,12 +291,15 @@ class TestBallDetector:
         assert abs(detection.x - 200) <= 4
         assert abs(detection.y - 300) <= 4
 
-    def test_expected_radius_proportional_tolerance_rejects_far_radius(self):
-        """When expected_radius is given, the default radius tolerance is
-        proportional (~±40%). A blob whose radius is wildly off (and far
-        from any expected_pos) should not be returned as the ball."""
+    def test_blurred_large_radius_ball_not_rejected(self):
+        """A motion-blurred rolling ball's enclosing-circle radius balloons
+        well beyond its rest radius. The radius gate must stay LOOSE so the
+        blurred ball survives — rejecting it on a tight tolerance dropped
+        nearly every motion frame in production (fit collapsed to 1-2 frames,
+        breaking hard-putt speed). expected_radius biases scoring, it does
+        NOT hard-reject a far-off radius."""
         frame = np.zeros((360, 640, 3), dtype=np.uint8)
-        # Only a big blob present, r≈30
+        # A single blurred-ball-sized blob, r≈30, while rest radius was ~12.
         cv2.circle(frame, (300, 300), 30, (0, 140, 255), -1)
 
         detector = BallDetector(
@@ -304,7 +307,6 @@ class TestBallDetector:
             min_radius=5,
         )
 
-        # Expected radius 12 → proportional tol ~±5px → [7,17]; r=30 excluded.
         detection = detector.detect(
             frame=frame,
             zone_x1=0, zone_x2_limit=640,
@@ -313,7 +315,9 @@ class TestBallDetector:
             expected_radius=12,
         )
 
-        assert detection is None
+        # Loose gate: the blurred ball is still detected, not dropped.
+        assert detection is not None
+        assert abs(detection.x - 300) <= 4
 
 
 class TestGenerateHsvFromPatch:
