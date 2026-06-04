@@ -226,6 +226,41 @@ class TestMevoDetector:
         assert shot2 is not None
         assert shot2.ball_speed == 140.0
 
+    def test_is_confirming_tracks_settle_window(self) -> None:
+        """is_confirming flags the settle window so the app loop polls FAST
+        only while a shot's values are settling, then returns to the slow
+        cadence. This is what cuts the Mevo full-swing latency."""
+        detector, ocr, capture = self._make_detector(mse_threshold=1.0)
+
+        frame1 = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame2 = np.ones((100, 100, 3), dtype=np.uint8) * 128
+
+        # Baseline poll — not confirming yet.
+        capture.capture.return_value = frame1
+        ocr.read_metrics.return_value = {
+            "ball_speed": 120.0, "launch_angle": 12.0, "launch_direction": 1.5,
+        }
+        detector.poll()
+        assert detector.is_confirming is False
+
+        # A display change opens the confirming window (1 read so far, < K).
+        capture.capture.return_value = frame2
+        ocr.read_metrics.return_value = {
+            "ball_speed": 130.0, "launch_angle": 15.0, "launch_direction": -2.0,
+        }
+        detector.poll()
+        assert detector.is_confirming is True
+
+        # Further identical reads accumulate to K and commit the shot; the
+        # window then closes so the loop drops back to the slow cadence.
+        committed = None
+        for _ in range(STABILITY_K + 1):
+            r = detector.poll()
+            if r is not None:
+                committed = r
+        assert committed is not None
+        assert detector.is_confirming is False
+
     def test_same_shot_suppressed(self) -> None:
         detector, ocr, capture = self._make_detector(mse_threshold=1.0)
 

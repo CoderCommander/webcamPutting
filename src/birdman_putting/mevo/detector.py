@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -353,11 +354,24 @@ class MevoDetector:
         self._settle_polls: int = 0
         # Buffer of recent agreeing reads (the candidate shot, growing toward K).
         self._stable_buffer: list[dict[str, float | None]] = []
+        # perf_counter when the current confirming window opened — for the
+        # "confirmed in X.XXs" latency log so the gate's cost is measurable.
+        self._confirm_start_time: float = 0.0
 
         # Optional club / loft for the plausibility gate. Set by the app via
         # set_expected_club() / set_expected_loft(), or passed to poll().
         self._expected_club: str | None = None
         self._expected_loft: float | None = None
+
+    @property
+    def is_confirming(self) -> bool:
+        """True while a detected shot's settled values are being confirmed.
+
+        The app's Mevo poll loop polls FASTER during this window (see
+        ``MevoSettings.confirm_poll_interval``) so the stability gate adds
+        minimal latency between the shot landing and being sent to GSPro.
+        """
+        return self._confirming
 
     def set_expected_club(self, club: str | None) -> None:
         """Set the GSPro club code used by the plausibility gate.
@@ -511,6 +525,7 @@ class MevoDetector:
             self._confirming = True
             self._settle_polls = 0
             self._stable_buffer = []
+            self._confirm_start_time = time.perf_counter()
 
         if not self._confirming:
             return None
@@ -542,6 +557,12 @@ class MevoDetector:
 
         # We have K stable reads. This is the committed candidate.
         committed = self._stable_buffer[-1]
+        if self._confirm_start_time > 0:
+            logger.info(
+                "Mevo shot confirmed in %.2fs (%d polls)",
+                time.perf_counter() - self._confirm_start_time,
+                self._settle_polls,
+            )
         self._reset_confirm()
 
         # Suppress if identical to the previously emitted shot.

@@ -2495,16 +2495,23 @@ class PuttingApp:
 
     def _mevo_loop(self) -> None:
         """Background thread: poll Mevo display for new shots."""
-        interval = self.config.mevo.poll_interval
+        normal_interval = self.config.mevo.poll_interval
+        confirm_interval = self.config.mevo.confirm_poll_interval
         while self._running:
             if self._mevo_paused:
                 time.sleep(0.5)
                 continue
             start = time.perf_counter()
+            confirming = False
             if self._mevo_detector:
                 shot = self._mevo_detector.poll()
                 if shot is not None:
                     self._handle_mevo_shot(shot)
+                confirming = self._mevo_detector.is_confirming
+            # While a shot's display values are still settling, poll fast so the
+            # stability gate adds minimal latency between the shot landing and
+            # reaching GSPro; otherwise poll at the normal (low-CPU) cadence.
+            interval = confirm_interval if confirming else normal_interval
             elapsed = time.perf_counter() - start
             remaining = max(0.01, interval - elapsed)
             time.sleep(remaining)

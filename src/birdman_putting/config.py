@@ -141,6 +141,9 @@ class MevoSettings:
     enabled: bool = False
     window_title: str = "FS Golf PC"  # Title of the Mevo app window
     poll_interval: float = 0.2  # Seconds between screenshot captures
+    confirm_poll_interval: float = 0.12  # Faster poll while confirming a shot's
+    # settled values: keeps the K-read misread protection but cuts the stability
+    # gate's added latency (K reads accumulate in ~K*0.12s, not K*poll_interval).
     mse_threshold: float = 100.0  # Pixel-change threshold for new-shot detection
     tessdata_dir: str = ""  # Path to tessdata directory (empty = system default)
     send_to_gspro: bool = True  # Send Mevo shots to GSPro via OpenAPI
