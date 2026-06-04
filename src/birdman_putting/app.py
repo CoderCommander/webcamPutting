@@ -1219,8 +1219,15 @@ class PuttingApp:
                     else:
                         self._fps_drop_start = 0.0
 
-                    # Adaptive frame skipping: skip processing but keep capturing
-                    if self._skip_counter > 0:
+                    # Adaptive frame skipping: skip processing but keep capturing.
+                    # Never skip while a putt is live (STARTED/ENTERED) or the
+                    # post-shot tracer is drawing — every motion frame counts for
+                    # an accurate fit and a smooth projected trail (even under
+                    # OBS encoding load).
+                    if self._skip_counter > 0 and not (
+                        self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+                        or self._post_shot_tracking
+                    ):
                         self._skip_counter -= 1
                         continue
 
@@ -1592,9 +1599,15 @@ class PuttingApp:
                         with contextlib.suppress(queue.Full):
                             self._frame_queue.put_nowait(output_frame)
 
-                    # Adaptive skip: if processing is slow, skip next frame(s)
+                    # Adaptive skip: if processing is slow, skip next frame(s) —
+                    # but never during a live putt or the post-shot tracer, so a
+                    # motion frame is never dropped under load (e.g. OBS encoding).
                     process_duration = time.perf_counter() - frame_time
-                    if process_duration > self._target_process_time:
+                    _putt_active = (
+                        self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+                        or self._post_shot_tracking
+                    )
+                    if process_duration > self._target_process_time and not _putt_active:
                         frames_behind = int(process_duration / self._target_process_time)
                         self._skip_counter = min(frames_behind, 2)
 
@@ -1993,8 +2006,12 @@ class PuttingApp:
                 saved_circ = None
                 try:
 
-                    # Adaptive frame skipping
-                    if self._skip_counter > 0:
+                    # Adaptive frame skipping — never skip during a live putt or
+                    # the post-shot tracer (every motion frame counts).
+                    if self._skip_counter > 0 and not (
+                        self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+                        or self._post_shot_tracking
+                    ):
                         self._skip_counter -= 1
                         cv2.waitKey(1)
                         continue
@@ -2231,9 +2248,13 @@ class PuttingApp:
 
                     cv2.imshow(window_name, display_frame)
 
-                    # Adaptive skip calculation
+                    # Adaptive skip calculation — never during a live putt/tracer.
                     process_duration = time.perf_counter() - frame_time
-                    if process_duration > self._target_process_time:
+                    _putt_active = (
+                        self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+                        or self._post_shot_tracking
+                    )
+                    if process_duration > self._target_process_time and not _putt_active:
                         frames_behind = int(process_duration / self._target_process_time)
                         self._skip_counter = min(frames_behind, 2)
 
