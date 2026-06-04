@@ -699,3 +699,186 @@ class TestTrajectoryFitWithMarkers:
         )
         assert dbg["uses_markers"] is False
         assert v > 0  # still produces a (biased) result
+
+
+class TestSpeedFitOutlierRejection:
+    """The trajectory-fit speed estimator must reject spurious detections
+    (noise re-lock after motion blur) instead of letting one bad sample
+    skew v0.  Critically, it must be a *no-op on clean data* so the
+    existing accuracy tests above keep passing.
+    """
+
+    PPF = 60.0
+    FPS = 60.0
+    STIMP = 11.0
+    DT = 1.0 / FPS
+
+    def _decelerating_track(
+        self, launch_mph: float, n_motion_frames: int = 20,
+        n_rest_frames: int = 3,
+    ) -> list[tuple[int, int, float]]:
+        a = (6.08 ** 2) / (2 * self.STIMP)
+        launch_fps = launch_mph * 5280 / 3600
+        positions: list[tuple[int, int, float]] = []
+        for i in range(n_rest_frames):
+            positions.append((100, 200, i * self.DT))
+        t_start = n_rest_frames * self.DT
+        for i in range(n_motion_frames):
+            tau = (i + 1) * self.DT
+            travel_ft = launch_fps * tau - 0.5 * a * tau * tau
+            x = int(100 + travel_ft * self.PPF)
+            positions.append((x, 200, t_start + tau))
+        return positions
+
+    def test_single_gross_outlier_rejected(self) -> None:
+        """Inject one wildly-off detection mid-trajectory; fitted speed
+        must stay within ~5% of the clean fit (outlier discarded)."""
+        launch_mph = 8.0
+        clean = self._decelerating_track(launch_mph, n_motion_frames=20)
+        s_clean, dbg_clean = speed_from_trajectory_fit(clean, self.PPF, self.STIMP)
+        assert dbg_clean["reason"] == "ok"
+
+        # Corrupt one interior motion sample: jump it far forward (a noise
+        # blob re-lock far down the line).  This would inflate v0 badly
+        # under a plain single-pass least-squares.
+        dirty = list(clean)
+        idx = 8  # interior motion frame (rest frames are 0..2)
+        x, y, t = dirty[idx]
+        dirty[idx] = (x + 400, y, t)  # +400 px ≈ +6.7 ft of bogus travel
+
+        s_dirty, dbg_dirty = speed_from_trajectory_fit(dirty, self.PPF, self.STIMP)
+        assert dbg_dirty["reason"] == "ok", f"unexpected: {dbg_dirty}"
+        rel_err = abs(s_dirty - s_clean) / s_clean
+        assert rel_err < 0.05, (
+            f"outlier not rejected: clean={s_clean:.3f} dirty={s_dirty:.3f} "
+            f"rel_err={rel_err:.3f}"
+        )
+
+    def _old_single_pass_v0_mph(
+        self, track: list[tuple[int, int, float]],
+    ) -> float:
+        """Reproduce the ORIGINAL single-pass least-squares v0 estimate
+        (no outlier rejection, abs() travel) so we can assert the new code
+        is a byte-for-byte no-op on clean data."""
+        import math as _m
+        stimp = self.STIMP
+        a_fps2 = (6.08 ** 2) / (2.0 * stimp)
+        rest_x, rest_y = float(track[0][0]), float(track[0][1])
+        motion_start = None
+        for i, (px, py, _t) in enumerate(track):
+            if _m.hypot(px - rest_x, py - rest_y) > 5.0:  # _FIT_MOTION_THRESHOLD_PX
+                motion_start = i
+                break
+        motion = list(track[motion_start:])
+        x0, y0, t0 = float(motion[0][0]), float(motion[0][1]), motion[0][2]
+        sum_y_tau = 0.0
+        sum_tau_sq = 0.0
+        for px, py, t in motion:
+            tau = float(t - t0)
+            if tau < 0:
+                continue
+            travel_px = _m.hypot(float(px) - x0, float(py) - y0)
+            travel_ft = travel_px / self.PPF
+            y_i = travel_ft + 0.5 * a_fps2 * tau * tau
+            sum_y_tau += y_i * tau
+            sum_tau_sq += tau * tau
+        v0_fps = sum_y_tau / sum_tau_sq
+        return v0_fps / (5280.0 / 3600.0)
+
+    def test_no_op_on_clean_data_exact(self) -> None:
+        """On an outlier-free trajectory the new code must return EXACTLY
+        the previous single-pass result (within float tolerance) for
+        several speeds — the regression guard for existing accuracy tests."""
+        for launch_mph in (3.0, 4.0, 5.0, 8.0):
+            track = self._decelerating_track(launch_mph, n_motion_frames=20)
+            measured, dbg = speed_from_trajectory_fit(track, self.PPF, self.STIMP)
+            assert dbg["reason"] == "ok"
+            old = self._old_single_pass_v0_mph(track)
+            assert abs(measured - old) < 1e-9, (
+                f"no-op-on-clean broken: launch={launch_mph} "
+                f"new={measured} old={old}"
+            )
+
+    def test_re_lock_behind_anchor_not_counted_as_travel(self) -> None:
+        """A noise blob *behind* the running-max travel (a backward
+        re-lock) must be discarded, not added as positive travel via
+        abs().  The clean and dirty fits should match within ~5%."""
+        launch_mph = 6.0
+        clean = self._decelerating_track(launch_mph, n_motion_frames=20)
+        s_clean, _ = speed_from_trajectory_fit(clean, self.PPF, self.STIMP)
+
+        dirty = list(clean)
+        idx = 10
+        x, y, t = dirty[idx]
+        # Re-lock far BEHIND the anchor (x well below x0=100): abs(x_ft-x0)
+        # in the old code would add large positive travel from this bad point.
+        dirty[idx] = (100 - 300, y, t)
+        s_dirty, dbg = speed_from_trajectory_fit(dirty, self.PPF, self.STIMP)
+        assert dbg["reason"] == "ok"
+        rel_err = abs(s_dirty - s_clean) / s_clean
+        assert rel_err < 0.05, (
+            f"backward re-lock skewed fit: clean={s_clean:.3f} "
+            f"dirty={s_dirty:.3f} rel_err={rel_err:.3f}"
+        )
+
+    def test_too_few_frames_low_confidence(self) -> None:
+        """Below _FIT_MIN_FRAMES motion samples → zero per current contract."""
+        track = self._decelerating_track(4.0, n_motion_frames=2)
+        speed, dbg = speed_from_trajectory_fit(track, self.PPF, self.STIMP)
+        assert speed == 0.0
+        assert "motion frames" in dbg["reason"]
+
+    def test_too_many_outliers_returns_zero(self) -> None:
+        """If a large fraction of samples are garbage, the fit can't be
+        trusted — return the low/zero-confidence signal (0.0)."""
+        launch_mph = 6.0
+        track = self._decelerating_track(launch_mph, n_motion_frames=12)
+        dirty = list(track)
+        # Corrupt ~half of the motion frames with random-ish big jumps.
+        motion_idxs = [i for i, p in enumerate(dirty) if p[0] != 100]
+        for k, i in enumerate(motion_idxs):
+            if k % 2 == 0:
+                x, y, t = dirty[i]
+                dirty[i] = (x + (300 + 50 * k), y, t)
+        speed, dbg = speed_from_trajectory_fit(dirty, self.PPF, self.STIMP)
+        assert speed == 0.0, f"expected zero on heavy corruption, got {speed} ({dbg})"
+
+
+class TestPixelXToFeetMissingMarker:
+    """A missing interior marker must not silently shift the foot scale.
+
+    True 1-ft pixel positions are [0, 57, 114, 171, 228].  If the stored
+    list drops the 171 marker → [0, 57, 114, 228], the naive array-index
+    mapping reads x=228 as 3 ft (index 3) instead of its true 4 ft.
+    """
+
+    def test_missing_interior_marker_repaired(self) -> None:
+        markers_full = [0.0, 57.0, 114.0, 171.0, 228.0]
+        markers_missing = [0.0, 57.0, 114.0, 228.0]  # 171 dropped
+
+        # OLD behavior (single-pass index mapping) returned ~3.0 here,
+        # because x=228 == markers[-1] → index 3.  After validation/repair
+        # the spacing-based mapping must yield ~4.0 ft.
+        ft_missing = pixel_x_to_feet(228.0, markers_missing, 60.0)
+        assert abs(ft_missing - 4.0) < 0.2, (
+            f"missing-marker foot scale not corrected: got {ft_missing:.3f} "
+            "(old buggy code returned ~3.0)"
+        )
+
+        # And the genuinely-complete list still reads 4.0 (sanity).
+        ft_full = pixel_x_to_feet(228.0, markers_full, 60.0)
+        assert abs(ft_full - 4.0) < 0.001
+
+    def test_uniform_markers_regression(self) -> None:
+        """Genuinely uniform markers must be byte-for-byte unchanged."""
+        markers = [0.0, 57.0, 114.0, 171.0, 228.0]
+        for i, m in enumerate(markers):
+            assert abs(pixel_x_to_feet(m, markers, 60.0) - i) < 1e-9, (
+                f"uniform regression: marker {m} should map to {i}ft"
+            )
+        # The simple [0,57,114,171,228] spacing example from the spec:
+        assert pixel_x_to_feet(0.0, markers, 60.0) == 0.0
+        assert abs(pixel_x_to_feet(57.0, markers, 60.0) - 1.0) < 1e-9
+        assert abs(pixel_x_to_feet(114.0, markers, 60.0) - 2.0) < 1e-9
+        assert abs(pixel_x_to_feet(171.0, markers, 60.0) - 3.0) < 1e-9
+        assert abs(pixel_x_to_feet(228.0, markers, 60.0) - 4.0) < 1e-9

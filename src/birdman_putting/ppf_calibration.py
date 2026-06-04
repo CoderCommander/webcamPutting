@@ -12,12 +12,80 @@ This is the building block for both the manual cork-on-mat measurement
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SpacingValidation:
+    """Uniformity assessment of a sorted marker list.
+
+    A *missing* marker shows up as a gap roughly 2x the robust median
+    spacing; a *spurious* marker shows up as a gap roughly half the
+    median.  Either one silently corrupts an array-index→foot mapping, so
+    we surface them explicitly.
+    """
+
+    uniform: bool                 # True if every gap is within tolerance
+    median_spacing: float         # robust median of adjacent gaps (0 if <2)
+    gap_outliers: list[int]       # indices i where diffs[i] deviates badly
+    diffs: list[float]            # the adjacent gaps that were assessed
+
+
+# Fraction a single gap may deviate from the robust median before it is
+# flagged.  A missing marker doubles a gap (+100%); a spurious one halves
+# it (-50%).  35% sits comfortably below both while tolerating realistic
+# fisheye gradients (Greg's corks span ~45-57 px/ft → ±~13% about median).
+_SPACING_TOLERANCE = 0.35
+
+
+def validate_marker_spacing(
+    centers: list[tuple[float, float]],
+    tolerance: float = _SPACING_TOLERANCE,
+) -> SpacingValidation:
+    """Check that adjacent marker gaps are uniform to within ``tolerance``.
+
+    Computes the robust (median) adjacent-gap spacing and flags any gap
+    whose deviation from that median exceeds ``tolerance`` (fractional).
+    A ~2x gap (missing marker) or ~0.5x gap (spurious marker) is reported
+    in ``gap_outliers`` as the index into the diffs list.
+
+    With fewer than 2 markers there is nothing to validate, so the result
+    is trivially uniform.
+    """
+    if len(centers) < 2:
+        return SpacingValidation(
+            uniform=True, median_spacing=0.0, gap_outliers=[], diffs=[],
+        )
+
+    xs = [c[0] for c in centers]
+    diffs = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+
+    # Robust median spacing: exclude gaps that are obviously not a single
+    # marker interval (a 2x+ missing-marker gap) so the median reflects
+    # the true 1-ft spacing rather than being dragged upward by the gap.
+    sorted_diffs = sorted(diffs)
+    p25 = sorted_diffs[len(sorted_diffs) // 4]
+    plausible = [d for d in diffs if d <= p25 * 1.5] if p25 > 0 else diffs
+    base = plausible if plausible else diffs
+    median = float(np.median(base))
+
+    gap_outliers: list[int] = []
+    if median > 0:
+        for i, d in enumerate(diffs):
+            if abs(d - median) / median > tolerance:
+                gap_outliers.append(i)
+
+    return SpacingValidation(
+        uniform=(len(gap_outliers) == 0),
+        median_spacing=median,
+        gap_outliers=gap_outliers,
+        diffs=diffs,
+    )
 
 
 @dataclass
@@ -28,6 +96,11 @@ class MarkerDetectionResult:
     median_spacing_px: float | None     # px/ft if 2+ markers, else None
     mean_spacing_px: float | None
     diffs: list[float]                  # adjacent inter-marker distances
+    # Spacing-validation outputs (defaulted so existing keyword construction
+    # in callers keeps working).  spacing_uniform is False when a gap looks
+    # like a missing/extra marker; gap_outliers lists the offending indices.
+    spacing_uniform: bool = True
+    gap_outliers: list[int] = field(default_factory=list)
 
 
 def detect_calibration_markers(
@@ -168,7 +241,24 @@ def detect_calibration_markers(
     else:
         median = None
         mean = None
+
+    # Validate that the gaps are uniform.  A missing interior marker (e.g.
+    # one filtered out because it fell in the start zone) leaves a ~2x gap
+    # that would silently shift every downstream foot reading; surface it
+    # so callers can repair or reject rather than trust it blindly.
+    validation = validate_marker_spacing(centers)
+    if not validation.uniform:
+        logger.warning(
+            "Calibration spacing non-uniform: median=%.1fpx, suspect gaps at "
+            "indices %s (diffs=%s) — a missing/extra marker may be present",
+            validation.median_spacing,
+            validation.gap_outliers,
+            [round(d, 1) for d in validation.diffs],
+        )
+
     return MarkerDetectionResult(
         centers=centers, median_spacing_px=median,
         mean_spacing_px=mean, diffs=diffs,
+        spacing_uniform=validation.uniform,
+        gap_outliers=validation.gap_outliers,
     )

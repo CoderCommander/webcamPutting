@@ -5,7 +5,10 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from birdman_putting.ppf_calibration import detect_calibration_markers
+from birdman_putting.ppf_calibration import (
+    detect_calibration_markers,
+    validate_marker_spacing,
+)
 
 
 def _make_frame_with_markers(
@@ -146,3 +149,69 @@ class TestDetectCalibrationMarkers:
             frame, band_y_center=180, hue_range=(170, 10), min_saturation=80,
         )
         assert len(result.centers) == 4
+
+
+class TestSpacingValidation:
+    """A missing/extra marker must be detected so it can't silently shift
+    the foot scale.  Exposed via MarkerDetectionResult.spacing_uniform and
+    .gap_outliers (indices of the deviating gaps)."""
+
+    def _frame_at_xs(self, xs: list[int]) -> np.ndarray:
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        frame[:, :] = (40, 90, 30)
+        for x in xs:
+            cv2.rectangle(frame, (x - 2, 173), (x + 2, 187), (255, 255, 255), -1)
+        return frame
+
+    def test_uniform_markers_flagged_uniform(self) -> None:
+        """Evenly-spaced markers → spacing_uniform True, no gap outliers."""
+        frame = self._frame_at_xs([50, 105, 160, 215, 270, 325])
+        result = detect_calibration_markers(frame, band_y_center=180)
+        assert len(result.centers) == 6
+        assert result.spacing_uniform is True
+        assert result.gap_outliers == []
+
+    def test_missing_interior_marker_flagged(self) -> None:
+        """One interior marker missing → a ~2x gap → flagged non-uniform
+        and the oversized gap index is reported."""
+        # 55px spacing, but the 4th marker (would be at 50+3*55=215) is
+        # absent → gap from 160 to 270 is 110px ≈ 2x the 55px median.
+        frame = self._frame_at_xs([50, 105, 160, 270, 325, 380])
+        result = detect_calibration_markers(frame, band_y_center=180)
+        assert len(result.centers) == 6
+        assert result.spacing_uniform is False
+        # The big gap is between centers[2] and centers[3] → index 2.
+        assert 2 in result.gap_outliers
+
+    def test_smooth_fisheye_gradient_not_flagged(self) -> None:
+        """A gradual spacing gradient (legit fisheye) must NOT be flagged
+        as a missing marker — only sudden ~2x jumps are."""
+        # spacings 50,60,70,80,90 — each within ~35% of the median (70).
+        frame = self._frame_at_xs([50, 100, 160, 230, 310, 400])
+        result = detect_calibration_markers(frame, band_y_center=180)
+        assert len(result.centers) == 6
+        assert result.spacing_uniform is True
+        assert result.gap_outliers == []
+
+    def test_validate_marker_spacing_direct_missing(self) -> None:
+        """validate_marker_spacing exposes the uniformity decision for
+        callers/tests directly from a centers list."""
+        centers = [(0.0, 0.0), (57.0, 0.0), (114.0, 0.0), (228.0, 0.0)]
+        v = validate_marker_spacing(centers)
+        assert v.uniform is False
+        assert 2 in v.gap_outliers  # gap 114->228 is the bad one
+        # Median spacing should be the robust ~57 (NOT pulled up by the gap).
+        assert abs(v.median_spacing - 57.0) < 1.0
+
+    def test_validate_marker_spacing_direct_uniform(self) -> None:
+        centers = [(0.0, 0.0), (57.0, 0.0), (114.0, 0.0), (171.0, 0.0), (228.0, 0.0)]
+        v = validate_marker_spacing(centers)
+        assert v.uniform is True
+        assert v.gap_outliers == []
+        assert abs(v.median_spacing - 57.0) < 1e-9
+
+    def test_validate_too_few_markers(self) -> None:
+        """0 or 1 markers: nothing to validate, uniform True, no outliers."""
+        assert validate_marker_spacing([]).uniform is True
+        assert validate_marker_spacing([(10.0, 0.0)]).uniform is True
+        assert validate_marker_spacing([]).gap_outliers == []

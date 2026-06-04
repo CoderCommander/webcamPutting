@@ -241,6 +241,19 @@ _FIT_MIN_FRAMES = 4              # need at least this many motion samples
 _FIT_MIN_TAU_SECONDS = 0.05      # smallest time-span over which to fit
 _FIT_MAX_MPH = 25.0              # sanity cap (above any real putt)
 
+# Outlier-rejection tunables for the speed fit.
+_FIT_RESIDUAL_SIGMA = 2.0        # reject samples beyond this many σ of residual
+# Floor on the residual magnitude (ft) below which NO sample is rejected.
+# This guarantees the rejection is a strict no-op on clean trajectories
+# (sub-foot, unbiased residuals from pixel quantization never trip it) while
+# still catching a noise re-lock that lands feet away from the fitted curve.
+_FIT_RESIDUAL_FLOOR_FT = 0.5
+_FIT_REJECT_ITERS = 2            # refit passes after the initial fit
+# If more than this fraction of motion samples are rejected, the trajectory
+# is too corrupted to trust → return the low/zero-confidence signal.
+_FIT_MAX_REJECT_FRACTION = 0.30
+_FIT_MIN_FIT_SAMPLES = 3         # need at least this many survivors to fit
+
 
 def pixel_x_to_feet(
     x: float,
@@ -261,32 +274,95 @@ def pixel_x_to_feet(
     This corrects for fisheye / off-axis distortion where pixels-per-foot
     varies across the frame.  Greg's Kiyo Pro setup, for example, has
     ~57 px/ft near the start zone but only ~46 px/ft at the right edge.
+
+    Robustness to a *missing* marker: the naive "array index == foot
+    count" assumption breaks if an interior marker is absent (e.g. it fell
+    in the start zone and was filtered).  Instead of trusting the index,
+    we infer each marker's true foot number from its cumulative spacing
+    relative to the robust median gap (``_marker_foot_indices``).  For
+    genuinely uniform markers — and for smooth fisheye gradients — this
+    yields exactly [0, 1, …, N-1], so behavior is unchanged.  When a ~2x
+    gap is present the foot indices step (…, 2, 4, …), so positions past
+    the gap read their true feet rather than coming up short.
     """
     if markers and len(markers) >= 2:
         m_sorted = sorted(markers)
+        feet = _marker_foot_indices(m_sorted)
         if x <= m_sorted[0]:
-            # Before the first marker — extrapolate using the leftmost segment
-            local_ppf = m_sorted[1] - m_sorted[0]
+            # Before the first marker — extrapolate using the leftmost
+            # segment's per-foot pixel rate.
+            span_ft = feet[1] - feet[0]
+            local_ppf = (m_sorted[1] - m_sorted[0]) / span_ft if span_ft > 0 else 0.0
             if local_ppf > 0:
-                return -(m_sorted[0] - x) / local_ppf
-            return 0.0
+                return feet[0] - (m_sorted[0] - x) / local_ppf
+            return float(feet[0])
         if x >= m_sorted[-1]:
-            # After the last marker — extrapolate with the rightmost segment
-            local_ppf = m_sorted[-1] - m_sorted[-2]
+            # After the last marker — extrapolate with the rightmost segment.
+            span_ft = feet[-1] - feet[-2]
+            local_ppf = (m_sorted[-1] - m_sorted[-2]) / span_ft if span_ft > 0 else 0.0
             if local_ppf > 0:
-                return (len(m_sorted) - 1) + (x - m_sorted[-1]) / local_ppf
-            return float(len(m_sorted) - 1)
-        # Within range — find the segment via binary search
+                return feet[-1] + (x - m_sorted[-1]) / local_ppf
+            return float(feet[-1])
+        # Within range — find the bracketing segment.
         for i in range(len(m_sorted) - 1):
             if m_sorted[i] <= x <= m_sorted[i + 1]:
-                local_ppf = m_sorted[i + 1] - m_sorted[i]
-                if local_ppf > 0:
-                    return i + (x - m_sorted[i]) / local_ppf
-                return float(i)
+                seg_px = m_sorted[i + 1] - m_sorted[i]
+                seg_ft = feet[i + 1] - feet[i]
+                if seg_px > 0 and seg_ft > 0:
+                    # Interpolate in feet across the (possibly multi-foot)
+                    # segment so a missing-marker gap spans its true feet.
+                    return feet[i] + (x - m_sorted[i]) / (seg_px / seg_ft)
+                return float(feet[i])
     # No markers — flat ppf scale
     if fallback_ppf > 0:
         return x / fallback_ppf
     return 0.0
+
+
+def _marker_foot_indices(m_sorted: list[float]) -> list[float]:
+    """Infer the true foot number of each sorted marker.
+
+    Returns a list ``feet`` where ``feet[i]`` is how many feet marker
+    ``i`` sits from the first marker.  Normally this is simply the array
+    index ``i``; but if an interior marker is missing, the gap is ~2x the
+    typical spacing and the index undercounts the feet past the gap.
+
+    We compute it from cumulative pixel distance divided by the robust
+    median single-marker spacing, rounded to the nearest integer foot and
+    forced strictly increasing.  For uniform spacing (and smooth fisheye
+    gradients) the rounding reproduces [0, 1, …, N-1] exactly, so callers
+    see no change.
+    """
+    n = len(m_sorted)
+    if n < 2:
+        return [float(i) for i in range(n)]
+
+    diffs = [m_sorted[i + 1] - m_sorted[i] for i in range(n - 1)]
+
+    # Robust median spacing: exclude obvious missing-marker gaps (>1.5x the
+    # 25th-percentile gap) so the median reflects a true 1-ft spacing.
+    sorted_diffs = sorted(diffs)
+    p25 = sorted_diffs[len(sorted_diffs) // 4]
+    plausible = [d for d in diffs if d <= p25 * 1.5] if p25 > 0 else diffs
+    base = plausible if plausible else diffs
+    median = float(np.median(base))
+    if median <= 0:
+        return [float(i) for i in range(n)]
+
+    feet: list[float] = [0.0]
+    cum = 0.0
+    for d in diffs:
+        cum += d
+        # Number of foot-intervals this gap represents (≈1 for normal gaps,
+        # ≈2 for a missing-marker gap).  At least 1 so feet strictly rise.
+        step = max(1, int(round(d / median)))
+        feet.append(feet[-1] + step)
+
+    # Sanity: if the inferred span is wildly larger than the marker count
+    # (median misestimated), fall back to plain indices to avoid garbage.
+    if feet[-1] > 4 * (n - 1):
+        return [float(i) for i in range(n)]
+    return feet
 
 
 def speed_from_trajectory_fit(
@@ -364,8 +440,15 @@ def speed_from_trajectory_fit(
     else:
         x0_ft = 0.0  # not used in flat-ppf branch (we compute Euclidean directly)
 
-    sum_y_tau = 0.0
-    sum_tau_sq = 0.0
+    # ---- Build (tau, travel_ft) samples ----------------------------------
+    # Travel is measured forward from the first motion frame.  With per-x
+    # markers we take the *signed* travel along the putt line (a putt only
+    # advances through the gateway, so a noise re-lock *behind* the anchor
+    # reads negative and produces a large fit residual → rejected below —
+    # rather than abs() turning it into bogus positive travel).  Without
+    # markers we use Euclidean pixel distance, exactly as before.  On a
+    # clean forward putt signed travel == abs travel, so this is a no-op.
+    samples: list[tuple[float, float]] = []  # (tau, travel_ft)
     last_tau = 0.0
     travel_max_ft = 0.0
     for px, py, t in motion:
@@ -375,23 +458,16 @@ def speed_from_trajectory_fit(
         last_tau = tau
 
         if use_markers:
-            # Per-x ppf: signed travel along putt line.  The fit assumes
-            # the ball moves monotonically in one direction; we take
-            # the absolute travel from the anchor.  Y-axis travel is
-            # ignored (small relative to X for a putt).
             x_ft = pixel_x_to_feet(float(px), calibration_markers, pixels_per_foot)
-            travel_ft = abs(x_ft - x0_ft)
+            travel_ft = x_ft - x0_ft  # signed forward travel (Y ignored)
         else:
-            # Flat ppf — use Euclidean pixel distance (preserves prior behavior)
             travel_px = math.hypot(float(px) - x0, float(py) - y0)
             travel_ft = travel_px / pixels_per_foot
 
         if travel_ft > travel_max_ft:
             travel_max_ft = travel_ft
-        # y_i = travel + ½·a·τ²; fit y = v0·τ
-        y_i = travel_ft + 0.5 * a_fps2 * tau * tau
-        sum_y_tau += y_i * tau
-        sum_tau_sq += tau * tau
+
+        samples.append((tau, travel_ft))
 
     debug["tau_max"] = last_tau
     debug["travel_max_ft"] = travel_max_ft
@@ -399,11 +475,66 @@ def speed_from_trajectory_fit(
     if last_tau < _FIT_MIN_TAU_SECONDS:
         debug["reason"] = "tau range too small"
         return 0.0, debug
-    if sum_tau_sq <= 0:
+
+    n_total = len(samples)
+
+    # ---- Iteratively-reweighted v0 fit -----------------------------------
+    # y_i = travel_i + ½·a·τ_i²;  fit y = v0·τ  (v0 = Σ(y·τ) / Σ(τ²)).
+    # After the initial pass, drop samples whose residual to the fitted
+    # curve exceeds max(2σ, floor) and refit.  The fixed floor makes this a
+    # guaranteed no-op on clean data (tiny sub-foot residuals never exceed
+    # it), so existing accuracy tests are unaffected.
+    def _fit_v0(pts: list[tuple[float, float]]) -> float | None:
+        s_ytau = 0.0
+        s_tausq = 0.0
+        for tau, travel in pts:
+            y = travel + 0.5 * a_fps2 * tau * tau
+            s_ytau += y * tau
+            s_tausq += tau * tau
+        if s_tausq <= 0:
+            return None
+        return s_ytau / s_tausq
+
+    kept = list(samples)
+    v0_fps = _fit_v0(kept)
+    if v0_fps is None:
         debug["reason"] = "zero tau²"
         return 0.0, debug
 
-    v0_fps = sum_y_tau / sum_tau_sq
+    for _ in range(_FIT_REJECT_ITERS):
+        if len(kept) <= _FIT_MIN_FIT_SAMPLES:
+            break
+        residuals = [
+            (travel + 0.5 * a_fps2 * tau * tau) - v0_fps * tau
+            for tau, travel in kept
+        ]
+        sigma = float(np.std(residuals))
+        threshold = max(_FIT_RESIDUAL_SIGMA * sigma, _FIT_RESIDUAL_FLOOR_FT)
+        survivors = [
+            pt for pt, r in zip(kept, residuals, strict=True) if abs(r) <= threshold
+        ]
+        # Stop once nothing new is rejected, or rejecting more would drop
+        # below the minimum fit support.
+        if len(survivors) == len(kept) or len(survivors) < _FIT_MIN_FIT_SAMPLES:
+            break
+        kept = survivors
+        new_v0 = _fit_v0(kept)
+        if new_v0 is None:
+            break
+        v0_fps = new_v0
+
+    n_rejected = n_total - len(kept)
+    debug["n_rejected"] = n_rejected
+    debug["n_used"] = len(kept)
+
+    # If we threw away too much of the trajectory, the fit is untrustworthy.
+    if n_total > 0 and n_rejected > n_total * _FIT_MAX_REJECT_FRACTION:
+        debug["reason"] = "too many outliers rejected"
+        return 0.0, debug
+    if len(kept) < _FIT_MIN_FIT_SAMPLES:
+        debug["reason"] = "too few samples after rejection"
+        return 0.0, debug
+
     v0_mph = v0_fps / _MPH_TO_FPS
 
     if v0_mph > _FIT_MAX_MPH:
