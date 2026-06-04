@@ -527,13 +527,25 @@ def speed_from_trajectory_fit(
     debug["n_rejected"] = n_rejected
     debug["n_used"] = len(kept)
 
-    # If we threw away too much of the trajectory, the fit is untrustworthy.
-    if n_total > 0 and n_rejected > n_total * _FIT_MAX_REJECT_FRACTION:
-        debug["reason"] = "too many outliers rejected"
-        return 0.0, debug
-    if len(kept) < _FIT_MIN_FIT_SAMPLES:
-        debug["reason"] = "too few samples after rejection"
-        return 0.0, debug
+    # If rejection removed too much of the trajectory, the data is sparse/noisy
+    # rather than having one clean outlier.  Do NOT fail the fit here — failing
+    # drops the shot to the unreliable launch/dist fallback (which under-reads a
+    # firm putt as "a few feet").  Instead fall back to the all-points fit (the
+    # original, pre-outlier-rejection behavior), which still yields a usable
+    # velocity.  Outlier rejection then only ever *helps* (on dense clean
+    # trails) and never hurts (on sparse ones).
+    too_many_rejected = (
+        n_total > 0 and n_rejected > n_total * _FIT_MAX_REJECT_FRACTION
+    )
+    if too_many_rejected or len(kept) < _FIT_MIN_FIT_SAMPLES:
+        v0_all = _fit_v0(samples)
+        if v0_all is not None and v0_all > 0:
+            v0_fps = v0_all
+            debug["reason"] = "rejection unstable; used all-points fit"
+            debug["n_used"] = n_total
+        else:
+            debug["reason"] = "fit failed (all-points non-positive)"
+            return 0.0, debug
 
     v0_mph = v0_fps / _MPH_TO_FPS
 

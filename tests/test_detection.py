@@ -226,14 +226,20 @@ class TestBallDetector:
         assert abs(detection.x - 400) <= 3
         assert detection.radius > 20
 
-    def test_expected_pos_prefers_near_ball_over_larger_far_blob(self):
-        """With expected_pos near a ball-sized blob, the near ball wins even
-        though a LARGER blob (hand/shadow) sits far away in the zone.
+    def test_expected_pos_does_not_override_largest_blob(self):
+        """Scoring is reverted: even when expected_pos sits on a small ball,
+        detect() returns the LARGEST passing orange contour, not the nearest.
+
+        This restores the historical, projector-safe behavior. The overhead
+        OBS tracer is projected onto the physical mat, so the camera sees
+        near-the-ball false blobs; the old proximity scoring wrongly preferred
+        those over the real moving ball and dropped motion frames. The real
+        ball is the largest orange blob, so largest-wins is reliable.
         """
         frame = np.zeros((360, 640, 3), dtype=np.uint8)
-        # The ball: round, r=14, at (120, 300) — near expected_pos
+        # Small blob near expected_pos (e.g. a projected-tracer segment)...
         cv2.circle(frame, (120, 300), 14, (0, 140, 255), -1)
-        # A larger blob far away (a hand/shadow), r=35, at (480, 300)
+        # ...and the LARGER real ball elsewhere in the zone.
         cv2.circle(frame, (480, 300), 35, (0, 140, 255), -1)
 
         detector = BallDetector(
@@ -251,45 +257,9 @@ class TestBallDetector:
         )
 
         assert detection is not None
-        # The near ball must win, NOT the larger far blob
-        assert abs(detection.x - 120) <= 3
-        assert abs(detection.y - 300) <= 3
-        assert detection.radius < 25
-
-    def test_expected_pos_rounder_ball_beats_less_round_hand_same_distance(self):
-        """At roughly the same distance from expected_pos, a rounder ball
-        should outscore a less-round (elongated) hand-like blob, EVEN with
-        circularity floor at 0.0 (the gate doesn't reject the hand; the
-        score must)."""
-        frame = np.zeros((360, 640, 3), dtype=np.uint8)
-        # Round ball at (200, 300), r≈14
-        cv2.circle(frame, (200, 300), 14, (0, 140, 255), -1)
-        # Elongated blob (hand) roughly mirrored distance on the other side:
-        # tall narrow rectangle centered near (260, 300). Its enclosing
-        # circle center is about the same distance from expected_pos as the
-        # ball, but circularity is much lower.
-        cv2.rectangle(frame, (250, 250), (270, 350), (0, 140, 255), -1)
-
-        # Circularity floor 0.0 (as app.py sets during STARTED/ENTERED)
-        detector = BallDetector(
-            hsv_range=get_preset("orange2"),
-            min_radius=5,
-            min_circularity=0.0,
-        )
-
-        detection = detector.detect(
-            frame=frame,
-            zone_x1=0, zone_x2_limit=640,
-            zone_y1=0, zone_y2=360,
-            timestamp=time.perf_counter(),
-            expected_pos=(230, 300),
-            expected_radius=14,
-        )
-
-        assert detection is not None
-        # The round ball should win on score (nearest + roundest + radius)
-        assert abs(detection.x - 200) <= 4
-        assert abs(detection.y - 300) <= 4
+        # Largest blob wins regardless of expected_pos (scoring disabled).
+        assert abs(detection.x - 480) <= 3
+        assert detection.radius > 20
 
     def test_blurred_large_radius_ball_not_rejected(self):
         """A motion-blurred rolling ball's enclosing-circle radius balloons

@@ -162,7 +162,16 @@ class BallDetector:
         )
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-        use_scoring = expected_pos is not None or expected_radius is not None
+        # Scoring DISABLED (reverted). Scoring candidates by proximity to the
+        # ball's last position regressed live capture: the overhead projector
+        # paints the OBS tracer onto the physical mat, and the camera sees it.
+        # Proximity then picked those projected trail segments (sitting right
+        # where the ball just was) over the real moving ball, dropping motion
+        # frames and collapsing the trajectory fit. The largest passing orange
+        # contour is the actual ball — the proven-reliable choice — so always
+        # use it (the historical behavior). expected_pos/expected_radius are
+        # retained in the signature for callers but no longer drive selection.
+        use_scoring = False
         best_detection: BallDetection | None = None
         best_score = float("-inf")
 
