@@ -39,6 +39,13 @@ _FRAME_VALIDATE_ATTEMPTS = 3  # frames to check after warmup
 _FRAME_VALIDATE_DELAY = 0.1   # seconds between validation reads
 _BLACK_FRAME_THRESHOLD = 3.0  # mean brightness below this = black frame
 
+# Grab-thread liveness tuning.  On a read failure the grab loop sleeps a
+# small interval (instead of busy-spinning at 100% CPU on a dead camera) and
+# counts consecutive failures; once the count reaches the threshold the camera
+# is flagged unhealthy so a mid-session disconnect becomes observable.
+_GRAB_FAILURE_SLEEP = 0.005      # seconds to back off after a failed read
+_GRAB_FAILURE_THRESHOLD = 30     # consecutive failures before flagging unhealthy
+
 
 class Camera:
     """Manages video capture from webcam or video file.
@@ -47,6 +54,11 @@ class Camera:
     and camera property management. Automatically falls back from
     MJPEG/DirectShow to the default backend if frames fail to arrive.
     """
+
+    # Exposed as class attributes so callers/tests can read the tuning without
+    # importing the module-level constants.
+    _GRAB_FAILURE_SLEEP = _GRAB_FAILURE_SLEEP
+    _GRAB_FAILURE_THRESHOLD = _GRAB_FAILURE_THRESHOLD
 
     def __init__(self, settings: CameraSettings):
         self._settings = settings
@@ -66,6 +78,16 @@ class Camera:
         self._latest_frame: np.ndarray | None = None
         self._frame_new = False  # True when grab thread has a new frame
         self._frame_lock = threading.Lock()
+
+        # Serializes access to the underlying cv2.VideoCapture object, which is
+        # NOT thread-safe.  The grab thread's _cap.read() and any UI-thread
+        # _cap.set() (property writes) must be mutually exclusive.
+        self._capture_lock = threading.Lock()
+
+        # Grab-thread liveness: consecutive failed reads and a sticky failure
+        # flag set once the failure count crosses _GRAB_FAILURE_THRESHOLD.
+        self._consecutive_failures = 0
+        self._read_failed = False
 
     @property
     def fps(self) -> float:
@@ -88,6 +110,20 @@ class Camera:
     def status_message(self) -> str:
         """Human-readable status of the last open attempt."""
         return self._status_message
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Number of consecutive failed grab-thread reads (0 when healthy)."""
+        return self._consecutive_failures
+
+    @property
+    def is_healthy(self) -> bool:
+        """False once the grab thread has hit too many consecutive read failures.
+
+        Used to detect a mid-session camera disconnect.  Becomes True again
+        as soon as a single read succeeds (the counter resets).
+        """
+        return not self._read_failed
 
     def update_settings(self, settings: CameraSettings) -> None:
         """Replace camera settings and re-apply properties."""
@@ -521,11 +557,7 @@ class Camera:
         grab_count = 0
         grab_start = time.perf_counter()
         while self._grab_running and self._cap is not None:
-            ret, frame = self._cap.read()
-            if ret and frame is not None:
-                with self._frame_lock:
-                    self._latest_frame = frame
-                    self._frame_new = True
+            if self._grab_once():
                 grab_count += 1
                 now = time.perf_counter()
                 if now - grab_start >= 30.0:
@@ -533,6 +565,61 @@ class Camera:
                     logger.info("Grab thread FPS: %.1f", grab_fps)
                     grab_count = 0
                     grab_start = now
+            # On failure _grab_once() has already slept a small interval, so
+            # the loop does not busy-spin at 100% CPU on a dead camera.
+
+    def _grab_once(self) -> bool:
+        """Perform one capture iteration: read a frame and update shared state.
+
+        Reads under _capture_lock (cv2.VideoCapture is not thread-safe, so this
+        serializes against UI-thread property writes) and stores the frame under
+        _frame_lock.  Tracks consecutive read failures: each failure sleeps a
+        small back-off interval and increments the counter; once the counter
+        reaches _GRAB_FAILURE_THRESHOLD the camera is flagged unhealthy
+        (self._read_failed) and a warning is logged.  A successful read resets
+        the counter and clears the flag.
+
+        Returns:
+            True if a frame was read and stored, False otherwise.
+        """
+        cap = self._cap
+        if cap is None:
+            self._record_grab_failure()
+            return False
+
+        with self._capture_lock:
+            if self._cap is None:  # released while waiting for the lock
+                self._record_grab_failure()
+                return False
+            ret, frame = self._cap.read()
+
+        if ret and frame is not None:
+            with self._frame_lock:
+                self._latest_frame = frame
+                self._frame_new = True
+            # Healthy again — clear any prior failure state.
+            if self._consecutive_failures or self._read_failed:
+                self._consecutive_failures = 0
+                self._read_failed = False
+            return True
+
+        self._record_grab_failure()
+        return False
+
+    def _record_grab_failure(self) -> None:
+        """Account for a failed grab: back off, count, and flag if persistent."""
+        time.sleep(_GRAB_FAILURE_SLEEP)
+        self._consecutive_failures += 1
+        if (
+            self._consecutive_failures >= _GRAB_FAILURE_THRESHOLD
+            and not self._read_failed
+        ):
+            self._read_failed = True
+            logger.warning(
+                "Camera grab failed %d consecutive reads — marking unhealthy "
+                "(possible disconnect)",
+                self._consecutive_failures,
+            )
 
     def stop_grab_thread(self) -> None:
         """Stop the grab thread."""
@@ -544,11 +631,20 @@ class Camera:
     def read(self) -> np.ndarray | None:
         """Read a single frame from the capture source.
 
-        If the grab thread is running, returns the latest grabbed frame
-        (non-blocking). Otherwise reads directly from the capture device.
+        If the grab thread is running, returns a COPY of the latest grabbed
+        frame (non-blocking) and clears the freshness flag.  Otherwise reads
+        directly from the capture device.
+
+        Freshness contract (relied on by the processing loop): when the grab
+        thread is running and no NEW frame has arrived since the last call,
+        this returns None.  The returned frame is always an independent copy,
+        so the in-place operations below (normalize/flip) and any downstream
+        processing cannot be corrupted by the grab thread overwriting
+        ``_latest_frame`` concurrently.
 
         Returns:
-            BGR frame as numpy array, or None if read failed.
+            BGR frame as a caller-owned numpy array, or None if no fresh frame
+            is available / the read failed.
         """
         if self._cap is None:
             return None
@@ -556,14 +652,57 @@ class Camera:
         # Use threaded grab if available
         if self._grab_running:
             with self._frame_lock:
-                if not self._frame_new:
+                if not self._frame_new or self._latest_frame is None:
                     return None  # No new frame since last read
-                frame = self._latest_frame
+                # Copy under the lock so the grab thread cannot mutate the
+                # buffer (or rebind _latest_frame) out from under us.
+                frame = self._latest_frame.copy()
                 self._frame_new = False
-            if frame is None:
-                return None
         else:
-            ret, frame = self._cap.read()
+            with self._capture_lock:
+                if self._cap is None:
+                    return None
+                ret, frame = self._cap.read()
+            if not ret or frame is None:
+                return None
+
+        return self._post_process(frame)
+
+    def read_latest(self) -> np.ndarray | None:
+        """Return a COPY of the most-recently captured frame, ignoring freshness.
+
+        Unlike :meth:`read`, this does NOT consult or clear the ``_frame_new``
+        freshness flag — it always hands back the last frame the grab thread
+        stored (or, when the grab thread is not running, reads one directly).
+        It is the primitive used by one-shot UI calibration captures, which
+        must not spuriously get None just because the processing thread already
+        consumed the latest frame.
+
+        Returns:
+            A caller-owned BGR frame, or None only if no frame has ever been
+            captured / the camera is not open.
+        """
+        if self._grab_running:
+            # Grab thread owns _cap.read(); never issue a competing direct read
+            # from this (calibration) thread.  Hand back the last stored frame,
+            # or None if the grab thread hasn't produced one yet.
+            with self._frame_lock:
+                if self._latest_frame is None:
+                    return None
+                frame = self._latest_frame.copy()
+        elif self._latest_frame is not None:
+            # Grab thread idle but a frame was previously captured — reuse it.
+            with self._frame_lock:
+                frame = self._latest_frame.copy()
+        else:
+            # No grab thread and nothing captured yet: read once directly
+            # (e.g. video-file mode, or a one-shot before the grab thread runs).
+            if self._cap is None:
+                return None
+            with self._capture_lock:
+                if self._cap is None:
+                    return None
+                ret, frame = self._cap.read()
             if not ret or frame is None:
                 return None
 
@@ -571,6 +710,18 @@ class Camera:
         if self._settings.ps4 and not self._video_file:
             frame = self._decode_ps4(frame)
 
+        return self._post_process(frame)
+
+    def _post_process(self, frame: np.ndarray) -> np.ndarray:
+        """Apply darkness normalization and configured flip to ``frame``.
+
+        Operates in place where possible; the caller must already own
+        ``frame`` (it is always a copy in :meth:`read`/:meth:`read_latest`).
+
+        NOTE: Rotation is applied AFTER resize in the processing loop to avoid
+        warpAffine on the full 1280x720 frame (~4x slower), so it is not done
+        here.
+        """
         # Apply darkness normalization
         if self._settings.darkness > 0:
             d = self._settings.darkness
@@ -579,9 +730,6 @@ class Camera:
         # Flip if configured
         if self._settings.flip_image and not self._video_file:
             frame = cv2.flip(frame, 1)
-
-        # NOTE: Rotation is applied AFTER resize in the processing loop
-        # to avoid warpAffine on the full 1280x720 frame (~4x slower).
 
         return frame
 
@@ -616,15 +764,26 @@ class Camera:
         self._apply_camera_properties()
 
     def _apply_camera_properties(self) -> None:
-        """Apply all configured camera properties."""
+        """Apply all configured camera properties.
+
+        cv2.VideoCapture is not thread-safe, so the _cap.set() writes are
+        serialized against the grab thread's _cap.read() via _capture_lock.
+        We chose a dedicated lock over pausing/joining the grab thread because
+        stopping the thread would force re-settling and, on the Razer Kiyo Pro,
+        risk a firmware reset; the lock is far lower-risk and the property
+        writes are quick.
+        """
         if self._cap is None:
             return
 
-        for field_name, prop_id in _CAMERA_PROPS.items():
-            value = getattr(self._settings, field_name, 0.0)
-            if value != 0.0:
-                self._cap.set(prop_id, value)
-                logger.debug("Set camera %s = %s", field_name, value)
+        with self._capture_lock:
+            if self._cap is None:  # released while waiting for the lock
+                return
+            for field_name, prop_id in _CAMERA_PROPS.items():
+                value = getattr(self._settings, field_name, 0.0)
+                if value != 0.0:
+                    self._cap.set(prop_id, value)
+                    logger.debug("Set camera %s = %s", field_name, value)
 
     @staticmethod
     def _decode_ps4(frame: np.ndarray) -> np.ndarray:
