@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import logging
 import select
@@ -18,6 +19,45 @@ from enum import Enum
 from birdman_putting.config import ConnectionSettings
 
 logger = logging.getLogger(__name__)
+
+# Winsock / errno codes that indicate the socket is simply gone. Treat these
+# as a *clean* disconnect (reconnect quietly) rather than an unexpected error.
+#   10053 WSAECONNABORTED  - software caused connection abort
+#   10054 WSAECONNRESET    - connection reset by peer (forcibly closed)
+#   10038 WSAENOTSOCK      - operation on something that is not a socket
+#                            (happens when the fd is closed under a blocked read)
+#   10058 WSAESHUTDOWN     - cannot send/recv after socket shutdown
+_CLEAN_DISCONNECT_CODES = frozenset(
+    {
+        10053,
+        10054,
+        10038,
+        10058,
+        errno.EBADF,
+        errno.ENOTSOCK,
+        errno.ECONNRESET,
+        errno.ECONNABORTED,
+        errno.ESHUTDOWN,
+        errno.EPIPE,
+    }
+)
+
+
+def _is_clean_disconnect(exc: OSError) -> bool:
+    """Return True if ``exc`` represents an expected socket teardown.
+
+    Covers ``ConnectionResetError``/``ConnectionAbortedError``/``TimeoutError``
+    (subclasses of ``OSError``) plus any ``OSError`` whose ``winerror`` or
+    ``errno`` is a known "socket is gone" code.
+    """
+    if isinstance(
+        exc, (ConnectionResetError, ConnectionAbortedError, TimeoutError, BrokenPipeError)
+    ):
+        return True
+    code = getattr(exc, "winerror", None)
+    if code in _CLEAN_DISCONNECT_CODES:
+        return True
+    return exc.errno in _CLEAN_DISCONNECT_CODES
 
 
 class ConnectionMode(Enum):
@@ -51,16 +91,26 @@ class GSProClient:
         self._shot_number: int = 0
         self._connected = threading.Event()
         self._lock = threading.Lock()
-        self._heartbeat_thread: threading.Thread | None = None
+        # Serializes socket teardown/replacement so the listener-driven
+        # reconnect and an external disconnect()/reconnect cannot run at the
+        # same time and leak or stomp on each other's sockets.
+        self._teardown_lock = threading.Lock()
+        self._listener_thread: threading.Thread | None = None
         self._running = False
         self._ball_detected = False  # Set True when ball is ready for shot
-        self._shot_cooldown: int = 0  # Heartbeat cycles to skip after a shot
         self._on_club_change = on_club_change  # Called with club name on GSPro code 201
+        # Persistent receive buffer for streaming JSON framing across recv()s.
+        self._recv_buffer = b""
 
     def set_shot_cooldown(self, cycles: int) -> None:
-        """Set the number of heartbeat cycles to skip after a shot (thread-safe)."""
-        with self._lock:
-            self._shot_cooldown = cycles
+        """Deprecated no-op retained for backwards compatibility.
+
+        The post-shot cooldown is handled by the tracker (see
+        ``ShotSettings.post_shot_cooldown``); this client no longer sends
+        heartbeats, so there are no cycles to skip. Kept callable because
+        ``app.py`` still invokes it.
+        """
+        return None
 
     @property
     def is_connected(self) -> bool:
@@ -97,19 +147,45 @@ class GSProClient:
         return self._connect_socket()
 
     def disconnect(self) -> None:
-        """Close connection and stop heartbeat."""
-        self._running = False
-        if self._heartbeat_thread is not None:
-            self._heartbeat_thread.join(timeout=10)
-            self._heartbeat_thread = None
+        """Close the connection and stop the listener thread.
 
-        with self._lock:
-            if self._socket is not None:
-                with contextlib.suppress(OSError):
-                    self._socket.close()
+        Signals the listener to stop, then tears the socket down. The teardown
+        does ``shutdown(SHUT_RDWR)`` *before* ``close()`` so a listener thread
+        blocked in ``select()``/``recv()`` is woken promptly and observes a
+        clean disconnect instead of a "not a socket" error.
+        """
+        self._running = False
+        self._connected.clear()
+        # Wake the listener and release the socket. Serialized so we never race
+        # the listener's own reconnect teardown.
+        self._teardown_socket(log_msg="Disconnected from GSPro")
+
+        thread = self._listener_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=10)
+            self._listener_thread = None
+
+    def _teardown_socket(self, log_msg: str | None = None) -> None:
+        """Shut down and close the current socket, if any (idempotent).
+
+        Holds ``_teardown_lock`` for the whole operation so an external
+        ``disconnect()`` and the listener-driven reconnect cannot both be
+        manipulating the socket at once.
+        """
+        with self._teardown_lock:
+            with self._lock:
+                sock = self._socket
                 self._socket = None
-                self._connected.clear()
-                logger.info("Disconnected from GSPro")
+            if sock is None:
+                return
+            # shutdown() first to unblock any reader; ignore errors if the
+            # peer already closed (the socket may not be connected).
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                sock.close()
+            if log_msg:
+                logger.info(log_msg)
 
     def send_shot(self, speed_mph: float, hla_degrees: float) -> GSProResponse:
         """Send shot data to GSPro.
@@ -153,7 +229,6 @@ class GSProClient:
             return GSProResponse(success=False, message="Not connected to GSPro")
 
         self._shot_number += 1
-        self._shot_cooldown = 3  # Skip 3 heartbeat cycles (~15s) after shot
         message = self._build_full_shot_message(
             ball_speed, vla, hla, total_spin, spin_axis,
             back_spin, side_spin, club_speed,
@@ -169,17 +244,16 @@ class GSProClient:
     def _open_socket(self) -> bool:
         """Open a TCP socket to GSPro (no heartbeat thread).
 
-        Used by both initial connect and reconnects from the heartbeat loop.
+        Used by both initial connect and reconnects from the listener loop.
+        Any previous socket is torn down (shutdown + close) first, under the
+        teardown lock so we never race a concurrent disconnect.
         """
         host = self._settings.gspro_host
         port = self._settings.gspro_port
 
-        # Close any existing socket
-        with self._lock:
-            if self._socket is not None:
-                with contextlib.suppress(OSError):
-                    self._socket.close()
-                self._socket = None
+        # Tear down any existing socket and start with a fresh receive buffer.
+        self._teardown_socket()
+        self._reset_recv_buffer()
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -189,6 +263,12 @@ class GSProClient:
 
             with self._lock:
                 self._socket = sock
+
+            # A disconnect() may have raced in while we were connecting; if so,
+            # don't leak the freshly-opened socket.
+            if not self._running:
+                self._teardown_socket()
+                return False
 
             self._connected.set()
             logger.info("Connected to GSPro at %s:%d", host, port)
@@ -206,9 +286,12 @@ class GSProClient:
         the TCP connection alone. Heartbeats with zero-data BallData
         were interfering with GSPro's shot processing.
         """
-        if not self._open_socket():
-            return False
+        # Mark running before opening so the "do we still want a socket?"
+        # invariant (_running True ⇒ keep the socket) holds during connect.
         self._running = True
+        if not self._open_socket():
+            self._running = False
+            return False
 
         # Send initial ready signal so GSPro shows "Ready" in OpenAPI
         ready_msg = {
@@ -238,11 +321,11 @@ class GSProClient:
         logger.info("Sent ready signal to GSPro")
 
         # Start a listener thread for incoming GSPro messages (club selection etc.)
-        if self._heartbeat_thread is None or not self._heartbeat_thread.is_alive():
-            self._heartbeat_thread = threading.Thread(
+        if self._listener_thread is None or not self._listener_thread.is_alive():
+            self._listener_thread = threading.Thread(
                 target=self._message_listener, daemon=True,
             )
-            self._heartbeat_thread.start()
+            self._listener_thread.start()
 
         return True
 
@@ -252,7 +335,6 @@ class GSProClient:
             return GSProResponse(success=False, message="Not connected to GSPro")
 
         self._shot_number += 1
-        self._shot_cooldown = 3  # Skip 3 heartbeat cycles (~15s) after shot
         message = self._build_shot_message(speed_mph, hla_degrees)
         return self._send_json(message)
 
@@ -276,37 +358,6 @@ class GSProClient:
 
             except OSError as e:
                 logger.error("Failed to send to GSPro: %s", e)
-                self._connected.clear()
-                return GSProResponse(success=False, message=str(e))
-
-    def _send_heartbeat_json(self, message: dict[str, object]) -> GSProResponse:
-        """Send a heartbeat message without waiting for a response.
-
-        GSPro does not respond to heartbeats, so blocking on recv causes
-        a 10-second timeout that cascades into connection failures.
-        """
-        with self._lock:
-            if self._socket is None:
-                return GSProResponse(success=False, message="Socket not connected")
-
-            try:
-                data = json.dumps(message).encode("utf-8")
-                self._socket.sendall(data)
-
-                # Drain any pending response data without blocking
-                self._socket.setblocking(False)
-                try:
-                    self._socket.recv(4096)
-                except BlockingIOError:
-                    pass  # No data available — expected for heartbeats
-                finally:
-                    self._socket.setblocking(True)
-                    self._socket.settimeout(2.0)
-
-                return GSProResponse(success=True)
-
-            except OSError as e:
-                logger.error("Heartbeat send failed: %s", e)
                 self._connected.clear()
                 return GSProResponse(success=False, message=str(e))
 
@@ -396,42 +447,136 @@ class GSProClient:
         }
         return msg
 
-    def _build_heartbeat_message(self) -> dict[str, object]:
-        """Build GSPro heartbeat message."""
-        return {
-            "DeviceID": self._settings.device_id,
-            "Units": "Yards",
-            "ShotNumber": self._shot_number,
-            "APIversion": "1",
-            "BallData": {
-                "Speed": 0.0,
-                "SpinAxis": 0.0,
-                "TotalSpin": 0.0,
-                "BackSpin": 0.0,
-                "SideSpin": 0.0,
-                "HLA": 0.0,
-                "VLA": 0.0,
-            },
-            "ShotDataOptions": {
-                "ContainsBallData": False,
-                "ContainsClubData": False,
-                "LaunchMonitorIsReady": True,
-                "LaunchMonitorBallDetected": self._ball_detected,
-                "IsHeartBeat": True,
-            },
-        }
+    def _reset_recv_buffer(self) -> None:
+        """Discard any buffered, partially-received bytes.
+
+        Called on (re)connect so stale fragments from a dropped socket cannot
+        corrupt framing on the new one.
+        """
+        self._recv_buffer = b""
+
+    def _handle_message(self, msg: dict[str, object]) -> None:
+        """Dispatch a single decoded GSPro message."""
+        code = msg.get("Code", -1)
+        if code == 201:
+            player = msg.get("Player", {})
+            club = player.get("Club", "") if isinstance(player, dict) else ""
+            logger.info("GSPro club selected: %s", club)
+            if self._on_club_change and club:
+                self._on_club_change(club)
+        else:
+            logger.debug("GSPro message (code %s): %s", code, msg)
+
+    def _process_recv_data(self, data: bytes) -> int:
+        """Append ``data`` to the receive buffer and dispatch complete objects.
+
+        GSPro frames messages as bare, concatenated JSON objects with no
+        delimiter, and a single TCP ``recv`` may contain a partial object, one
+        object, or several. We accumulate bytes in ``self._recv_buffer`` and use
+        ``json.JSONDecoder.raw_decode`` to peel off one complete object at a
+        time, leaving any incomplete trailing bytes buffered for the next read.
+
+        This is string-aware (braces inside string values do not confuse it)
+        and never drops an object split across two reads.
+
+        Returns:
+            The number of complete messages dispatched this call.
+        """
+        if data:
+            self._recv_buffer += data
+
+        # Decode against the text form so raw_decode's index lines up with
+        # character positions; re-encode the remainder to keep the buffer bytes.
+        try:
+            text = self._recv_buffer.decode("utf-8")
+        except UnicodeDecodeError:
+            # A multi-byte character was split across recvs — wait for the rest.
+            return 0
+
+        decoder = json.JSONDecoder()
+        idx = 0
+        n = len(text)
+        dispatched = 0
+        while idx < n:
+            # Skip inter-object whitespace.
+            while idx < n and text[idx].isspace():
+                idx += 1
+            if idx >= n:
+                break
+            try:
+                msg, end = decoder.raw_decode(text, idx)
+            except json.JSONDecodeError:
+                # Incomplete (or genuinely malformed) trailing object. Keep the
+                # remainder buffered; the next recv should complete it. If it is
+                # truly malformed it will be retried, but that is rare and the
+                # connection is usually torn down first.
+                break
+            idx = end
+            if isinstance(msg, dict):
+                self._handle_message(msg)
+                dispatched += 1
+            else:
+                logger.debug("Ignoring non-object GSPro message: %r", msg)
+
+        # Persist whatever we could not fully parse.
+        self._recv_buffer = text[idx:].encode("utf-8")
+        return dispatched
+
+    def _listen_once(self, sock: socket.socket) -> bool:
+        """Run one select/recv/frame/dispatch cycle on ``sock``.
+
+        Returns:
+            True if the connection is still alive after this cycle; False if it
+            was closed or dropped (the caller should reconnect). On a dropped
+            connection this clears the connected flag and logs at INFO (no
+            traceback) for expected socket teardown. Genuinely unexpected
+            exceptions are logged at ERROR with a traceback and also reported as
+            "connection gone" so the loop recovers.
+        """
+        try:
+            readable, _, _ = select.select([sock], [], [], 1.0)
+            if not readable:
+                return True  # Nothing to read this tick; connection still up.
+            data = sock.recv(2048)
+        except (ConnectionResetError, ConnectionAbortedError, TimeoutError, BrokenPipeError):
+            logger.info("GSPro connection dropped; reconnecting")
+            self._connected.clear()
+            return False
+        except OSError as e:
+            if _is_clean_disconnect(e):
+                logger.info("GSPro connection dropped; reconnecting")
+                self._connected.clear()
+                return False
+            logger.error("GSPro listener error: %s", e, exc_info=True)
+            self._connected.clear()
+            return False
+        except Exception as e:  # noqa: BLE001 - report unexpected types loudly
+            logger.error("GSPro listener error: %s", e, exc_info=True)
+            self._connected.clear()
+            return False
+
+        if len(data) == 0:
+            # Peer performed an orderly shutdown.
+            logger.info("GSPro connection dropped; reconnecting")
+            self._connected.clear()
+            return False
+
+        self._process_recv_data(data)
+        return True
 
     def _message_listener(self) -> None:
-        """Listen for incoming GSPro messages (club selection, etc.).
+        """Listener thread: read incoming GSPro messages and auto-reconnect.
 
-        Matches the springbok connector's check_for_message() pattern:
-        non-blocking select() to read incoming data without sending
-        heartbeats. The connection stays alive via TCP keepalive.
+        Matches the springbok connector's check_for_message() pattern: a
+        non-blocking ``select()`` reads incoming data without sending
+        heartbeats; the connection stays alive via TCP keepalive. This thread
+        is the sole owner of socket teardown during reconnects — external
+        ``disconnect()`` only signals intent and shuts the socket down to wake
+        this loop.
         """
         backoff = 1.0
         while self._running:
             if not self._connected.is_set():
-                # Reconnect
                 logger.info("Attempting reconnect (backoff=%.1fs)", backoff)
                 if self._open_socket():
                     backoff = 1.0
@@ -440,39 +585,19 @@ class GSProClient:
                     backoff = min(backoff * 2, 30.0)
                 continue
 
-            # Check for incoming messages from GSPro (non-blocking)
             with self._lock:
                 sock = self._socket
             if sock is None:
-                time.sleep(1)
+                # disconnect()/teardown cleared it out from under us.
+                if not self._running:
+                    break
+                self._connected.clear()
                 continue
 
-            try:
-                readable, _, _ = select.select([sock], [], [], 1.0)
-                if readable:
-                    data = sock.recv(2048)
-                    if len(data) == 0:
-                        logger.warning("GSPro closed the connection")
-                        self._connected.clear()
-                        continue
-                    # Parse messages (may be concatenated)
-                    for part in data.decode("utf-8").replace("}{", "}|{").split("|"):
-                        try:
-                            msg = json.loads(part)
-                            code = msg.get("Code", -1)
-                            if code == 201:
-                                club = msg.get("Player", {}).get("Club", "")
-                                logger.info("GSPro club selected: %s", club)
-                                if self._on_club_change and club:
-                                    self._on_club_change(club)
-                            else:
-                                logger.debug("GSPro message (code %d): %s", code, msg)
-                        except json.JSONDecodeError:
-                            logger.debug("Failed to parse GSPro message: %s", part[:200])
-            except Exception as e:
-                logger.error("GSPro listener error: %s", e, exc_info=True)
-                if isinstance(e, OSError):
-                    self._connected.clear()
+            if not self._listen_once(sock):
+                # Connection gone; loop will reconnect (unless we're stopping).
+                continue
+
         logger.info("GSPro listener thread exiting")
 
     # --- HTTP Middleware (Legacy) ---
