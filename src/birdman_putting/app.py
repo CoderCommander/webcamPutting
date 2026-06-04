@@ -437,13 +437,10 @@ class PuttingApp:
             logger.info("Angle calibration cancelled")
         else:
             # Capture current frame as background (line should NOT be projected yet).
-            # Retry briefly — grab thread may not have a new frame ready yet.
-            frame = None
-            for _ in range(50):
-                frame = self._camera.read()
-                if frame is not None:
-                    break
-                time.sleep(0.02)
+            # Use read_latest() — a one-shot capture must not spuriously get
+            # None just because the processing thread already consumed the
+            # most-recent frame; freshness is irrelevant for a background grab.
+            frame = self._camera.read_latest()
             if frame is not None:
                 bg = resize_with_aspect_ratio(frame, width=640)
                 self._angle_cal_bg = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
@@ -619,9 +616,12 @@ class PuttingApp:
         time.sleep(0.6)
 
         # Capture a frame from the live grab thread (avoid touching the
-        # capture device directly) and run the tracker's normal preprocess
+        # capture device directly) and run the tracker's normal preprocess.
+        # read_latest() returns the most-recent frame regardless of freshness
+        # — this one-shot capture must not get None just because the
+        # processing thread already consumed the latest frame.
         try:
-            frame = self._camera.read()
+            frame = self._camera.read_latest()
             if frame is None:
                 self._notify_cam_status(
                     "OBS Auto Cal: no frame from camera", "error",
@@ -769,13 +769,10 @@ class PuttingApp:
             self._notify_cam_status("Cork Cal: start the camera first", "error")
             return
 
-        # Retry briefly — grab thread may not have a new frame ready yet.
-        frame = None
-        for _ in range(50):
-            frame = self._camera.read()
-            if frame is not None:
-                break
-            time.sleep(0.02)
+        # One-shot capture: read_latest() returns the most-recent frame
+        # regardless of freshness, so we don't spuriously get None just
+        # because the processing thread already consumed the latest frame.
+        frame = self._camera.read_latest()
         if frame is None:
             self._notify_cam_status("Cork Cal: no frame from camera", "error")
             return
@@ -1166,431 +1163,469 @@ class PuttingApp:
         zone = self.config.detection_zone
         last_ui_update = 0.0
 
-        while self._running:
-            # Read frame
-            frame = self._camera.read()
-            if frame is None:
-                if self._camera.is_grab_running:
-                    # Threaded grab: no new frame yet, wait briefly and retry
-                    time.sleep(0.001)
-                    continue
-                logger.warning("No frame received, stopping")
-                self._running = False
-                break
-
-            frame_time = time.perf_counter()
-            self._fps_queue.append(frame_time)
-
-            # Calculate FPS (only counts actual new frames)
-            if len(self._fps_queue) >= 2:
-                elapsed = self._fps_queue[-1] - self._fps_queue[0]
-                if elapsed > 0:
-                    self._actual_fps = (len(self._fps_queue) - 1) / elapsed
-
-            # FPS watchdog: auto-reset tracker if FPS stays critically low
-            # AND the tracker is stuck in a non-IDLE state for an extended
-            # period.  We do NOT reset from IDLE/BALL_DETECTED/STARTED — the
-            # user may be in the middle of placing a ball, and resetting
-            # mid-stability-accumulation prevents detection from ever
-            # locking on a slow CPU.  Only ENTERED-stuck is suspicious;
-            # the ENTERED state already has its own 2s timeout (tracker.py)
-            # so the watchdog is now mostly belt-and-suspenders for
-            # genuinely degenerate cases.
-            _WATCHDOG_FPS_THRESHOLD = 3.0   # was 10 — only react to severe drops
-            _WATCHDOG_HOLD_SECONDS = 30.0   # was 2 — give detection time to settle
-            if self._actual_fps > 0 and self._actual_fps < _WATCHDOG_FPS_THRESHOLD:
-                tracker_stuck_state = self._tracker.state in (
-                    ShotState.ENTERED,
-                )
-                if tracker_stuck_state:
-                    if self._fps_drop_start == 0.0:
-                        self._fps_drop_start = frame_time
-                    elif frame_time - self._fps_drop_start > _WATCHDOG_HOLD_SECONDS:
-                        logger.warning(
-                            "FPS watchdog: %.1f FPS for >%ds while stuck in "
-                            "ENTERED — resetting tracker",
-                            self._actual_fps, int(_WATCHDOG_HOLD_SECONDS),
-                        )
-                        self._tracker.reset()
-                        self._post_shot_tracking = False
-                        self._fps_drop_start = 0.0
-                else:
-                    self._fps_drop_start = 0.0
-            else:
-                self._fps_drop_start = 0.0
-
-            # Adaptive frame skipping: skip processing but keep capturing
-            if self._skip_counter > 0:
-                self._skip_counter -= 1
-                continue
-
-            # Resize for processing, then apply rotation on the smaller frame
-            t0 = time.perf_counter()
-            display_frame = resize_with_aspect_ratio(frame, width=640)
-            display_frame = self._camera.apply_rotation(display_frame)
-
-            # --- Angle calibration mode (line detection) ---
-            if self._angle_cal_active:
-                display_frame = self._process_angle_cal_frame(display_frame)
-                try:
-                    self._frame_queue.put_nowait(display_frame)
-                except queue.Full:
-                    with contextlib.suppress(queue.Empty):
-                        self._frame_queue.get_nowait()
-                    with contextlib.suppress(queue.Full):
-                        self._frame_queue.put_nowait(display_frame)
-                continue
-
-            # --- Calibration mode ---
-            if self._calibrating and self._calibrator:
-                cal_detection = self._detector.detect_full_frame(
-                    display_frame, timestamp=frame_time,
-                )
-                dh, dw = display_frame.shape[:2]
-                cal_result = self._calibrator.update(cal_detection, dw, dh)
-
-                # Draw calibration overlay
-                state_text = f"AUTO ZONE: {self._calibrator.state.value}"
-                ball_pos = (cal_detection.x, cal_detection.y) if cal_detection else None
-                draw_calibration_overlay(display_frame, state_text, ball_pos)
-
-                if cal_result is not None:
-                    # Calibration complete — apply zone
-                    self.config.detection_zone = cal_result.zone
-                    self._tracker.zone = cal_result.zone
-                    self._tracker.reset()
-                    self._calibrating = False
-                    save_config(self.config)
-                    logger.info("Auto-calibration applied zone")
-                    if self._window:
-                        with contextlib.suppress(RuntimeError):
-                            self._window.after(
-                                0, self._window.set_auto_zone_state, False,
-                            )
-                elif self._calibrator.state == CalibrationState.FAILED:
-                    self._calibrating = False
-                    logger.warning("Auto-calibration failed")
-                    if self._window:
-                        with contextlib.suppress(RuntimeError):
-                            self._window.after(
-                                0, self._window.set_auto_zone_state, False,
-                            )
-
-                # Put frame and skip normal detect/track
-                try:
-                    self._frame_queue.put_nowait(display_frame)
-                except queue.Full:
-                    with contextlib.suppress(queue.Empty):
-                        self._frame_queue.get_nowait()
-                    with contextlib.suppress(queue.Full):
-                        self._frame_queue.put_nowait(display_frame)
-                continue
-
-            # Set detection area based on state and tracking mode
-            if (
-                self.config.shot.extended_tracking
-                and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
-            ):
-                detect_x1 = 0
-                detect_x2 = display_frame.shape[1]
-            elif self._tracker.state == ShotState.ENTERED:
-                # Wide search to track ball exiting past gateway
-                detect_x1 = zone.start_x1
-                detect_x2 = display_frame.shape[1]
-            else:
-                detect_x1 = zone.start_x1
-                detect_x2 = display_frame.shape[1]
-
-            # Widen Y range + disable circularity when ball is moving (STARTED
-            # or ENTERED) to handle motion blur during roll.  The original
-            # cam-putting-py (which Springbok uses) doesn't use a circularity
-            # filter at all — motion blur drops circularity to 0.3-0.5, which
-            # was causing birdman to reject valid in-flight detections and
-            # leave the tracker with only sparse trail points.
-            if self._tracker.state == ShotState.ENTERED:
-                det_y1 = max(0, zone.y1 - 50)
-                det_y2 = min(display_frame.shape[0], zone.y2 + 50)
-                saved_circ = self._detector.min_circularity
-                self._detector.min_circularity = 0.0
-            elif self._tracker.state == ShotState.STARTED:
-                det_y1 = max(0, zone.y1 - 30)
-                det_y2 = min(display_frame.shape[0], zone.y2 + 30)
-                saved_circ = self._detector.min_circularity
-                self._detector.min_circularity = 0.0
-            else:
-                det_y1 = zone.y1
-                det_y2 = zone.y2
+        try:
+            while self._running:
+                # Read frame
+                frame = self._camera.read()
+                if frame is None:
+                    if self._camera.is_grab_running:
+                        # Threaded grab: no new frame yet, wait briefly and retry
+                        time.sleep(0.001)
+                        continue
+                    logger.warning("No frame received, stopping")
+                    self._running = False
+                    break
                 saved_circ = None
+                try:
 
-            expected_r = (
-                self._tracker.start_circle[2]
-                if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
-                else None
-            )
+                    frame_time = time.perf_counter()
+                    self._fps_queue.append(frame_time)
 
-            # Two-pass detection in STARTED state:
-            # 1. Search start zone only — if ball still there, use that
-            # 2. Only if ball NOT found at start, search wider area for gateway
-            # This prevents noise contours in the gateway area from
-            # triggering false ENTERED transitions while the ball is stationary.
-            if self._tracker.state == ShotState.STARTED:
-                # Pass 1: start zone only
-                detection = self._detector.detect(
-                    frame=display_frame,
-                    zone_x1=zone.start_x1,
-                    zone_x2_limit=zone.start_x2,
-                    zone_y1=det_y1,
-                    zone_y2=det_y2,
-                    timestamp=frame_time,
-                    expected_radius=expected_r,
-                )
-                if detection is None:
-                    # Ball not in start zone — search full width for gateway
-                    # crossing.  A fast putt can jump past the gateway in one
-                    # frame, so we must search the entire frame, not just a
-                    # narrow band around the gateway.
-                    detection = self._detector.detect(
-                        frame=display_frame,
-                        zone_x1=detect_x1,
-                        zone_x2_limit=detect_x2,
-                        zone_y1=det_y1,
-                        zone_y2=det_y2,
-                        timestamp=frame_time,
-                        expected_radius=expected_r,
+                    # Calculate FPS (only counts actual new frames)
+                    if len(self._fps_queue) >= 2:
+                        elapsed = self._fps_queue[-1] - self._fps_queue[0]
+                        if elapsed > 0:
+                            self._actual_fps = (len(self._fps_queue) - 1) / elapsed
+
+                    # FPS watchdog: auto-reset tracker if FPS stays critically low
+                    # AND the tracker is stuck in a non-IDLE state for an extended
+                    # period.  We do NOT reset from IDLE/BALL_DETECTED/STARTED — the
+                    # user may be in the middle of placing a ball, and resetting
+                    # mid-stability-accumulation prevents detection from ever
+                    # locking on a slow CPU.  Only ENTERED-stuck is suspicious;
+                    # the ENTERED state already has its own 2s timeout (tracker.py)
+                    # so the watchdog is now mostly belt-and-suspenders for
+                    # genuinely degenerate cases.
+                    _WATCHDOG_FPS_THRESHOLD = 3.0   # was 10 — only react to severe drops
+                    _WATCHDOG_HOLD_SECONDS = 30.0   # was 2 — give detection time to settle
+                    if self._actual_fps > 0 and self._actual_fps < _WATCHDOG_FPS_THRESHOLD:
+                        tracker_stuck_state = self._tracker.state in (
+                            ShotState.ENTERED,
+                        )
+                        if tracker_stuck_state:
+                            if self._fps_drop_start == 0.0:
+                                self._fps_drop_start = frame_time
+                            elif frame_time - self._fps_drop_start > _WATCHDOG_HOLD_SECONDS:
+                                logger.warning(
+                                    "FPS watchdog: %.1f FPS for >%ds while stuck in "
+                                    "ENTERED — resetting tracker",
+                                    self._actual_fps, int(_WATCHDOG_HOLD_SECONDS),
+                                )
+                                self._tracker.reset()
+                                self._post_shot_tracking = False
+                                self._fps_drop_start = 0.0
+                        else:
+                            self._fps_drop_start = 0.0
+                    else:
+                        self._fps_drop_start = 0.0
+
+                    # Adaptive frame skipping: skip processing but keep capturing
+                    if self._skip_counter > 0:
+                        self._skip_counter -= 1
+                        continue
+
+                    # Resize for processing, then apply rotation on the smaller frame
+                    t0 = time.perf_counter()
+                    display_frame = resize_with_aspect_ratio(frame, width=640)
+                    display_frame = self._camera.apply_rotation(display_frame)
+
+                    # --- Angle calibration mode (line detection) ---
+                    if self._angle_cal_active:
+                        display_frame = self._process_angle_cal_frame(display_frame)
+                        try:
+                            self._frame_queue.put_nowait(display_frame)
+                        except queue.Full:
+                            with contextlib.suppress(queue.Empty):
+                                self._frame_queue.get_nowait()
+                            with contextlib.suppress(queue.Full):
+                                self._frame_queue.put_nowait(display_frame)
+                        continue
+
+                    # --- Calibration mode ---
+                    if self._calibrating and self._calibrator:
+                        cal_detection = self._detector.detect_full_frame(
+                            display_frame, timestamp=frame_time,
+                        )
+                        dh, dw = display_frame.shape[:2]
+                        cal_result = self._calibrator.update(cal_detection, dw, dh)
+
+                        # Draw calibration overlay
+                        state_text = f"AUTO ZONE: {self._calibrator.state.value}"
+                        ball_pos = (cal_detection.x, cal_detection.y) if cal_detection else None
+                        draw_calibration_overlay(display_frame, state_text, ball_pos)
+
+                        if cal_result is not None:
+                            # Calibration complete — apply zone
+                            self.config.detection_zone = cal_result.zone
+                            self._tracker.zone = cal_result.zone
+                            self._tracker.reset()
+                            self._calibrating = False
+                            save_config(self.config)
+                            logger.info("Auto-calibration applied zone")
+                            if self._window:
+                                with contextlib.suppress(RuntimeError):
+                                    self._window.after(
+                                        0, self._window.set_auto_zone_state, False,
+                                    )
+                        elif self._calibrator.state == CalibrationState.FAILED:
+                            self._calibrating = False
+                            logger.warning("Auto-calibration failed")
+                            if self._window:
+                                with contextlib.suppress(RuntimeError):
+                                    self._window.after(
+                                        0, self._window.set_auto_zone_state, False,
+                                    )
+
+                        # Put frame and skip normal detect/track
+                        try:
+                            self._frame_queue.put_nowait(display_frame)
+                        except queue.Full:
+                            with contextlib.suppress(queue.Empty):
+                                self._frame_queue.get_nowait()
+                            with contextlib.suppress(queue.Full):
+                                self._frame_queue.put_nowait(display_frame)
+                        continue
+
+                    # Set detection area based on state and tracking mode
+                    if (
+                        self.config.shot.extended_tracking
+                        and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+                    ):
+                        detect_x1 = 0
+                        detect_x2 = display_frame.shape[1]
+                    elif self._tracker.state == ShotState.ENTERED:
+                        # Wide search to track ball exiting past gateway
+                        detect_x1 = zone.start_x1
+                        detect_x2 = display_frame.shape[1]
+                    else:
+                        detect_x1 = zone.start_x1
+                        detect_x2 = display_frame.shape[1]
+
+                    # Widen Y range + disable circularity when ball is moving (STARTED
+                    # or ENTERED) to handle motion blur during roll.  The original
+                    # cam-putting-py (which Springbok uses) doesn't use a circularity
+                    # filter at all — motion blur drops circularity to 0.3-0.5, which
+                    # was causing birdman to reject valid in-flight detections and
+                    # leave the tracker with only sparse trail points.
+                    if self._tracker.state == ShotState.ENTERED:
+                        det_y1 = max(0, zone.y1 - 50)
+                        det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+                        saved_circ = self._detector.min_circularity
+                        self._detector.min_circularity = 0.0
+                    elif self._tracker.state == ShotState.STARTED:
+                        det_y1 = max(0, zone.y1 - 30)
+                        det_y2 = min(display_frame.shape[0], zone.y2 + 30)
+                        saved_circ = self._detector.min_circularity
+                        self._detector.min_circularity = 0.0
+                    else:
+                        det_y1 = zone.y1
+                        det_y2 = zone.y2
+                        saved_circ = None
+
+                    expected_r = (
+                        self._tracker.start_circle[2]
+                        if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
+                        else None
                     )
-            else:
-                detection = self._detector.detect(
-                    frame=display_frame,
-                    zone_x1=detect_x1,
-                    zone_x2_limit=detect_x2,
-                    zone_y1=det_y1,
-                    zone_y2=det_y2,
-                    timestamp=frame_time,
-                    expected_radius=expected_r,
-                )
+                    # Expected ball position for inter-frame continuity during motion
+                    # states (STARTED/ENTERED).  Prefer the most-recent tracked
+                    # position (deque tail) — during ENTERED the ball has rolled away
+                    # from start, so start_circle is stale; positions[-1] is where it
+                    # actually was last seen.  Fall back to start_circle when the trail
+                    # is empty.  Left as None for IDLE/BALL_DETECTED so first-detection
+                    # keeps its largest-contour behavior.
+                    if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED):
+                        _trail = self._tracker.positions
+                        if _trail:
+                            _lx, _ly, _ = _trail[-1]
+                            expected_pos: tuple[int, int] | None = (int(_lx), int(_ly))
+                        else:
+                            expected_pos = self._tracker.start_circle[:2]
+                    else:
+                        expected_pos = None
 
-            if saved_circ is not None:
-                self._detector.min_circularity = saved_circ
-
-            # Skip tracker updates when a non-putter club is selected.
-            # Prevents false putt detections from full-swing motion in
-            # or near the detection zone.  Mevo handles those shots.
-            if not self.is_putting_mode:
-                if self._tracker.state != ShotState.IDLE:
-                    self._tracker.reset()
-                detection = None  # Clear for downstream rendering
-                shot_result = None
-                prev_state = self._tracker.state
-            else:
-                # Track ball (with state transition logging)
-                prev_state = self._tracker.state
-                shot_result = self._tracker.update(detection)
-                if self._tracker.state != prev_state:
-                    logger.info(
-                        "Tracker: %s → %s", prev_state.value, self._tracker.state.value,
-                    )
-                    self._last_state_change = frame_time
-                if shot_result is not None:
-                    logger.info("Shot result received from tracker")
-
-            # Auto-reset if stuck in STARTED for >10s (no shot progress)
-            # or stuck in BALL_DETECTED for >10s (can't stabilize)
-            if (
-                self._tracker.state in (ShotState.STARTED, ShotState.BALL_DETECTED)
-                and self._last_state_change > 0
-                and frame_time - self._last_state_change > 10.0
-            ):
-                    logger.warning(
-                        "Auto-reset: stuck in %s for >10s",
-                        self._tracker.state.value,
-                    )
-                    self._tracker.reset()
-                    self._tracker.last_shot_positions.clear()
-                    self._post_shot_tracking = False
-                    self._last_state_change = frame_time
-            # Log when ball is lost during active tracking
-            if (
-                detection is None
-                and prev_state in (ShotState.STARTED, ShotState.ENTERED)
-                and self._tracker.state == ShotState.IDLE
-            ):
-                logger.warning(
-                    "Ball lost during %s — detection returned None "
-                    "(frame: %dx%d, zone: x=%d-%d y=%d-%d)",
-                    prev_state.value,
-                    display_frame.shape[1], display_frame.shape[0],
-                    detect_x1, detect_x2, zone.y1, zone.y2,
-                )
-
-            # Signal GSPro when ball is detected and ready
-            # When Mevo is active, always report ball detected (Mevo handles it)
-            if not self._mevo_detector:
-                self._gspro.ball_detected = self._tracker.state not in (
-                    ShotState.IDLE,
-                )
-
-            # Process completed shot
-            if shot_result is not None:
-                self._handle_shot(shot_result)
-                # Begin post-shot tracking to extend the trail (only if
-                # positions were stored — _handle_shot may return early)
-                if self._tracker.last_shot_positions:
-                    self._post_shot_tracking = True
-                    self._last_shot_time = frame_time
-                    ov = self.config.overlay
-                    total = ov.trail_peak_time + ov.trail_fade_time
-                    self._post_shot_deadline = frame_time + total
-                    self._post_shot_radius = shot_result.start_radius
-                    # Auto-clear trail after peak + fade
-                    self._trail_clear_time = (
-                        frame_time + total
-                    )
-
-            # Post-shot trail extension
-            if self._post_shot_tracking:
-                if (frame_time >= self._post_shot_deadline
-                        or self.config.overlay.projected_trail):
-                    # Projected trail already calculated — no camera tracking needed
-                    self._post_shot_tracking = False
-                elif detection is None:
-                    # Try to find ball near its last known position (not full frame)
-                    last_positions = self._tracker.last_shot_positions
-                    if len(last_positions) >= 2:
-                        lx, ly = last_positions[-1]
-                        # Search in a box around the last known position
-                        margin = 80
-                        search_y1 = max(0, ly - margin)
-                        search_y2 = min(display_frame.shape[0], ly + margin)
-                        search_x1 = max(0, lx - margin)
-                        search_x2 = min(display_frame.shape[1], lx + margin)
+                    # Two-pass detection in STARTED state:
+                    # 1. Search start zone only — if ball still there, use that
+                    # 2. Only if ball NOT found at start, search wider area for gateway
+                    # This prevents noise contours in the gateway area from
+                    # triggering false ENTERED transitions while the ball is stationary.
+                    if self._tracker.state == ShotState.STARTED:
+                        # Pass 1: start zone only
                         detection = self._detector.detect(
                             frame=display_frame,
-                            zone_x1=search_x1,
-                            zone_x2_limit=search_x2,
-                            zone_y1=search_y1,
-                            zone_y2=search_y2,
+                            zone_x1=zone.start_x1,
+                            zone_x2_limit=zone.start_x2,
+                            zone_y1=det_y1,
+                            zone_y2=det_y2,
                             timestamp=frame_time,
-                            expected_radius=self._post_shot_radius,
-                            radius_tolerance=20,
+                            expected_radius=expected_r,
+                            expected_pos=expected_pos,
                         )
-                    if detection is not None:
-                        self._tracker.last_shot_positions.append(
-                            (detection.x, detection.y),
-                        )
+                        if detection is None:
+                            # Ball not in start zone — search full width for gateway
+                            # crossing.  A fast putt can jump past the gateway in one
+                            # frame, so we must search the entire frame, not just a
+                            # narrow band around the gateway.
+                            detection = self._detector.detect(
+                                frame=display_frame,
+                                zone_x1=detect_x1,
+                                zone_x2_limit=detect_x2,
+                                zone_y1=det_y1,
+                                zone_y2=det_y2,
+                                timestamp=frame_time,
+                                expected_radius=expected_r,
+                                expected_pos=expected_pos,
+                            )
                     else:
-                        self._post_shot_tracking = False
-                elif detection is not None:
-                    self._tracker.last_shot_positions.append(
-                        (detection.x, detection.y),
-                    )
+                        # ENTERED passes expected_pos (set above); IDLE/BALL_DETECTED
+                        # leaves it None so first-detection stays largest-contour.
+                        detection = self._detector.detect(
+                            frame=display_frame,
+                            zone_x1=detect_x1,
+                            zone_x2_limit=detect_x2,
+                            zone_y1=det_y1,
+                            zone_y2=det_y2,
+                            timestamp=frame_time,
+                            expected_radius=expected_r,
+                            expected_pos=expected_pos,
+                        )
 
-            # Auto-clear stale trail to stop expensive glow rendering
-            if (
-                self._trail_clear_time > 0
-                and frame_time >= self._trail_clear_time
-                and self._tracker.state == ShotState.IDLE
-            ):
-                self._tracker.last_shot_positions.clear()
-                self._trail_clear_time = 0.0
+                    # Skip tracker updates when a non-putter club is selected.
+                    # Prevents false putt detections from full-swing motion in
+                    # or near the detection zone.  Mevo handles those shots.
+                    if not self.is_putting_mode:
+                        if self._tracker.state != ShotState.IDLE:
+                            self._tracker.reset()
+                        detection = None  # Clear for downstream rendering
+                        shot_result = None
+                        prev_state = self._tracker.state
+                    else:
+                        # Track ball (with state transition logging)
+                        prev_state = self._tracker.state
+                        shot_result = self._tracker.update(detection)
+                        if self._tracker.state != prev_state:
+                            logger.info(
+                                "Tracker: %s → %s", prev_state.value, self._tracker.state.value,
+                            )
+                            self._last_state_change = frame_time
+                        if shot_result is not None:
+                            logger.info("Shot result received from tracker")
 
-            # Build trail data for overlay
-            active_trail: list[tuple[int, int]] = []
-            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
-                active_trail = [(x, y) for x, y, _t in self._tracker.positions]
+                    # Auto-reset if stuck in STARTED for >10s (no shot progress)
+                    # or stuck in BALL_DETECTED for >10s (can't stabilize).
+                    # Compare against the tracker's last_activity_time (same
+                    # perf_counter clock as frame_time): it advances on genuine
+                    # progress (state transitions and real re-starts) but STAYS
+                    # FROZEN when a stationary ball's redundant re-starts are
+                    # suppressed — so a truly stuck ball trips this reset while a
+                    # ball that keeps genuinely re-arming keeps it alive.
+                    if (
+                        self._tracker.state in (ShotState.STARTED, ShotState.BALL_DETECTED)
+                        and self._tracker.last_activity_time > 0
+                        and frame_time - self._tracker.last_activity_time > 10.0
+                    ):
+                            logger.warning(
+                                "Auto-reset: stuck in %s for >10s (no tracker activity)",
+                                self._tracker.state.value,
+                            )
+                            self._tracker.reset()
+                            self._tracker.last_shot_positions.clear()
+                            self._post_shot_tracking = False
+                            self._last_state_change = frame_time
+                    # Log when ball is lost during active tracking
+                    if (
+                        detection is None
+                        and prev_state in (ShotState.STARTED, ShotState.ENTERED)
+                        and self._tracker.state == ShotState.IDLE
+                    ):
+                        logger.warning(
+                            "Ball lost during %s — detection returned None "
+                            "(frame: %dx%d, zone: x=%d-%d y=%d-%d)",
+                            prev_state.value,
+                            display_frame.shape[1], display_frame.shape[0],
+                            detect_x1, detect_x2, zone.y1, zone.y2,
+                        )
 
-            # Draw overlays onto display frame
-            t_overlay = time.perf_counter()
-            edit_mode = self._window.edit_zone_mode if self._window else False
+                    # Signal GSPro when ball is detected and ready
+                    # When Mevo is active, always report ball detected (Mevo handles it)
+                    if not self._mevo_detector:
+                        self._gspro.ball_detected = self._tracker.state not in (
+                            ShotState.IDLE,
+                        )
 
-            # Compute trail brightness based on peak + fade timing
-            trail_brightness = 1.0
-            if self._last_shot_time > 0 and self._tracker.last_shot_positions:
-                elapsed_since_shot = frame_time - self._last_shot_time
-                peak = self.config.overlay.trail_peak_time
-                fade = self.config.overlay.trail_fade_time
-                if elapsed_since_shot <= peak:
+                    # Process completed shot
+                    if shot_result is not None:
+                        self._handle_shot(shot_result)
+                        # Begin post-shot tracking to extend the trail (only if
+                        # positions were stored — _handle_shot may return early)
+                        if self._tracker.last_shot_positions:
+                            self._post_shot_tracking = True
+                            self._last_shot_time = frame_time
+                            ov = self.config.overlay
+                            total = ov.trail_peak_time + ov.trail_fade_time
+                            self._post_shot_deadline = frame_time + total
+                            self._post_shot_radius = shot_result.start_radius
+                            # Auto-clear trail after peak + fade
+                            self._trail_clear_time = (
+                                frame_time + total
+                            )
+
+                    # Post-shot trail extension
+                    if self._post_shot_tracking:
+                        if (frame_time >= self._post_shot_deadline
+                                or self.config.overlay.projected_trail):
+                            # Projected trail already calculated — no camera tracking needed
+                            self._post_shot_tracking = False
+                        elif detection is None:
+                            # Try to find ball near its last known position (not full frame)
+                            last_positions = self._tracker.last_shot_positions
+                            if len(last_positions) >= 2:
+                                lx, ly = last_positions[-1]
+                                # Search in a box around the last known position
+                                margin = 80
+                                search_y1 = max(0, ly - margin)
+                                search_y2 = min(display_frame.shape[0], ly + margin)
+                                search_x1 = max(0, lx - margin)
+                                search_x2 = min(display_frame.shape[1], lx + margin)
+                                detection = self._detector.detect(
+                                    frame=display_frame,
+                                    zone_x1=search_x1,
+                                    zone_x2_limit=search_x2,
+                                    zone_y1=search_y1,
+                                    zone_y2=search_y2,
+                                    timestamp=frame_time,
+                                    expected_radius=self._post_shot_radius,
+                                    radius_tolerance=20,
+                                )
+                            if detection is not None:
+                                self._tracker.last_shot_positions.append(
+                                    (detection.x, detection.y),
+                                )
+                            else:
+                                self._post_shot_tracking = False
+                        elif detection is not None:
+                            self._tracker.last_shot_positions.append(
+                                (detection.x, detection.y),
+                            )
+
+                    # Auto-clear stale trail to stop expensive glow rendering
+                    if (
+                        self._trail_clear_time > 0
+                        and frame_time >= self._trail_clear_time
+                        and self._tracker.state == ShotState.IDLE
+                    ):
+                        self._tracker.last_shot_positions.clear()
+                        self._trail_clear_time = 0.0
+
+                    # Build trail data for overlay
+                    active_trail: list[tuple[int, int]] = []
+                    if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+                        active_trail = [(x, y) for x, y, _t in self._tracker.positions]
+
+                    # Draw overlays onto display frame
+                    t_overlay = time.perf_counter()
+                    edit_mode = self._window.edit_zone_mode if self._window else False
+
+                    # Compute trail brightness based on peak + fade timing
                     trail_brightness = 1.0
-                elif fade > 0:
-                    trail_brightness = max(0.0, 1.0 - (elapsed_since_shot - peak) / fade)
-                else:
-                    trail_brightness = 0.0
+                    if self._last_shot_time > 0 and self._tracker.last_shot_positions:
+                        elapsed_since_shot = frame_time - self._last_shot_time
+                        peak = self.config.overlay.trail_peak_time
+                        fade = self.config.overlay.trail_fade_time
+                        if elapsed_since_shot <= peak:
+                            trail_brightness = 1.0
+                        elif fade > 0:
+                            trail_brightness = max(0.0, 1.0 - (elapsed_since_shot - peak) / fade)
+                        else:
+                            trail_brightness = 0.0
 
-            overlay_kwargs = dict(
-                zone=self.config.detection_zone,
-                state=self._tracker.state,
-                detection=detection,
-                fps=self._actual_fps,
-                connected=self._gspro.is_connected,
-                connection_mode=self._gspro.mode,
-                last_speed=self._tracker.last_shot_speed,
-                last_hla=self._tracker.last_shot_hla,
-                last_start=self._tracker.last_shot_start,
-                last_end=self._tracker.last_shot_end,
-                shot_count=self._tracker.shot_count,
-                edit_mode=edit_mode,
-                active_trail=active_trail,
-                last_shot_trail=self._tracker.last_shot_positions,
-                obs_show_zones=self.config.overlay.obs_show_zones,
-                obs_calibration_grid=self._obs_calibration_grid,
-                trail_color_name=self.config.overlay.trail_color,
-                active_trail_color_name=self.config.overlay.active_trail_color,
-                trail_brightness=trail_brightness,
-            )
-
-            draw_overlay(
-                frame=display_frame,
-                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
-                **overlay_kwargs,
-            )
-            output_frame = display_frame
-
-            # Log slow frames to diagnose FPS drops
-            t_end = time.perf_counter()
-            total_ms = (t_end - t0) * 1000
-            if total_ms > 100:  # >100ms = slower than 10fps
-                overlay_ms = (t_end - t_overlay) * 1000
-                detect_ms = (t_overlay - t0) * 1000
-                trail_len = len(self._tracker.last_shot_positions)
-                logger.warning(
-                    "Slow frame: %.0fms (detect=%.0fms, overlay=%.0fms) "
-                    "state=%s trail=%d post_shot=%s",
-                    total_ms, detect_ms, overlay_ms,
-                    self._tracker.state.value, trail_len,
-                    self._post_shot_tracking,
-                )
-
-            # Put frame into queue (drop old frames if queue is full)
-            try:
-                self._frame_queue.put_nowait(output_frame)
-            except queue.Full:
-                with contextlib.suppress(queue.Empty):
-                    self._frame_queue.get_nowait()
-                with contextlib.suppress(queue.Full):
-                    self._frame_queue.put_nowait(output_frame)
-
-            # Adaptive skip: if processing is slow, skip next frame(s)
-            process_duration = time.perf_counter() - frame_time
-            if process_duration > self._target_process_time:
-                frames_behind = int(process_duration / self._target_process_time)
-                self._skip_counter = min(frames_behind, 2)
-
-            # Periodic UI updates (~4 times per second for labels)
-            if self._window and (frame_time - last_ui_update) > 0.25:
-                last_ui_update = frame_time
-                fps = self._actual_fps
-                state = self._tracker.state.value
-                connected = self._gspro.is_connected
-                shot_count = self._tracker.shot_count
-                # Schedule UI updates on the main thread
-                with contextlib.suppress(RuntimeError):
-                    self._window.after(0, self._window.update_fps, fps)
-                    self._window.after(0, self._window.update_state, state)
-                    self._window.after(
-                        0, self._window.update_connection_status, connected
+                    overlay_kwargs = dict(
+                        zone=self.config.detection_zone,
+                        state=self._tracker.state,
+                        detection=detection,
+                        fps=self._actual_fps,
+                        connected=self._gspro.is_connected,
+                        connection_mode=self._gspro.mode,
+                        last_speed=self._tracker.last_shot_speed,
+                        last_hla=self._tracker.last_shot_hla,
+                        last_start=self._tracker.last_shot_start,
+                        last_end=self._tracker.last_shot_end,
+                        shot_count=self._tracker.shot_count,
+                        edit_mode=edit_mode,
+                        active_trail=active_trail,
+                        last_shot_trail=self._tracker.last_shot_positions,
+                        obs_show_zones=self.config.overlay.obs_show_zones,
+                        obs_calibration_grid=self._obs_calibration_grid,
+                        trail_color_name=self.config.overlay.trail_color,
+                        active_trail_color_name=self.config.overlay.active_trail_color,
+                        trail_brightness=trail_brightness,
                     )
-                    self._window.after(
-                        0, self._window.update_shot_count, shot_count
+
+                    draw_overlay(
+                        frame=display_frame,
+                        obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                        **overlay_kwargs,
                     )
+                    output_frame = display_frame
+
+                    # Log slow frames to diagnose FPS drops
+                    t_end = time.perf_counter()
+                    total_ms = (t_end - t0) * 1000
+                    if total_ms > 100:  # >100ms = slower than 10fps
+                        overlay_ms = (t_end - t_overlay) * 1000
+                        detect_ms = (t_overlay - t0) * 1000
+                        trail_len = len(self._tracker.last_shot_positions)
+                        logger.warning(
+                            "Slow frame: %.0fms (detect=%.0fms, overlay=%.0fms) "
+                            "state=%s trail=%d post_shot=%s",
+                            total_ms, detect_ms, overlay_ms,
+                            self._tracker.state.value, trail_len,
+                            self._post_shot_tracking,
+                        )
+
+                    # Put frame into queue (drop old frames if queue is full)
+                    try:
+                        self._frame_queue.put_nowait(output_frame)
+                    except queue.Full:
+                        with contextlib.suppress(queue.Empty):
+                            self._frame_queue.get_nowait()
+                        with contextlib.suppress(queue.Full):
+                            self._frame_queue.put_nowait(output_frame)
+
+                    # Adaptive skip: if processing is slow, skip next frame(s)
+                    process_duration = time.perf_counter() - frame_time
+                    if process_duration > self._target_process_time:
+                        frames_behind = int(process_duration / self._target_process_time)
+                        self._skip_counter = min(frames_behind, 2)
+
+                    # Periodic UI updates (~4 times per second for labels)
+                    if self._window and (frame_time - last_ui_update) > 0.25:
+                        last_ui_update = frame_time
+                        fps = self._actual_fps
+                        state = self._tracker.state.value
+                        connected = self._gspro.is_connected
+                        shot_count = self._tracker.shot_count
+                        # Schedule UI updates on the main thread
+                        with contextlib.suppress(RuntimeError):
+                            self._window.after(0, self._window.update_fps, fps)
+                            self._window.after(0, self._window.update_state, state)
+                            self._window.after(
+                                0, self._window.update_connection_status, connected
+                            )
+                            self._window.after(
+                                0, self._window.update_shot_count, shot_count
+                            )
+                except Exception:
+                    logger.exception(
+                        "Processing loop: error processing frame — skipping"
+                    )
+                    continue
+                finally:
+                    if saved_circ is not None:
+                        self._detector.min_circularity = saved_circ
+        except Exception:
+            logger.exception("Processing loop crashed — stopping")
+            self._running = False
 
     def _handle_shot(self, shot_result: object) -> None:
         """Process a completed shot — calculate physics, send to GSPro, update UI."""
@@ -1941,268 +1976,298 @@ class PuttingApp:
         cv2.namedWindow(window_name)
         cv2.setMouseCallback(window_name, self._on_headless_mouse)
 
-        while self._running:
-            frame_time = time.perf_counter()
-            self._fps_queue.append(frame_time)
+        try:
+            while self._running:
+                frame_time = time.perf_counter()
+                self._fps_queue.append(frame_time)
 
-            if len(self._fps_queue) >= 2:
-                elapsed = self._fps_queue[-1] - self._fps_queue[0]
-                if elapsed > 0:
-                    self._actual_fps = (len(self._fps_queue) - 1) / elapsed
+                if len(self._fps_queue) >= 2:
+                    elapsed = self._fps_queue[-1] - self._fps_queue[0]
+                    if elapsed > 0:
+                        self._actual_fps = (len(self._fps_queue) - 1) / elapsed
 
-            # Read frame (always read to drain camera buffer)
-            frame = self._camera.read()
-            if frame is None:
-                break
-
-            # Adaptive frame skipping
-            if self._skip_counter > 0:
-                self._skip_counter -= 1
-                cv2.waitKey(1)
-                continue
-
-            display_frame = resize_with_aspect_ratio(frame, width=640)
-            display_frame = self._camera.apply_rotation(display_frame)
-            self._pick_frame = display_frame.copy()
-
-            # --- Calibration mode (headless) ---
-            if self._calibrating and self._calibrator:
-                cal_detection = self._detector.detect_full_frame(
-                    display_frame, timestamp=frame_time,
-                )
-                dh, dw = display_frame.shape[:2]
-                cal_result = self._calibrator.update(cal_detection, dw, dh)
-
-                state_text = f"AUTO ZONE: {self._calibrator.state.value}"
-                ball_pos = (
-                    (cal_detection.x, cal_detection.y) if cal_detection else None
-                )
-                draw_calibration_overlay(display_frame, state_text, ball_pos)
-
-                if cal_result is not None:
-                    self.config.detection_zone = cal_result.zone
-                    zone = cal_result.zone
-                    self._tracker.zone = cal_result.zone
-                    self._tracker.reset()
-                    self._calibrating = False
-                    save_config(self.config)
-                    logger.info("Auto-calibration applied zone (headless)")
-                elif self._calibrator.state == CalibrationState.FAILED:
-                    self._calibrating = False
-                    logger.warning("Auto-calibration failed (headless)")
-
-                cv2.imshow(window_name, display_frame)
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("q"):
-                    self._running = False
-                continue
-
-            # Set detection area based on state and tracking mode
-            if (
-                self.config.shot.extended_tracking
-                and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
-            ):
-                detect_x1 = 0
-                detect_x2 = display_frame.shape[1]
-            elif self._tracker.state == ShotState.ENTERED:
-                detect_x1 = zone.start_x1
-                detect_x2 = display_frame.shape[1]
-            else:
-                detect_x1 = zone.start_x1
-                detect_x2 = display_frame.shape[1]
-
-            if self._tracker.state == ShotState.ENTERED:
-                det_y1 = max(0, zone.y1 - 50)
-                det_y2 = min(display_frame.shape[0], zone.y2 + 50)
-                saved_circ = self._detector.min_circularity
-                self._detector.min_circularity = 0.0
-            elif self._tracker.state == ShotState.STARTED:
-                det_y1 = max(0, zone.y1 - 30)
-                det_y2 = min(display_frame.shape[0], zone.y2 + 30)
-                saved_circ = self._detector.min_circularity
-                self._detector.min_circularity = 0.0
-            else:
-                det_y1 = zone.y1
-                det_y2 = zone.y2
+                # Read frame (always read to drain camera buffer)
+                frame = self._camera.read()
+                if frame is None:
+                    break
                 saved_circ = None
+                try:
 
-            expected_r = (
-                self._tracker.start_circle[2]
-                if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
-                else None
-            )
+                    # Adaptive frame skipping
+                    if self._skip_counter > 0:
+                        self._skip_counter -= 1
+                        cv2.waitKey(1)
+                        continue
 
-            # Two-pass detection in STARTED state (headless)
-            if self._tracker.state == ShotState.STARTED:
-                detection = self._detector.detect(
-                    frame=display_frame,
-                    zone_x1=zone.start_x1,
-                    zone_x2_limit=zone.start_x2,
-                    zone_y1=det_y1,
-                    zone_y2=det_y2,
-                    timestamp=frame_time,
-                    expected_radius=expected_r,
-                )
-                if detection is None:
-                    detection = self._detector.detect(
-                        frame=display_frame,
-                        zone_x1=detect_x1,
-                        zone_x2_limit=detect_x2,
-                        zone_y1=det_y1,
-                        zone_y2=det_y2,
-                        timestamp=frame_time,
-                        expected_radius=expected_r,
+                    display_frame = resize_with_aspect_ratio(frame, width=640)
+                    display_frame = self._camera.apply_rotation(display_frame)
+                    self._pick_frame = display_frame.copy()
+
+                    # --- Calibration mode (headless) ---
+                    if self._calibrating and self._calibrator:
+                        cal_detection = self._detector.detect_full_frame(
+                            display_frame, timestamp=frame_time,
+                        )
+                        dh, dw = display_frame.shape[:2]
+                        cal_result = self._calibrator.update(cal_detection, dw, dh)
+
+                        state_text = f"AUTO ZONE: {self._calibrator.state.value}"
+                        ball_pos = (
+                            (cal_detection.x, cal_detection.y) if cal_detection else None
+                        )
+                        draw_calibration_overlay(display_frame, state_text, ball_pos)
+
+                        if cal_result is not None:
+                            self.config.detection_zone = cal_result.zone
+                            zone = cal_result.zone
+                            self._tracker.zone = cal_result.zone
+                            self._tracker.reset()
+                            self._calibrating = False
+                            save_config(self.config)
+                            logger.info("Auto-calibration applied zone (headless)")
+                        elif self._calibrator.state == CalibrationState.FAILED:
+                            self._calibrating = False
+                            logger.warning("Auto-calibration failed (headless)")
+
+                        cv2.imshow(window_name, display_frame)
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == ord("q"):
+                            self._running = False
+                        continue
+
+                    # Set detection area based on state and tracking mode
+                    if (
+                        self.config.shot.extended_tracking
+                        and self._tracker.state in (ShotState.STARTED, ShotState.ENTERED)
+                    ):
+                        detect_x1 = 0
+                        detect_x2 = display_frame.shape[1]
+                    elif self._tracker.state == ShotState.ENTERED:
+                        detect_x1 = zone.start_x1
+                        detect_x2 = display_frame.shape[1]
+                    else:
+                        detect_x1 = zone.start_x1
+                        detect_x2 = display_frame.shape[1]
+
+                    if self._tracker.state == ShotState.ENTERED:
+                        det_y1 = max(0, zone.y1 - 50)
+                        det_y2 = min(display_frame.shape[0], zone.y2 + 50)
+                        saved_circ = self._detector.min_circularity
+                        self._detector.min_circularity = 0.0
+                    elif self._tracker.state == ShotState.STARTED:
+                        det_y1 = max(0, zone.y1 - 30)
+                        det_y2 = min(display_frame.shape[0], zone.y2 + 30)
+                        saved_circ = self._detector.min_circularity
+                        self._detector.min_circularity = 0.0
+                    else:
+                        det_y1 = zone.y1
+                        det_y2 = zone.y2
+                        saved_circ = None
+
+                    expected_r = (
+                        self._tracker.start_circle[2]
+                        if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED)
+                        else None
                     )
-            else:
-                detection = self._detector.detect(
-                    frame=display_frame,
-                    zone_x1=detect_x1,
-                    zone_x2_limit=detect_x2,
-                    zone_y1=det_y1,
-                    zone_y2=det_y2,
-                    timestamp=frame_time,
-                    expected_radius=expected_r,
-                )
+                    # Expected ball position for inter-frame continuity during motion
+                    # states (STARTED/ENTERED).  Prefer the most-recent tracked
+                    # position (deque tail); fall back to start_circle when the trail
+                    # is empty.  Left as None for IDLE/BALL_DETECTED so first-detection
+                    # keeps its largest-contour behavior.
+                    if self._tracker.state not in (ShotState.IDLE, ShotState.BALL_DETECTED):
+                        _trail = self._tracker.positions
+                        if _trail:
+                            _lx, _ly, _ = _trail[-1]
+                            expected_pos: tuple[int, int] | None = (int(_lx), int(_ly))
+                        else:
+                            expected_pos = self._tracker.start_circle[:2]
+                    else:
+                        expected_pos = None
 
-            if saved_circ is not None:
-                self._detector.min_circularity = saved_circ
-
-            # Skip tracker updates when a non-putter club is selected
-            if not self.is_putting_mode:
-                if self._tracker.state != ShotState.IDLE:
-                    self._tracker.reset()
-                shot_result = None
-            else:
-                shot_result = self._tracker.update(detection)
-
-            # Signal GSPro when ball is detected and ready
-            if not self._mevo_detector:
-                self._gspro.ball_detected = self._tracker.state not in (
-                    ShotState.IDLE,
-                )
-
-            if shot_result is not None:
-                self._handle_shot(shot_result)
-                if self._tracker.last_shot_positions:
-                    self._post_shot_tracking = True
-                    self._post_shot_deadline = (
-                        frame_time + self.config.overlay.trail_duration
-                    )
-                    self._post_shot_radius = shot_result.start_radius
-                    self._trail_clear_time = (
-                        frame_time + self.config.overlay.trail_duration
-                    )
-
-            # Post-shot trail extension
-            if self._post_shot_tracking:
-                if (frame_time >= self._post_shot_deadline
-                        or self.config.overlay.projected_trail):
-                    self._post_shot_tracking = False
-                elif detection is None:
-                    last_positions = self._tracker.last_shot_positions
-                    if len(last_positions) >= 2:
-                        lx, ly = last_positions[-1]
-                        margin = 80
-                        search_y1 = max(0, ly - margin)
-                        search_y2 = min(display_frame.shape[0], ly + margin)
-                        search_x1 = max(0, lx - margin)
-                        search_x2 = min(display_frame.shape[1], lx + margin)
+                    # Two-pass detection in STARTED state (headless)
+                    if self._tracker.state == ShotState.STARTED:
                         detection = self._detector.detect(
                             frame=display_frame,
-                            zone_x1=search_x1,
-                            zone_x2_limit=search_x2,
-                            zone_y1=search_y1,
-                            zone_y2=search_y2,
+                            zone_x1=zone.start_x1,
+                            zone_x2_limit=zone.start_x2,
+                            zone_y1=det_y1,
+                            zone_y2=det_y2,
                             timestamp=frame_time,
-                            expected_radius=self._post_shot_radius,
-                            radius_tolerance=20,
+                            expected_radius=expected_r,
+                            expected_pos=expected_pos,
                         )
-                    if detection is not None:
-                        self._tracker.last_shot_positions.append(
-                            (detection.x, detection.y),
-                        )
+                        if detection is None:
+                            detection = self._detector.detect(
+                                frame=display_frame,
+                                zone_x1=detect_x1,
+                                zone_x2_limit=detect_x2,
+                                zone_y1=det_y1,
+                                zone_y2=det_y2,
+                                timestamp=frame_time,
+                                expected_radius=expected_r,
+                                expected_pos=expected_pos,
+                            )
                     else:
-                        self._post_shot_tracking = False
-                elif detection is not None:
-                    self._tracker.last_shot_positions.append(
-                        (detection.x, detection.y),
+                        # ENTERED passes expected_pos (set above); IDLE/BALL_DETECTED
+                        # leaves it None so first-detection stays largest-contour.
+                        detection = self._detector.detect(
+                            frame=display_frame,
+                            zone_x1=detect_x1,
+                            zone_x2_limit=detect_x2,
+                            zone_y1=det_y1,
+                            zone_y2=det_y2,
+                            timestamp=frame_time,
+                            expected_radius=expected_r,
+                            expected_pos=expected_pos,
+                        )
+
+                    # Skip tracker updates when a non-putter club is selected
+                    if not self.is_putting_mode:
+                        if self._tracker.state != ShotState.IDLE:
+                            self._tracker.reset()
+                        shot_result = None
+                    else:
+                        shot_result = self._tracker.update(detection)
+
+                    # Signal GSPro when ball is detected and ready
+                    if not self._mevo_detector:
+                        self._gspro.ball_detected = self._tracker.state not in (
+                            ShotState.IDLE,
+                        )
+
+                    if shot_result is not None:
+                        self._handle_shot(shot_result)
+                        if self._tracker.last_shot_positions:
+                            self._post_shot_tracking = True
+                            self._post_shot_deadline = (
+                                frame_time + self.config.overlay.trail_duration
+                            )
+                            self._post_shot_radius = shot_result.start_radius
+                            self._trail_clear_time = (
+                                frame_time + self.config.overlay.trail_duration
+                            )
+
+                    # Post-shot trail extension
+                    if self._post_shot_tracking:
+                        if (frame_time >= self._post_shot_deadline
+                                or self.config.overlay.projected_trail):
+                            self._post_shot_tracking = False
+                        elif detection is None:
+                            last_positions = self._tracker.last_shot_positions
+                            if len(last_positions) >= 2:
+                                lx, ly = last_positions[-1]
+                                margin = 80
+                                search_y1 = max(0, ly - margin)
+                                search_y2 = min(display_frame.shape[0], ly + margin)
+                                search_x1 = max(0, lx - margin)
+                                search_x2 = min(display_frame.shape[1], lx + margin)
+                                detection = self._detector.detect(
+                                    frame=display_frame,
+                                    zone_x1=search_x1,
+                                    zone_x2_limit=search_x2,
+                                    zone_y1=search_y1,
+                                    zone_y2=search_y2,
+                                    timestamp=frame_time,
+                                    expected_radius=self._post_shot_radius,
+                                    radius_tolerance=20,
+                                )
+                            if detection is not None:
+                                self._tracker.last_shot_positions.append(
+                                    (detection.x, detection.y),
+                                )
+                            else:
+                                self._post_shot_tracking = False
+                        elif detection is not None:
+                            self._tracker.last_shot_positions.append(
+                                (detection.x, detection.y),
+                            )
+
+                    # Auto-clear stale trail
+                    if (
+                        self._trail_clear_time > 0
+                        and frame_time >= self._trail_clear_time
+                        and self._tracker.state == ShotState.IDLE
+                    ):
+                        self._tracker.last_shot_positions.clear()
+                        self._trail_clear_time = 0.0
+
+                    # Build trail data for overlay
+                    active_trail: list[tuple[int, int]] = []
+                    if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
+                        active_trail = [(x, y) for x, y, _t in self._tracker.positions]
+
+                    overlay_kwargs_hl = dict(
+                        zone=zone,
+                        state=self._tracker.state,
+                        detection=detection,
+                        fps=self._actual_fps,
+                        connected=self._gspro.is_connected,
+                        connection_mode=self._gspro.mode,
+                        last_speed=self._tracker.last_shot_speed,
+                        last_hla=self._tracker.last_shot_hla,
+                        last_start=self._tracker.last_shot_start,
+                        last_end=self._tracker.last_shot_end,
+                        shot_count=self._tracker.shot_count,
+                        active_trail=active_trail,
+                        last_shot_trail=self._tracker.last_shot_positions,
+                        obs_show_zones=self.config.overlay.obs_show_zones,
+                        obs_calibration_grid=self._obs_calibration_grid,
+                        trail_color_name=self.config.overlay.trail_color,
+                        active_trail_color_name=self.config.overlay.active_trail_color,
+                        headless=True,
                     )
 
-            # Auto-clear stale trail
-            if (
-                self._trail_clear_time > 0
-                and frame_time >= self._trail_clear_time
-                and self._tracker.state == ShotState.IDLE
-            ):
-                self._tracker.last_shot_positions.clear()
-                self._trail_clear_time = 0.0
+                    draw_overlay(
+                        frame=display_frame,
+                        obs_overlay_mode=self.config.overlay.obs_overlay_mode,
+                        **overlay_kwargs_hl,
+                    )
 
-            # Build trail data for overlay
-            active_trail: list[tuple[int, int]] = []
-            if self._tracker.state in (ShotState.STARTED, ShotState.ENTERED):
-                active_trail = [(x, y) for x, y, _t in self._tracker.positions]
+                    if self._pick_mode:
+                        cv2.putText(
+                            display_frame, "CLICK ON BALL TO PICK COLOR",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
+                        )
 
-            overlay_kwargs_hl = dict(
-                zone=zone,
-                state=self._tracker.state,
-                detection=detection,
-                fps=self._actual_fps,
-                connected=self._gspro.is_connected,
-                connection_mode=self._gspro.mode,
-                last_speed=self._tracker.last_shot_speed,
-                last_hla=self._tracker.last_shot_hla,
-                last_start=self._tracker.last_shot_start,
-                last_end=self._tracker.last_shot_end,
-                shot_count=self._tracker.shot_count,
-                active_trail=active_trail,
-                last_shot_trail=self._tracker.last_shot_positions,
-                obs_show_zones=self.config.overlay.obs_show_zones,
-                obs_calibration_grid=self._obs_calibration_grid,
-                trail_color_name=self.config.overlay.trail_color,
-                active_trail_color_name=self.config.overlay.active_trail_color,
-                headless=True,
-            )
+                    cv2.imshow(window_name, display_frame)
 
-            draw_overlay(
-                frame=display_frame,
-                obs_overlay_mode=self.config.overlay.obs_overlay_mode,
-                **overlay_kwargs_hl,
-            )
+                    # Adaptive skip calculation
+                    process_duration = time.perf_counter() - frame_time
+                    if process_duration > self._target_process_time:
+                        frames_behind = int(process_duration / self._target_process_time)
+                        self._skip_counter = min(frames_behind, 2)
 
-            if self._pick_mode:
-                cv2.putText(
-                    display_frame, "CLICK ON BALL TO PICK COLOR",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
-                )
+                    if self._debug:
+                        mask = self._detector.get_mask(
+                            display_frame, zone.start_x1, 640, zone.y1, zone.y2
+                        )
+                        cv2.imshow("Debug Mask", mask)
 
-            cv2.imshow(window_name, display_frame)
-
-            # Adaptive skip calculation
-            process_duration = time.perf_counter() - frame_time
-            if process_duration > self._target_process_time:
-                frames_behind = int(process_duration / self._target_process_time)
-                self._skip_counter = min(frames_behind, 2)
-
-            if self._debug:
-                mask = self._detector.get_mask(
-                    display_frame, zone.start_x1, 640, zone.y1, zone.y2
-                )
-                cv2.imshow("Debug Mask", mask)
-
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                self._running = False
-            elif key == ord("d"):
-                self._debug = not self._debug
-                if not self._debug:
-                    cv2.destroyWindow("Debug Mask")
-            elif key == ord("a"):
-                self._on_auto_zone()
-            elif key == ord("r"):
-                self.reset_putt()
-            elif key == ord("c"):
-                self._pick_mode = not self._pick_mode
-                logger.info("Color pick mode: %s", "ON" if self._pick_mode else "OFF")
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord("q"):
+                        self._running = False
+                    elif key == ord("d"):
+                        self._debug = not self._debug
+                        if not self._debug:
+                            cv2.destroyWindow("Debug Mask")
+                    elif key == ord("a"):
+                        self._on_auto_zone()
+                    elif key == ord("r"):
+                        self.reset_putt()
+                    elif key == ord("c"):
+                        self._pick_mode = not self._pick_mode
+                        logger.info("Color pick mode: %s", "ON" if self._pick_mode else "OFF")
+                except Exception:
+                    logger.exception(
+                        "Headless loop: error processing frame — skipping"
+                    )
+                    continue
+                finally:
+                    if saved_circ is not None:
+                        self._detector.min_circularity = saved_circ
+        except Exception:
+            logger.exception("Headless processing loop crashed — stopping")
+            self._running = False
 
     # ---- OBS ----
 
