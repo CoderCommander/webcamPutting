@@ -15,6 +15,24 @@ from birdman_putting.physics import pixel_to_mm_ratio
 
 logger = logging.getLogger(__name__)
 
+# --- ENTERED-state forward-velocity sanity ---------------------------------
+# Conversions used to turn a configured max putt speed (MPH) into a per-frame
+# pixel-displacement cap, so a noise re-lock far ahead of the ball (implying a
+# hundreds-of-MPH velocity) is rejected without ever rejecting a legitimate
+# fast putt.
+_MPH_TO_FPS = 5280.0 / 3600.0   # 1.4667 ft/s per MPH
+_MM_PER_FOOT = 304.8            # exact
+# Multiplier on shot_settings.max_speed_mph for the rejection threshold.  We
+# want the cap to sit WELL above any real putt (which tops out ~20-25 MPH), so
+# only physically-impossible jumps are dropped.  3x → ~75 MPH ceiling.
+_ENTERED_MAX_SPEED_FACTOR = 3.0
+# Fallback per-frame pixel cap used only when pixels-per-foot can't be derived
+# (no px/mm ratio yet).  Derived from a generous max speed at a typical wide
+# scale: a putt physically cannot cross most of the frame in one 60fps frame.
+# 75 MPH ≈ 110 ft/s; at a low ~40 px/ft that's ~4400 px/s ≈ 73 px per 16ms.
+# We use a flat, very generous 1500 px/frame so this never trips a real putt.
+_ENTERED_FALLBACK_MAX_PX_PER_FRAME = 1500.0
+
 
 class ShotState(Enum):
     """Shot detection state machine states."""
@@ -82,6 +100,18 @@ class BallTracker:
         # estimate, instead of stopping at exit_x + min_exit_distance.
         self._exit_threshold_met: bool = False
         self._no_detection_streak: int = 0
+
+        # Public "last meaningful activity" timestamp (perf_counter base).
+        # Updated ONLY on genuine progress: state-machine transitions and
+        # genuine re-starts (a new resting position).  A stationary ball
+        # whose re-starts are suppressed does NOT bump this, so an external
+        # watchdog (app.py) can measure time-since-real-activity and reset a
+        # ball that is stuck in STARTED.  Starts at 0.0 (no activity yet).
+        self.last_activity_time: float = 0.0
+        # Set by _update_impl when a genuine (non-suppressed) re-start occurs,
+        # so the update() wrapper bumps last_activity_time even though a
+        # re-start is not a formal state transition.
+        self._activity_bumped: bool = False
 
         # Last shot data for UI display
         self.last_shot_speed: float = 0.0
@@ -156,12 +186,33 @@ class BallTracker:
     def update(self, detection: BallDetection | None) -> ShotResult | None:
         """Process one frame's detection. Returns ShotResult when shot completes.
 
+        Thin wrapper around :meth:`_update_impl` that maintains the public
+        ``last_activity_time`` timestamp.  Activity advances on ANY state
+        transition and on a genuine re-start (signalled by the inner method
+        via ``self._activity_bumped``).  A stationary ball whose re-starts are
+        suppressed produces neither, so ``last_activity_time`` stays frozen —
+        letting the app watchdog reset a truly stuck ball.
+
         Args:
             detection: Ball detection for this frame, or None if not found.
 
         Returns:
             ShotResult when a complete shot is detected, None otherwise.
         """
+        prev_state = self._state
+        self._activity_bumped = False
+        result = self._update_impl(detection)
+        if self._state != prev_state or self._activity_bumped:
+            # Use the detection's timestamp when available (same perf_counter
+            # base the app watchdog compares against); otherwise fall back to
+            # a fresh perf_counter() reading.
+            self.last_activity_time = (
+                detection.timestamp if detection is not None else time.perf_counter()
+            )
+        return result
+
+    def _update_impl(self, detection: BallDetection | None) -> ShotResult | None:
+        """Core state-machine step (see :meth:`update`)."""
         gateway_x1 = self._gateway_x1
         gateway_x2 = self._gateway_x2
 
@@ -389,14 +440,34 @@ class BallTracker:
                             if abs(cx - x) <= tolerance and abs(cy - y) <= tolerance
                         )
                         if matching >= self.ball_settings.start_stability_frames:
-                            logger.info("Re-start at (%d, %d) r=%d", x, y, detection.radius)
-                            self._start_circle = (x, y, detection.radius)
-                            self._start_pos = (x, y)
-                            self._positions.clear()
-                            self._positions.append((x, y, detection.timestamp))
+                            # Suppress redundant re-starts: if the converged
+                            # position is within tolerance of the CURRENT
+                            # start, the ball simply never moved — this is the
+                            # same rest, not a new one.  Re-emitting it floods
+                            # the log with hundreds of "Re-start" lines and
+                            # (because a re-start is not a state change) defeats
+                            # the app watchdog, which then fires the
+                            # "stuck in started >10s" auto-reset loop.  Reset
+                            # the stability window so we go quiet, but do NOT
+                            # log, re-emit, or bump activity.
+                            same_rest = (
+                                abs(x - self._start_pos[0]) <= tolerance
+                                and abs(y - self._start_pos[1]) <= tolerance
+                            )
                             self._start_candidates.clear()
-                            radius = self.ball_settings.fixed_radius or detection.radius
-                            self._px_mm_ratio = pixel_to_mm_ratio(radius)
+                            if not same_rest:
+                                logger.info(
+                                    "Re-start at (%d, %d) r=%d", x, y, detection.radius
+                                )
+                                self._start_circle = (x, y, detection.radius)
+                                self._start_pos = (x, y)
+                                self._positions.clear()
+                                self._positions.append((x, y, detection.timestamp))
+                                radius = self.ball_settings.fixed_radius or detection.radius
+                                self._px_mm_ratio = pixel_to_mm_ratio(radius)
+                                # Genuine re-start = real activity; bump the
+                                # watchdog timestamp via the update() wrapper.
+                                self._activity_bumped = True
             else:
                 # Ball in transit between start zone and gateway — track, stay STARTED
                 self._positions.append((x, y, detection.timestamp))
@@ -412,7 +483,7 @@ class BallTracker:
             # We do NOT reject large X jumps because fast putts can
             # legitimately skip 200+px per frame.
             if self._positions:
-                last_x, last_y, _ = self._positions[-1]
+                last_x, last_y, last_t = self._positions[-1]
                 dx = x - last_x
                 dy = y - last_y
 
@@ -449,6 +520,35 @@ class BallTracker:
                     logger.debug(
                         "ENTERED: rejecting large Y drift (%d,%d)->(%d,%d) tol=%d",
                         last_x, last_y, x, y, y_tol,
+                    )
+                    return None
+
+                # Forward-velocity sanity: reject a detection whose implied
+                # frame-to-frame speed exceeds the max PLAUSIBLE putt speed.
+                # Once the real ball exits the frame, the detector latches onto
+                # noise blobs at random positions — some land far AHEAD with
+                # near-zero Y drift (so the backward/Y checks above pass) yet
+                # imply hundreds of MPH.  Appending them pollutes the
+                # trajectory fit.  The cap is set generously (3x max_speed_mph)
+                # so legitimate fast putts are never rejected.
+                dt = detection.timestamp - last_t
+                disp_px = math.hypot(dx, dy)
+                max_mph = self.shot_settings.max_speed_mph * _ENTERED_MAX_SPEED_FACTOR
+                ppf = self._px_mm_ratio * _MM_PER_FOOT  # px/mm → px/ft
+                if ppf > 0 and dt > 0:
+                    max_px = (max_mph * _MPH_TO_FPS) * ppf * dt
+                elif dt > 0:
+                    # No scale available — fall back to a flat, very generous
+                    # per-frame pixel cap (documented assumption: a real putt
+                    # cannot cross most of the frame in a single frame).
+                    max_px = _ENTERED_FALLBACK_MAX_PX_PER_FRAME
+                else:
+                    max_px = float("inf")  # dt unknown → cannot judge; allow
+                if disp_px > max_px:
+                    logger.debug(
+                        "ENTERED: rejecting impossible velocity "
+                        "(%d,%d)->(%d,%d) disp=%.0fpx dt=%.4fs cap=%.0fpx",
+                        last_x, last_y, x, y, disp_px, dt, max_px,
                     )
                     return None
 

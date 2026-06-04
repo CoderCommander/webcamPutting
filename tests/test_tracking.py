@@ -347,6 +347,178 @@ class TestRightToLeft:
         assert result.end_position[0] == gateway_x1 - 200
 
 
+class TestRestartSuppression:
+    """A stationary ball that re-stabilizes repeatedly must not emit a flood
+    of Re-start logs, and last_activity_time must reflect real activity."""
+
+    def test_stationary_ball_single_restart_no_spam(
+        self, tracker: BallTracker, caplog
+    ) -> None:
+        """Drive a stationary ball so it re-stabilizes many times within
+        tolerance. At most ONE 'Re-start' should be emitted (the position
+        equals the existing start within tolerance → suppressed)."""
+        import logging
+
+        t = time.perf_counter()
+        # Stabilize at x=50 → STARTED (logs "New start", not "Re-start")
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+
+        with caplog.at_level(logging.INFO, logger="birdman_putting.tracking"):
+            # Keep feeding the SAME resting position (within tolerance).
+            # Each batch would re-trigger the stability check; without
+            # suppression this logs "Re-start" hundreds of times.
+            base = t + 0.5
+            for i in range(60):
+                tracker.update(_det(50, 300, base + i * 0.016))
+
+        assert tracker.state == ShotState.STARTED
+        restart_logs = [
+            r for r in caplog.records if "Re-start" in r.getMessage()
+        ]
+        assert len(restart_logs) == 0, (
+            f"expected no redundant Re-start logs, got {len(restart_logs)}: "
+            f"{[r.getMessage() for r in restart_logs]}"
+        )
+
+    def test_genuine_reposition_emits_one_restart_and_updates_activity(
+        self, tracker: BallTracker, caplog
+    ) -> None:
+        """Moving the ball to a genuinely NEW rest spot emits exactly one
+        Re-start and advances last_activity_time."""
+        import logging
+
+        t = time.perf_counter()
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+
+        activity_before = tracker.last_activity_time
+
+        with caplog.at_level(logging.INFO, logger="birdman_putting.tracking"):
+            # Reposition to x=120 (far beyond tolerance) and settle there.
+            base = t + 0.5
+            for i in range(10):
+                tracker.update(_det(120, 300, base + i * 0.016))
+
+        assert tracker.state == ShotState.STARTED
+        assert tracker.start_circle[:2] == (120, 300)
+        restart_logs = [
+            r for r in caplog.records if "Re-start" in r.getMessage()
+        ]
+        assert len(restart_logs) == 1, (
+            f"expected exactly one Re-start, got {len(restart_logs)}"
+        )
+        # Activity timestamp must advance on a genuine re-start.
+        assert tracker.last_activity_time > activity_before
+
+    def test_last_activity_time_advances_on_state_transition(
+        self, tracker: BallTracker
+    ) -> None:
+        """last_activity_time should update when the state machine
+        transitions (IDLE→BALL_DETECTED→STARTED)."""
+        t = time.perf_counter()
+        # Before any update, attribute exists and is a float.
+        assert isinstance(tracker.last_activity_time, float)
+
+        tracker.update(_det(50, 300, t))
+        after_detect = tracker.last_activity_time
+        assert after_detect > 0
+
+        for i in range(1, 10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+        # Transition to STARTED must have advanced activity.
+        assert tracker.last_activity_time >= after_detect
+
+    def test_stationary_activity_does_not_advance_when_suppressed(
+        self, tracker: BallTracker
+    ) -> None:
+        """A truly stationary ball (suppressed re-starts) must NOT keep
+        bumping last_activity_time — otherwise the app watchdog can never
+        fire on a stuck ball. Activity should stay frozen while nothing
+        meaningful happens."""
+        t = time.perf_counter()
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        assert tracker.state == ShotState.STARTED
+
+        frozen = tracker.last_activity_time
+
+        # Feed the same rest position for a long stretch.
+        base = t + 1.0
+        for i in range(80):
+            tracker.update(_det(50, 300, base + i * 0.016))
+
+        assert tracker.state == ShotState.STARTED
+        # No meaningful activity → timestamp must not have advanced.
+        assert tracker.last_activity_time == frozen
+
+
+class TestEnteredVelocitySanity:
+    """ENTERED-state forward-velocity sanity: a noise blob far ahead in one
+    frame implies an impossible velocity and must be rejected."""
+
+    def test_impossible_forward_velocity_rejected(
+        self, tracker: BallTracker
+    ) -> None:
+        """A forward detection implying an impossible frame-to-frame velocity
+        is NOT appended to the trajectory."""
+        zone = tracker.zone
+        t = time.perf_counter()
+
+        # Stabilize and enter the gateway normally.
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        gateway_x1 = zone.start_x2 + zone.gateway_width
+        tracker.update(_det(zone.start_x2 + 5, 300, t + 0.40))  # transit
+        tracker.update(_det(gateway_x1 + 5, 300, t + 0.42))     # enter
+        assert tracker.state == ShotState.ENTERED
+
+        positions_before = len(tracker.positions)
+        last_x = tracker.positions[-1][0]
+
+        # Noise blob jumps ~2000px forward in a single 16ms frame — far
+        # beyond the frame and any conceivable putt velocity (hundreds of
+        # MPH). Must be rejected regardless of the exact ppf derived from
+        # the detected ball radius.
+        result = tracker.update(_det(last_x + 2000, 300, t + 0.436))
+
+        assert result is None
+        assert len(tracker.positions) == positions_before, (
+            "impossible-velocity detection should not be appended"
+        )
+
+    def test_legitimate_fast_putt_not_rejected(
+        self, tracker: BallTracker
+    ) -> None:
+        """A fast but PLAUSIBLE putt (large dx, but within the velocity cap)
+        is still accepted — we must not reject legitimate fast putts."""
+        zone = tracker.zone
+        t = time.perf_counter()
+
+        for i in range(10):
+            tracker.update(_det(50, 300, t + i * 0.016))
+        gateway_x1 = zone.start_x2 + zone.gateway_width
+        tracker.update(_det(zone.start_x2 + 5, 300, t + 0.40))
+        tracker.update(_det(gateway_x1 + 5, 300, t + 0.42))
+        assert tracker.state == ShotState.ENTERED
+
+        positions_before = len(tracker.positions)
+        last_x = tracker.positions[-1][0]
+
+        # A ~20 MPH putt: ~29 ft/s ≈ 1700 px/s at 57px/ft → ~27px per 16ms.
+        # Use 120px over 0.05s (a sparse-detection fast putt) ≈ 2400px/s
+        # ≈ 42 ft/s ≈ 29 MPH — generous but plausible-ish; must be accepted
+        # since the cap is set well above any real putt.
+        result = tracker.update(_det(last_x + 120, 300, t + 0.47))
+        assert result is None  # shot not complete yet, but…
+        assert len(tracker.positions) == positions_before + 1, (
+            "a fast-but-plausible putt detection must be appended"
+        )
+
+
 class TestPostShotCooldown:
     """Tests for post-shot cooldown timer."""
 

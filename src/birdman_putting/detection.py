@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -73,7 +74,8 @@ class BallDetector:
         zone_y2: int,
         timestamp: float,
         expected_radius: int | None = None,
-        radius_tolerance: int = 50,
+        radius_tolerance: int | None = None,
+        expected_pos: tuple[int, int] | None = None,
     ) -> BallDetection | None:
         """Find the golf ball in the frame within the detection zone.
 
@@ -84,12 +86,41 @@ class BallDetector:
             zone_y1: Top edge of detection zone.
             zone_y2: Bottom edge of detection zone.
             timestamp: time.perf_counter() value for this frame.
-            expected_radius: If set, filter contours to match this radius.
-            radius_tolerance: Pixel tolerance for radius matching.
+            expected_radius: If set, prefer contours matching this radius and
+                filter out contours whose radius is outside the tolerance.
+            radius_tolerance: Pixel tolerance for radius matching.  If left as
+                ``None`` AND ``expected_radius`` is given, a *proportional*
+                tolerance of ±40% of ``expected_radius`` (min ±6px) is used —
+                much tighter than the legacy ±50px.  If an explicit value is
+                passed it is always respected.  When ``expected_radius`` is
+                ``None`` the tolerance is unused.
+            expected_pos: If set (with or without ``expected_radius``), every
+                passing candidate is scored by a blend of distance-to-this
+                point, radius match, and circularity, and the BEST-scoring
+                candidate is returned (inter-frame continuity) instead of the
+                largest contour.  This prevents the tracer from jumping to a
+                larger hand/shadow blob when the real ball is near its last
+                known position.
+
+        Behavior contract:
+            When BOTH ``expected_pos`` and ``expected_radius`` are ``None`` the
+            method preserves the original behavior EXACTLY — it returns the
+            FIRST passing contour in largest-area order.
 
         Returns:
             BallDetection if ball found, None otherwise.
         """
+        # Resolve the effective radius tolerance.  Only apply the proportional
+        # default when expected_radius is given and the caller did not pass an
+        # explicit tolerance.  This keeps the no-expectation path untouched and
+        # honors callers (and tests) that pass a specific tolerance.
+        if radius_tolerance is None:
+            if expected_radius is not None:
+                eff_radius_tol = max(6, int(round(expected_radius * 0.40)))
+            else:
+                eff_radius_tol = 50  # legacy default (unused when no expected_radius)
+        else:
+            eff_radius_tol = radius_tolerance
         # Crop to detection zone + margin BEFORE expensive operations.
         # This processes ~200x250 pixels instead of ~640x360 (~4x fewer).
         h, w = frame.shape[:2]
@@ -120,11 +151,17 @@ class BallDetector:
         inner_x2 = inner_x1 + (zone_x2_limit - zone_x1)
         zone_mask = mask[inner_y1:inner_y2, inner_x1:inner_x2]
 
-        # Find contours sorted by area (largest first)
+        # Find contours sorted by area (largest first).  Largest-first order
+        # is what the no-expectation path returns (first passing = largest);
+        # the scoring path re-ranks the survivors by score instead.
         contours, _ = cv2.findContours(
             zone_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+        use_scoring = expected_pos is not None or expected_radius is not None
+        best_detection: BallDetection | None = None
+        best_score = float("-inf")
 
         for contour in contours:
             ((cx, cy), r) = cv2.minEnclosingCircle(contour)
@@ -146,18 +183,18 @@ class BallDetector:
             area = cv2.contourArea(contour)
 
             # Filter by circularity: area / (π * r²). A ball ≈ 0.7-0.85; a hand ≈ 0.3-0.5
-            if r > 0 and self.min_circularity > 0:
-                circularity = area / (np.pi * r * r)
-                if circularity < self.min_circularity:
-                    continue
+            # (computed unconditionally — the scoring path below also needs it).
+            circularity = area / (np.pi * r * r) if r > 0 else 0.0
+            if r > 0 and self.min_circularity > 0 and circularity < self.min_circularity:
+                continue
 
             # Filter by expected radius if provided
             if expected_radius is not None and not (
-                expected_radius - radius_tolerance < r_int < expected_radius + radius_tolerance
+                expected_radius - eff_radius_tol < r_int < expected_radius + eff_radius_tol
             ):
                 continue
 
-            return BallDetection(
+            candidate = BallDetection(
                 x=int(cx),
                 y=int(cy),
                 radius=r_int,
@@ -165,14 +202,89 @@ class BallDetector:
                 timestamp=timestamp,
             )
 
-        return None
+            if not use_scoring:
+                # Preserve EXACT legacy behavior: contours are largest-first,
+                # so the first passing candidate is the largest-area one.
+                return candidate
+
+            score = self._score_candidate(
+                cx=float(cx),
+                cy=float(cy),
+                r=float(r),
+                circularity=circularity,
+                expected_pos=expected_pos,
+                expected_radius=expected_radius,
+            )
+            if score > best_score:
+                best_score = score
+                best_detection = candidate
+
+        return best_detection
+
+    def _score_candidate(
+        self,
+        cx: float,
+        cy: float,
+        r: float,
+        circularity: float,
+        expected_pos: tuple[int, int] | None,
+        expected_radius: int | None,
+    ) -> float:
+        """Score a passing contour for best-match selection (higher = better).
+
+        Three additive, bounded-in-[0,1] terms, weighted so that *proximity*
+        to the last known ball position dominates, roundness is the next
+        tie-breaker, and radius match is a lighter nudge:
+
+            score = 0.55 * proximity + 0.30 * circularity + 0.15 * radius_match
+
+        Rationale:
+        - Proximity (inter-frame continuity) is the strongest cue: the real
+          ball is near where it was last frame; a hand/shadow that enters the
+          zone is typically offset.  Uses a soft 1/(1+d/scale) falloff so a
+          far, larger blob can never beat a near ball.
+        - Circularity rewards a rounder blob so the ball outscores a less-round
+          hand at the same distance — this is what fixes the hand-blob problem
+          EVEN when the circularity gate is relaxed to 0.0 upstream.
+        - Radius match keeps the chosen blob consistent in size with the
+          known ball, but is intentionally the weakest term (motion blur and
+          partial occlusion shift the measured radius frame-to-frame).
+
+        When ``expected_pos`` is absent, the proximity term is neutralized
+        (set to its weight) so radius+circularity decide; when
+        ``expected_radius`` is absent, the radius term is likewise neutral.
+        """
+        # Proximity term in [0, 1]: 1.0 at the expected point, decaying with
+        # distance.  ``scale`` is anchored to the ball size so the falloff is
+        # resolution-independent: a blob one ball-diameter away scores ~0.5.
+        prox_w, circ_w, rad_w = 0.55, 0.30, 0.15
+        if expected_pos is not None:
+            dist = math.hypot(cx - expected_pos[0], cy - expected_pos[1])
+            scale = max(float(expected_radius or r) * 2.0, 20.0)
+            proximity = 1.0 / (1.0 + dist / scale)
+        else:
+            proximity = 1.0  # neutral — no positional expectation
+
+        # Radius-match term in [0, 1]: 1.0 at an exact match, decaying as the
+        # measured radius diverges from the expected radius.
+        if expected_radius is not None and expected_radius > 0:
+            radius_match = 1.0 / (1.0 + abs(r - expected_radius) / float(expected_radius))
+        else:
+            radius_match = 1.0  # neutral — no size expectation
+
+        # Circularity is already ~[0, 1] for blobs (can slightly exceed 1 for
+        # tiny/quantized contours); clamp for a well-behaved score.
+        circ = max(0.0, min(1.0, circularity))
+
+        return prox_w * proximity + circ_w * circ + rad_w * radius_match
 
     def detect_full_frame(
         self,
         frame: np.ndarray,
         timestamp: float,
         expected_radius: int | None = None,
-        radius_tolerance: int = 50,
+        radius_tolerance: int | None = None,
+        expected_pos: tuple[int, int] | None = None,
     ) -> BallDetection | None:
         """Detect ball anywhere in the full frame (no zone cropping).
 
@@ -188,6 +300,7 @@ class BallDetector:
             timestamp=timestamp,
             expected_radius=expected_radius,
             radius_tolerance=radius_tolerance,
+            expected_pos=expected_pos,
         )
 
     def get_mask(

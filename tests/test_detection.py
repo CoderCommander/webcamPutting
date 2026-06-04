@@ -197,6 +197,124 @@ class TestBallDetector:
         # Mask should have some white pixels where the ball is
         assert np.sum(mask > 0) > 0
 
+    # --- Best-scoring contour selection (expected_pos) -----------------
+
+    def test_no_expectation_returns_largest(self):
+        """Regression: with NO expected_pos/expected_radius, two blobs →
+        the LARGEST one wins (preserves original largest-area behavior).
+        """
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        # Small round ball at (100, 300), r=12
+        cv2.circle(frame, (100, 300), 12, (0, 140, 255), -1)
+        # Larger round blob at (400, 300), r=30
+        cv2.circle(frame, (400, 300), 30, (0, 140, 255), -1)
+
+        detector = BallDetector(
+            hsv_range=get_preset("orange2"),
+            min_radius=5,
+        )
+
+        detection = detector.detect(
+            frame=frame,
+            zone_x1=0, zone_x2_limit=640,
+            zone_y1=0, zone_y2=360,
+            timestamp=time.perf_counter(),
+        )
+
+        assert detection is not None
+        # Largest blob (the r=30 one at x=400) must win
+        assert abs(detection.x - 400) <= 3
+        assert detection.radius > 20
+
+    def test_expected_pos_prefers_near_ball_over_larger_far_blob(self):
+        """With expected_pos near a ball-sized blob, the near ball wins even
+        though a LARGER blob (hand/shadow) sits far away in the zone.
+        """
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        # The ball: round, r=14, at (120, 300) — near expected_pos
+        cv2.circle(frame, (120, 300), 14, (0, 140, 255), -1)
+        # A larger blob far away (a hand/shadow), r=35, at (480, 300)
+        cv2.circle(frame, (480, 300), 35, (0, 140, 255), -1)
+
+        detector = BallDetector(
+            hsv_range=get_preset("orange2"),
+            min_radius=5,
+        )
+
+        detection = detector.detect(
+            frame=frame,
+            zone_x1=0, zone_x2_limit=640,
+            zone_y1=0, zone_y2=360,
+            timestamp=time.perf_counter(),
+            expected_pos=(118, 300),
+            expected_radius=14,
+        )
+
+        assert detection is not None
+        # The near ball must win, NOT the larger far blob
+        assert abs(detection.x - 120) <= 3
+        assert abs(detection.y - 300) <= 3
+        assert detection.radius < 25
+
+    def test_expected_pos_rounder_ball_beats_less_round_hand_same_distance(self):
+        """At roughly the same distance from expected_pos, a rounder ball
+        should outscore a less-round (elongated) hand-like blob, EVEN with
+        circularity floor at 0.0 (the gate doesn't reject the hand; the
+        score must)."""
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        # Round ball at (200, 300), r≈14
+        cv2.circle(frame, (200, 300), 14, (0, 140, 255), -1)
+        # Elongated blob (hand) roughly mirrored distance on the other side:
+        # tall narrow rectangle centered near (260, 300). Its enclosing
+        # circle center is about the same distance from expected_pos as the
+        # ball, but circularity is much lower.
+        cv2.rectangle(frame, (250, 250), (270, 350), (0, 140, 255), -1)
+
+        # Circularity floor 0.0 (as app.py sets during STARTED/ENTERED)
+        detector = BallDetector(
+            hsv_range=get_preset("orange2"),
+            min_radius=5,
+            min_circularity=0.0,
+        )
+
+        detection = detector.detect(
+            frame=frame,
+            zone_x1=0, zone_x2_limit=640,
+            zone_y1=0, zone_y2=360,
+            timestamp=time.perf_counter(),
+            expected_pos=(230, 300),
+            expected_radius=14,
+        )
+
+        assert detection is not None
+        # The round ball should win on score (nearest + roundest + radius)
+        assert abs(detection.x - 200) <= 4
+        assert abs(detection.y - 300) <= 4
+
+    def test_expected_radius_proportional_tolerance_rejects_far_radius(self):
+        """When expected_radius is given, the default radius tolerance is
+        proportional (~±40%). A blob whose radius is wildly off (and far
+        from any expected_pos) should not be returned as the ball."""
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        # Only a big blob present, r≈30
+        cv2.circle(frame, (300, 300), 30, (0, 140, 255), -1)
+
+        detector = BallDetector(
+            hsv_range=get_preset("orange2"),
+            min_radius=5,
+        )
+
+        # Expected radius 12 → proportional tol ~±5px → [7,17]; r=30 excluded.
+        detection = detector.detect(
+            frame=frame,
+            zone_x1=0, zone_x2_limit=640,
+            zone_y1=0, zone_y2=360,
+            timestamp=time.perf_counter(),
+            expected_radius=12,
+        )
+
+        assert detection is None
+
 
 class TestGenerateHsvFromPatch:
     def test_solid_orange_patch(self):
