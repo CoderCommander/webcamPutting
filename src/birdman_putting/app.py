@@ -1737,6 +1737,19 @@ class PuttingApp:
                 final_speed = max(launch_speed, dist_speed)
                 speed_source = "launch/dist"
 
+            # Over-read safety cap: a sparse-trail fallback (fit failed) measures
+            # speed from only 1-2 frames and can wildly over-read a firm putt as
+            # a 50-100 ft rocket. Bound the FALLBACK to a realistic putt distance
+            # so a dropped-out putt can't send a monster to GSPro. The
+            # trajectory-fit path is trusted and never capped. (Stopgap until the
+            # processing frame rate is raised so firm putts reach the fit.)
+            _MAX_FALLBACK_PUTT_FT = 50.0
+            fallback_capped = False
+            if speed_source != "fit" and final_speed > 0:
+                if estimate_putt_distance_feet(final_speed, stimp) > _MAX_FALLBACK_PUTT_FT:
+                    final_speed = target_speed_for_distance(_MAX_FALLBACK_PUTT_FT, stimp)
+                    fallback_capped = True
+
             if final_speed > 0:
                 est_ft = estimate_putt_distance_feet(final_speed, stimp)
                 logger.info(
@@ -1766,7 +1779,7 @@ class PuttingApp:
             cap_hit = "cap" in launch_dbg.get("reason", "")
             no_launch = fit_speed <= 0 and launch_speed <= 0
             under_min = final_speed < self.config.shot.min_speed_mph
-            low_confidence = cap_hit or (no_launch and under_min)
+            low_confidence = cap_hit or fallback_capped or (no_launch and under_min)
             if low_confidence:
                 mevo_reading = self._recent_mevo_reading()
                 if mevo_reading is not None:
