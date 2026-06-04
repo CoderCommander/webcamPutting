@@ -5,7 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from birdman_putting.mevo.ocr import ROI, _fix_ocr_text, _parse_float
+from birdman_putting.mevo.ocr import (
+    FIELD_DECIMALS,
+    ROI,
+    _fix_ocr_text,
+    _parse_float,
+    parse_field,
+)
 
 
 class TestFixOcrText:
@@ -159,6 +165,113 @@ class TestMissingDecimalCorrection:
         """Verify _fix_ocr_text keeps '.' so decimal detection works."""
         assert "." in _fix_ocr_text("13.1 L")
         assert "." not in _fix_ocr_text("131 L")
+
+
+class TestParseFieldDecimalMask:
+    """Field-aware (mask-based) decimal parsing — replaces the blind ÷10 guess.
+
+    Each metric has a known display format (number of decimal places).
+    A no-dot OCR read is interpreted by INSERTING the decimal at the known
+    position. If the digit count does not match the field's mask, the read
+    is REJECTED (None) rather than silently guessing — this is the fix for
+    the production failure where a dropped digit was mistaken for a dropped
+    decimal point and divided by 10.
+    """
+
+    def test_launch_angle_is_one_decimal(self) -> None:
+        # Sanity: VLA (launch_angle) displays as NN.N (one decimal place).
+        assert FIELD_DECIMALS["launch_angle"] == 1
+
+    def test_no_dot_inserts_decimal_at_mask(self) -> None:
+        # NN.N field, "526" (3 digits) → insert dot before last digit → 52.6.
+        # Crucially this is NOT 526/10 == 52.6 by accident; we assert below
+        # that a digit-count MISMATCH is rejected, which division never does.
+        assert parse_field("launch_angle", "526") == pytest.approx(52.6)
+
+    def test_no_dot_two_decimals(self) -> None:
+        # smash_factor displays as N.NN (two decimals): "152" → 1.52.
+        assert FIELD_DECIMALS["smash_factor"] == 2
+        assert parse_field("smash_factor", "152") == pytest.approx(1.52)
+
+    def test_digit_count_mismatch_rejected_not_divided(self) -> None:
+        # "5260" is FOUR digits for a one-decimal (NN.N, max 3 sig digits in
+        # the normal display) field → mask mismatch → REJECT (None).
+        # Explicitly assert it is NOT the old ÷10 result (526.0) nor 52.6.
+        result = parse_field("launch_angle", "5260")
+        assert result is None
+        assert result != 526.0  # would be the raw value
+        assert result != 5260 / 10  # 526.0 — the old blind ÷10 guess
+        assert result != 52.6
+
+    def test_too_few_digits_rejected(self) -> None:
+        # A NN.N field needs >=2 digits to place one decimal sensibly.
+        # A single digit ("5") cannot satisfy the mask → reject.
+        assert parse_field("launch_angle", "5") is None
+
+    def test_existing_decimal_is_trusted(self) -> None:
+        # A read that already contains a "." is trusted as-is, not re-masked.
+        assert parse_field("launch_angle", "52.6") == pytest.approx(52.6)
+        assert parse_field("launch_angle", "13.1") == pytest.approx(13.1)
+
+    def test_existing_decimal_large_value_trusted(self) -> None:
+        # "13.1" must stay 13.1, never collapse to 1.3.
+        assert parse_field("launch_angle", "13.1") == pytest.approx(13.1)
+
+    def test_integer_field_no_decimal_insertion(self) -> None:
+        # spin_rate is an integer display (0 decimals) → "5234" stays 5234.0,
+        # never divided or dot-inserted.
+        assert FIELD_DECIMALS["spin_rate"] == 0
+        assert parse_field("spin_rate", "5234") == pytest.approx(5234.0)
+
+    def test_integer_field_with_stray_dot_trusted(self) -> None:
+        # Even an integer field trusts an explicit dot if OCR produced one.
+        assert parse_field("spin_rate", "5234") == pytest.approx(5234.0)
+
+    def test_ball_speed_mask(self) -> None:
+        # ball_speed displays NN.N: "1234" (4 digits) is allowed → 123.4
+        # (e.g. 123.4 mph). 3 digits "526" → 52.6.
+        assert FIELD_DECIMALS["ball_speed"] == 1
+        assert parse_field("ball_speed", "526") == pytest.approx(52.6)
+        assert parse_field("ball_speed", "1234") == pytest.approx(123.4)
+
+    def test_garbage_rejected(self) -> None:
+        assert parse_field("launch_angle", "") is None
+        assert parse_field("launch_angle", "abc") is None
+
+    def test_unknown_field_falls_back_to_plain_parse(self) -> None:
+        # A field with no registered format parses plainly (no masking).
+        assert parse_field("not_a_real_metric", "123") == pytest.approx(123.0)
+
+
+class TestParseFieldSigned:
+    """Signed fields: a NON-ZERO magnitude with no R/L suffix is a parse
+    FAILURE (None), not an assumed-positive value. A missed 'L' must never
+    silently flip a left miss into a positive (right) value.
+    """
+
+    def test_signed_with_R_suffix_positive(self) -> None:
+        assert parse_field("curve", "8.5R") == pytest.approx(8.5)
+
+    def test_signed_with_L_suffix_negative(self) -> None:
+        assert parse_field("curve", "8.5L") == pytest.approx(-8.5)
+
+    def test_signed_nonzero_no_suffix_is_failure(self) -> None:
+        # The bug: a non-zero curve with the R/L lost → must be None, not +8.5.
+        result = parse_field("curve", "8.5")
+        assert result is None
+        assert result != 8.5  # explicitly NOT assumed positive
+
+    def test_signed_launch_direction_no_suffix_is_failure(self) -> None:
+        result = parse_field("launch_direction", "3.1")
+        assert result is None
+
+    def test_signed_zero_no_suffix_ok(self) -> None:
+        # A zero magnitude has no direction to lose → sign 0 is fine.
+        assert parse_field("curve", "0.0") == pytest.approx(0.0)
+
+    def test_signed_no_dot_with_suffix_uses_mask(self) -> None:
+        # launch_direction is NN.N signed: "31L" → 3.1 then negated → -3.1.
+        assert parse_field("launch_direction", "31L") == pytest.approx(-3.1)
 
 
 try:
