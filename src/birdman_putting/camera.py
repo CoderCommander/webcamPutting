@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -63,6 +64,11 @@ class Camera:
     def __init__(self, settings: CameraSettings):
         self._settings = settings
         self._cap: cv2.VideoCapture | None = None
+        # Sony PS3 Eye capture handle (pseyepy.Camera).  Mutually exclusive
+        # with the cv2 _cap path; selected via settings.camera_type == "pseye".
+        # Typed Any because pseyepy ships no type stubs.
+        self._pseye: Any = None
+        self._is_pseye: bool = False
         self._video_file: bool = False
         self._fps: float = 0.0
         self._frame_width: int = 0
@@ -99,6 +105,8 @@ class Camera:
 
     @property
     def is_open(self) -> bool:
+        if self._is_pseye:
+            return self._pseye is not None
         return self._cap is not None and self._cap.isOpened()
 
     @property
@@ -475,6 +483,64 @@ class Camera:
         )
         return True
 
+    def open_pseye(self) -> bool:
+        """Open a Sony PS3 Eye camera via the ``pseyepy`` library.
+
+        pseyepy manages its own asynchronous USB capture internally, so the
+        grab thread simply calls ``self._pseye.read()`` in a loop (see
+        :meth:`_grab_loop`).  None of the cv2/MSMF/DirectShow machinery applies.
+
+        Resolution maps "qvga" -> 320x240 (RES_SMALL, ~96fps capable) and
+        "vga" -> 640x480 (RES_LARGE).  pseyepy returns RGB frames; the grab
+        loop converts them to BGR when ``pseye_swap_rb`` is set.
+
+        Returns:
+            True if the PS3 Eye opened and the grab thread started; False on
+            any failure (library missing, no device), with a status message.
+        """
+        s = self._settings
+        self._video_file = False
+        try:
+            from pseyepy import Camera as PSEyeCamera  # type: ignore[import-untyped]
+
+            if s.pseye_resolution.lower() == "vga":
+                resolution = PSEyeCamera.RES_LARGE
+                width, height = 640, 480
+            else:
+                resolution = PSEyeCamera.RES_SMALL
+                width, height = 320, 240
+
+            self._pseye = PSEyeCamera(
+                fps=s.pseye_fps,
+                resolution=resolution,
+                colour=True,
+                exposure=s.pseye_exposure,
+                gain=s.pseye_gain,
+            )
+            self._is_pseye = True
+            self._frame_width = width
+            self._frame_height = height
+            self._fps = float(s.pseye_fps)
+
+            # Warm up: discard a couple of frames so the async USB pipeline
+            # has settled before the grab thread starts storing frames.
+            for _ in range(2):
+                self._pseye.read()
+
+            self.start_grab_thread()
+
+            self._status_message = (
+                f"Connected (PS3 Eye {width}x{height} @ {s.pseye_fps}fps)"
+            )
+            logger.info("Camera ready: %s", self._status_message)
+            return True
+        except Exception:
+            logger.exception("Failed to open PS3 Eye via pseyepy")
+            self._pseye = None
+            self._is_pseye = False
+            self._status_message = "Failed to open PS3 Eye (pseyepy)"
+            return False
+
     def start_grab_thread(self) -> None:
         """Start a dedicated thread that continuously reads frames.
 
@@ -543,6 +609,12 @@ class Camera:
             except Exception:
                 pass
 
+        # PS3 Eye (pseyepy) uses a completely different read path — it manages
+        # its own async USB capture, so none of the cv2/MSMF code below applies.
+        if self._is_pseye:
+            self._grab_loop_pseye()
+            return
+
         logger.info("Grab thread reading from existing capture")
 
         # Discard initial frames so camera properties can settle
@@ -567,6 +639,47 @@ class Camera:
                     grab_start = now
             # On failure _grab_once() has already slept a small interval, so
             # the loop does not busy-spin at 100% CPU on a dead camera.
+
+    def _grab_loop_pseye(self) -> None:
+        """Grab loop for the PS3 Eye: read pseyepy frames into _latest_frame.
+
+        pseyepy's ``read()`` returns ``(frame, timestamp)`` where ``frame`` is
+        an HxWx3 contiguous uint8 RGB array.  We convert RGB->BGR when
+        ``pseye_swap_rb`` is set (this app/OpenCV expect BGR), then store the
+        frame under ``_frame_lock`` exactly like the cv2 path so ``read()`` /
+        ``read_latest()`` work unchanged.  Failure accounting mirrors
+        :meth:`_grab_once` (back-off sleep + consecutive-failure liveness flag).
+        """
+        logger.info("Grab thread reading from PS3 Eye (pseyepy)")
+        swap_rb = self._settings.pseye_swap_rb
+
+        grab_count = 0
+        grab_start = time.perf_counter()
+        while self._grab_running and self._pseye is not None:
+            try:
+                frame, _ts = self._pseye.read()
+            except Exception:
+                frame = None
+
+            if frame is not None:
+                if swap_rb:
+                    # pseyepy returns RGB; OpenCV/this app expect BGR.
+                    frame = np.ascontiguousarray(frame[:, :, ::-1])
+                with self._frame_lock:
+                    self._latest_frame = frame
+                    self._frame_new = True
+                if self._consecutive_failures or self._read_failed:
+                    self._consecutive_failures = 0
+                    self._read_failed = False
+
+                grab_count += 1
+                now = time.perf_counter()
+                if now - grab_start >= 30.0:
+                    logger.info("Grab thread FPS: %.1f", grab_count / (now - grab_start))
+                    grab_count = 0
+                    grab_start = now
+            else:
+                self._record_grab_failure()
 
     def _grab_once(self) -> bool:
         """Perform one capture iteration: read a frame and update shared state.
@@ -646,7 +759,9 @@ class Camera:
             BGR frame as a caller-owned numpy array, or None if no fresh frame
             is available / the read failed.
         """
-        if self._cap is None:
+        # PS3 Eye has no cv2 _cap — its frames arrive via the grab thread, so
+        # only short-circuit on a missing _cap for the (non-pseye) cv2 path.
+        if self._cap is None and not self._is_pseye:
             return None
 
         # Use threaded grab if available
@@ -752,8 +867,21 @@ class Camera:
         )
 
     def release(self) -> None:
-        """Release the video capture."""
+        """Release the capture source (cv2 webcam/video or PS3 Eye).
+
+        Idempotent: safe to call when nothing is open or after a prior release.
+        """
         self.stop_grab_thread()
+        if self._is_pseye:
+            if self._pseye is not None:
+                try:
+                    self._pseye.end()
+                except Exception:
+                    logger.exception("Error closing PS3 Eye")
+                self._pseye = None
+                logger.info("PS3 Eye released")
+            self._is_pseye = False
+            return
         if self._cap is not None:
             self._cap.release()
             self._cap = None

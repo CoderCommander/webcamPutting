@@ -302,8 +302,12 @@ class PuttingApp:
                     self._window.update_camera_status("Failed to open video", "error")
                 return
         else:
-            if not self._camera.open_webcam():
-                logger.error("Failed to open webcam")
+            if self.config.camera.camera_type == "pseye":
+                opened = self._camera.open_pseye()
+            else:
+                opened = self._camera.open_webcam()
+            if not opened:
+                logger.error("Failed to open camera")
                 if self._window:
                     self._window.update_camera_status(
                         self._camera.status_message, "error"
@@ -1233,7 +1237,9 @@ class PuttingApp:
 
                     # Resize for processing, then apply rotation on the smaller frame
                     t0 = time.perf_counter()
-                    display_frame = resize_with_aspect_ratio(frame, width=640)
+                    display_frame = resize_with_aspect_ratio(
+                        frame, width=self.config.camera.process_width
+                    )
                     display_frame = self._camera.apply_rotation(display_frame)
 
                     # --- Angle calibration mode (line detection) ---
@@ -1948,8 +1954,12 @@ class PuttingApp:
                 logger.error("Failed to open video: %s", self._video_path)
                 return
         else:
-            if not self._camera.open_webcam():
-                logger.error("Failed to open webcam")
+            if self.config.camera.camera_type == "pseye":
+                opened = self._camera.open_pseye()
+            else:
+                opened = self._camera.open_webcam()
+            if not opened:
+                logger.error("Failed to open camera")
                 return
 
         if not self._gspro.connect():
@@ -2029,7 +2039,9 @@ class PuttingApp:
                         cv2.waitKey(1)
                         continue
 
-                    display_frame = resize_with_aspect_ratio(frame, width=640)
+                    display_frame = resize_with_aspect_ratio(
+                        frame, width=self.config.camera.process_width
+                    )
                     display_frame = self._camera.apply_rotation(display_frame)
                     self._pick_frame = display_frame.copy()
 

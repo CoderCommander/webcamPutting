@@ -28,8 +28,13 @@ def main() -> None:
         help="Max tracking buffer size (default: 64)",
     )
     parser.add_argument(
-        "-w", "--camera", type=int, default=None,
+        "-w", "--webcam", type=int, default=None, dest="webcam",
         help="Webcam index number (default: from config)",
+    )
+    parser.add_argument(
+        "--camera", choices=["webcam", "pseye"], default=None,
+        help="Camera source: 'webcam' (OpenCV/USB) or 'pseye' (Sony PS3 Eye "
+             "via pseyepy). Overrides [camera].camera_type from config.",
     )
     parser.add_argument(
         "-c", "--ballcolor",
@@ -117,8 +122,11 @@ def main() -> None:
         save_config(config, config_path)
 
     # Apply CLI overrides
+    if args.webcam is not None:
+        config.camera.webcam_index = args.webcam
+
     if args.camera is not None:
-        config.camera.webcam_index = args.camera
+        config.camera.camera_type = args.camera
 
     if args.ballcolor:
         config.ball.color_preset = args.ballcolor

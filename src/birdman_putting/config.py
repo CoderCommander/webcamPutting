@@ -54,6 +54,17 @@ class CameraSettings:
     darkness: int = 0
     ps4: bool = False
 
+    # Camera source selection and Sony PS3 Eye (pseyepy) settings.
+    camera_type: str = "webcam"  # "webcam" or "pseye"
+    pseye_fps: int = 60  # PS3 Eye target FPS (QVGA supports up to ~120)
+    pseye_resolution: str = "qvga"  # "qvga" (320x240) or "vga" (640x480)
+    pseye_exposure: int = 120  # 0-255; lower = shorter exposure (higher fps, darker)
+    pseye_gain: int = 40  # 0-63
+    pseye_swap_rb: bool = True  # Convert pseyepy RGB output -> BGR for OpenCV
+    # Width frames are resized to BEFORE detection. 640 suits webcams; set 320
+    # for PS3 Eye QVGA so we process its native small frames without upscaling.
+    process_width: int = 640
+
     # Camera properties (0.0 = use camera default)
     saturation: float = 0.0
     exposure: float = 0.0

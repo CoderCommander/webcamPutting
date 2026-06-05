@@ -319,7 +319,8 @@ python -m birdman_putting [OPTIONS]
 
 Options:
   -c, --ballcolor NAME    Ball color preset (yellow, orange2, red, white, etc.)
-  -w, --camera INDEX      Webcam index (0, 1, 2...)
+  -w, --webcam INDEX      Webcam index (0, 1, 2...)
+  --camera SOURCE         Camera source: webcam or pseye (Sony PS3 Eye)
   -v, --video PATH        Test with a video file instead of webcam
   -d, --debug             Show color detection mask window
   --mevo                  Enable Mevo launch monitor via OCR
