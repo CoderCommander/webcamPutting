@@ -1166,14 +1166,16 @@ class PuttingApp:
 
         zone = self.config.detection_zone
         last_ui_update = 0.0
+        last_fps_log = 0.0
 
         try:
             while self._running:
                 # Read frame
                 frame = self._camera.read()
                 if frame is None:
-                    if self._camera.is_grab_running:
-                        # Threaded grab: no new frame yet, wait briefly and retry
+                    if self._camera.is_grab_running or self._camera.is_pseye:
+                        # Threaded grab OR inline PS3 Eye read: no fresh frame
+                        # yet (or a transient hiccup), wait briefly and retry.
                         time.sleep(0.001)
                         continue
                     logger.warning("No frame received, stopping")
@@ -1634,6 +1636,14 @@ class PuttingApp:
                             self._window.after(
                                 0, self._window.update_shot_count, shot_count
                             )
+
+                    # Periodic processing-FPS log for observability (logs/monitor)
+                    if (frame_time - last_fps_log) > 5.0:
+                        last_fps_log = frame_time
+                        logger.info(
+                            "Processing FPS: %.1f (state=%s)",
+                            self._actual_fps, self._tracker.state.value,
+                        )
                 except Exception:
                     logger.exception(
                         "Processing loop: error processing frame — skipping"
@@ -2025,6 +2035,10 @@ class PuttingApp:
                 # Read frame (always read to drain camera buffer)
                 frame = self._camera.read()
                 if frame is None:
+                    if self._camera.is_pseye:
+                        # Inline PS3 Eye read: transient None, keep going.
+                        time.sleep(0.001)
+                        continue
                     break
                 saved_circ = None
                 try:

@@ -350,7 +350,7 @@ class _FakePSEyeCamera:
     """Stand-in for pseyepy.Camera used by the PS3 Eye tests.
 
     Returns an RGB frame (red channel low, blue channel high) so the
-    RGB->BGR swap in the grab loop can be verified.  Records whether end()
+    RGB->BGR swap in the inline read can be verified.  Records whether end()
     was called.
     """
 
@@ -403,8 +403,8 @@ class TestPSEyeCamera:
                 # QVGA dimensions reported.
                 assert camera.frame_size == (320, 240)
 
-                # The grab thread should populate a frame; read_latest() hands
-                # back a BGR copy (240x320x3).
+                # open_pseye primes _latest_frame (no grab thread); read_latest()
+                # hands back a BGR copy (240x320x3).
                 assert _wait_for(lambda: camera.read_latest() is not None)
                 frame = camera.read_latest()
                 assert frame is not None
@@ -434,8 +434,33 @@ class TestPSEyeCamera:
             camera.release()
             assert camera._pseye is None
 
+    def test_pseye_uses_inline_read_not_grab_thread(self) -> None:
+        """PS3 Eye must be read inline (no grab thread) to avoid GIL starvation.
+
+        pseyepy's read() blocks while holding the Python GIL, so running it on a
+        dedicated grab thread starves the processing/UI threads.  open_pseye must
+        therefore NOT start a grab thread, and read() must return BGR frames by
+        reading the device inline.
+        """
+        fake_module = self._install_fake_pseyepy()
+        with patch.dict(sys.modules, {"pseyepy": fake_module}):
+            camera = _make_camera(camera_type="pseye", pseye_resolution="qvga")
+            try:
+                assert camera.open_pseye() is True
+                # No grab thread for the PS3 Eye.
+                assert camera.is_grab_running is False
+                assert camera.is_pseye is True
+                # read() reads the device inline and returns a swapped BGR frame.
+                frame = camera.read()
+                assert frame is not None
+                assert frame.shape == (240, 320, 3)
+                assert frame[0, 0, 0] == 200  # B (from RGB B=200)
+                assert frame[0, 0, 2] == 10   # R (from RGB R=10)
+            finally:
+                camera.release()
+
     def test_no_swap_keeps_rgb_order(self) -> None:
-        """With pseye_swap_rb=False the grab loop must not swap channels."""
+        """With pseye_swap_rb=False the inline read must not swap channels."""
         fake_module = self._install_fake_pseyepy()
         with patch.dict(sys.modules, {"pseyepy": fake_module}):
             camera = _make_camera(
