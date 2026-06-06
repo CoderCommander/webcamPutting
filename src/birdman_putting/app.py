@@ -317,10 +317,7 @@ class PuttingApp:
                     self._window.update_camera_status("Failed to open video", "error")
                 return
         else:
-            if self.config.camera.camera_type == "pseye":
-                opened = self._camera.open_pseye()
-            else:
-                opened = self._camera.open_webcam()
+            opened = self._camera.open_webcam()
             if not opened:
                 logger.error("Failed to open camera")
                 if self._window:
@@ -739,9 +736,8 @@ class PuttingApp:
                 # Read frame
                 frame = self._camera.read()
                 if frame is None:
-                    if self._camera.is_grab_running or self._camera.is_pseye:
-                        # Threaded grab OR inline PS3 Eye read: no fresh frame
-                        # yet (or a transient hiccup), wait briefly and retry.
+                    if self._camera.is_grab_running:
+                        # Threaded grab: no fresh frame yet, wait briefly and retry.
                         time.sleep(0.001)
                         continue
                     logger.warning("No frame received, stopping")
@@ -1449,10 +1445,7 @@ class PuttingApp:
                 logger.error("Failed to open video: %s", self._video_path)
                 return
         else:
-            if self.config.camera.camera_type == "pseye":
-                opened = self._camera.open_pseye()
-            else:
-                opened = self._camera.open_webcam()
+            opened = self._camera.open_webcam()
             if not opened:
                 logger.error("Failed to open camera")
                 return
@@ -1520,10 +1513,6 @@ class PuttingApp:
                 # Read frame (always read to drain camera buffer)
                 frame = self._camera.read()
                 if frame is None:
-                    if self._camera.is_pseye:
-                        # Inline PS3 Eye read: transient None, keep going.
-                        time.sleep(0.001)
-                        continue
                     break
                 saved_circ = None
                 try:
