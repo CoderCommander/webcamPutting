@@ -53,13 +53,9 @@ class MainWindow(ctk.CTk):
         on_settings_changed: Callable[[], None] | None = None,
         on_auto_zone: Callable[[], None] | None = None,
         on_reset_putt: Callable[[], None] | None = None,
-        on_angle_cal: Callable[[], None] | None = None,
         on_reconnect_gspro: Callable[[], None] | None = None,
-        on_obs_calibrate: Callable[[], None] | None = None,
-        on_dist_cal: Callable[[], None] | None = None,
         on_auto_cal: Callable[[], None] | None = None,
         on_obs_auto_cal: Callable[[], None] | None = None,
-        on_cork_cal: Callable[[], None] | None = None,
     ):
         super().__init__()
 
@@ -84,16 +80,11 @@ class MainWindow(ctk.CTk):
         self._on_settings_changed = on_settings_changed
         self._on_auto_zone = on_auto_zone
         self._on_reset_putt = on_reset_putt
-        self._on_angle_cal = on_angle_cal
         self._on_reconnect_gspro = on_reconnect_gspro
-        self._on_obs_calibrate = on_obs_calibrate
-        self._on_dist_cal = on_dist_cal
         self._on_auto_cal = on_auto_cal
         self._on_obs_auto_cal = on_obs_auto_cal
-        self._on_cork_cal = on_cork_cal
         self._edit_zone_active = False
         self._auto_zone_active = False
-        self._angle_cal_active = False
         self._shot_history: list[ShotHistoryEntry] = []
         self._save_after_id: str | None = None
 
@@ -908,24 +899,6 @@ class MainWindow(ctk.CTk):
         )
         self._settings_btn.pack(side="left", padx=(8, 0))
 
-        # Angle Cal button
-        self._angle_cal_btn = ctk.CTkButton(
-            parent, text="Angle Cal", command=self._on_angle_cal_clicked,
-            width=90, font=theme.font(11),
-            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            corner_radius=theme.CORNER_RADIUS,
-        )
-        self._angle_cal_btn.pack(side="left", padx=(8, 0))
-
-        # Distance Cal button
-        self._dist_cal_btn = ctk.CTkButton(
-            parent, text="Dist Cal", command=self._on_dist_cal_clicked,
-            width=80, font=theme.font(11),
-            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            corner_radius=theme.CORNER_RADIUS,
-        )
-        self._dist_cal_btn.pack(side="left", padx=(8, 0))
-
         # Auto Cal button — one-click ppf calibration from ball radius
         self._auto_cal_btn = ctk.CTkButton(
             parent, text="Auto Cal", command=self._on_auto_cal_clicked,
@@ -946,16 +919,6 @@ class MainWindow(ctk.CTk):
         )
         self._obs_cal_button.pack(side="left", padx=(8, 0))
 
-        # Cork Cal button — physical bright markers (corks/white tape) at
-        # 1-ft intervals.  Use when projector doesn't cover full FOV.
-        self._cork_cal_button = ctk.CTkButton(
-            parent, text="Cork Cal", command=self._on_cork_cal_clicked,
-            width=80, font=theme.font(11),
-            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            corner_radius=theme.CORNER_RADIUS,
-        )
-        self._cork_cal_button.pack(side="left", padx=(8, 0))
-
         # GSPro Reconnect button
         self._reconnect_btn = ctk.CTkButton(
             parent, text="Reconnect", command=self._on_reconnect_clicked,
@@ -964,16 +927,6 @@ class MainWindow(ctk.CTk):
             corner_radius=theme.CORNER_RADIUS,
         )
         self._reconnect_btn.pack(side="left", padx=(8, 0))
-
-        # OBS Calibrate button (toggle crosshair grid)
-        self._obs_cal_active = False
-        self._obs_cal_btn = ctk.CTkButton(
-            parent, text="OBS Grid", command=self._on_obs_calibrate_clicked,
-            width=90, font=theme.font(11),
-            fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            corner_radius=theme.CORNER_RADIUS,
-        )
-        self._obs_cal_btn.pack(side="left", padx=(8, 0))
 
         # Mode label (right side)
         mode_text = self._config.connection.mode.replace("_", " ").title()
@@ -1360,11 +1313,6 @@ class MainWindow(ctk.CTk):
         if self._on_reset_putt:
             self._on_reset_putt()
 
-    def _on_dist_cal_clicked(self) -> None:
-        """Handle Distance Calibration button click."""
-        if self._on_dist_cal:
-            self._on_dist_cal()
-
     def _on_auto_cal_clicked(self) -> None:
         """Handle Auto Cal button click — ppf from ball radius."""
         if self._on_auto_cal:
@@ -1374,25 +1322,6 @@ class MainWindow(ctk.CTk):
         """Handle OBS Cal button click — ppf from projected 1-ft markers."""
         if self._on_obs_auto_cal:
             self._on_obs_auto_cal()
-
-    def _on_cork_cal_clicked(self) -> None:
-        """Handle Cork Cal button click — ppf from physical 1-ft markers."""
-        if self._on_cork_cal:
-            self._on_cork_cal()
-
-    def _on_obs_calibrate_clicked(self) -> None:
-        """Toggle OBS calibration grid."""
-        self._obs_cal_active = not self._obs_cal_active
-        if self._obs_cal_active:
-            self._obs_cal_btn.configure(
-                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
-            )
-        else:
-            self._obs_cal_btn.configure(
-                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            )
-        if self._on_obs_calibrate:
-            self._on_obs_calibrate()
 
     def _on_reconnect_clicked(self) -> None:
         """Handle GSPro Reconnect button click."""
@@ -1417,47 +1346,6 @@ class MainWindow(ctk.CTk):
                 text="Auto Zone",
                 fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
             )
-
-    def _on_angle_cal_clicked(self) -> None:
-        """Handle Angle Cal button click."""
-        if self._on_angle_cal:
-            self._on_angle_cal()
-
-    def set_angle_cal_state(self, active: bool) -> None:
-        """Update Angle Cal button appearance."""
-        self._angle_cal_active = active
-        if active:
-            self._angle_cal_btn.configure(
-                text="Cancel Cal.",
-                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
-            )
-        else:
-            self._angle_cal_btn.configure(
-                text="Angle Cal",
-                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            )
-
-    def set_dist_cal_state(self, active: bool) -> None:
-        """Update Distance Cal button appearance."""
-        if active:
-            self._dist_cal_btn.configure(
-                text="Cancel Cal.",
-                fg_color=theme.BTN_WARNING[0], hover_color=theme.BTN_WARNING[1],
-            )
-        else:
-            self._dist_cal_btn.configure(
-                text="Dist Cal",
-                fg_color=theme.BTN_SECONDARY[0], hover_color=theme.BTN_SECONDARY[1],
-            )
-
-    def show_cal_phase(self, step_label: str, detail_label: str) -> None:
-        """Display the current calibration step (informational).
-
-        The matching update_camera_status call provides the user-visible
-        status-strip text; this method is a hook for future prominent
-        overlays. Implemented as a no-op to keep the callback chain alive.
-        """
-        logger.debug("Cal phase: %s — %s", step_label, detail_label)
 
     def _on_tab_changed(self, value: str) -> None:
         """Switch between Status and Settings views in the right panel."""

@@ -117,7 +117,6 @@ class PuttingApp:
         # Calibration
         self._calibrator: AutoCalibrator | None = None
         self._calibrating: bool = False
-        self._obs_calibration_grid: bool = False
 
         # Mevo thread
         self._mevo_detector: MevoDetector | None = None
@@ -140,19 +139,6 @@ class PuttingApp:
         self._last_shot_time: float = 0.0  # When the last shot completed (for trail fade)
         self._obs_window_visible = False  # Track separate OBS overlay window state
         self._last_state_change: float = 0.0  # For stuck-state auto-reset
-
-        # Angle calibration: measure HLA of a "straight" putt to auto-set rotation
-        self._angle_cal_active = False
-        self._angle_cal_samples: list[float] = []
-        self._angle_cal_bg: np.ndarray | None = None  # Background frame for subtraction
-
-        # Distance calibration: putt known distances to derive pixels_per_foot
-        self._dist_cal_active = False
-        self._dist_cal_phase = 0  # 0 = ~5ft phase, 1 = ~10ft phase
-        self._dist_cal_phase_labels = ["~5 ft", "~10 ft"]
-        self._dist_cal_samples: list[tuple[float, float]] = []  # (pixel_distance, actual_ft)
-        self._dist_cal_putts_per_phase = 3
-        self._dist_cal_pending_px: float = 0.0  # pixel distance awaiting user input
 
         # GUI reference (set when run_gui is called)
         self._window: MainWindow | None = None
@@ -295,13 +281,9 @@ class PuttingApp:
             on_settings_changed=self._on_settings_changed,
             on_auto_zone=self._on_auto_zone,
             on_reset_putt=self.reset_putt,
-            on_angle_cal=self._on_angle_cal,
-            on_dist_cal=self._on_dist_cal,
             on_auto_cal=self._on_auto_cal,
             on_obs_auto_cal=self._on_obs_auto_cal,
-            on_cork_cal=self._on_cork_cal,
             on_reconnect_gspro=self.reconnect_gspro,
-            on_obs_calibrate=self.toggle_obs_calibration,
         )
 
         # Auto-start if camera/video is available
@@ -432,12 +414,6 @@ class PuttingApp:
 
         _threading.Thread(target=_do_reconnect, daemon=True, name="gspro-reconnect").start()
 
-    def toggle_obs_calibration(self) -> None:
-        """Toggle the OBS calibration grid overlay on/off."""
-        self._obs_calibration_grid = not self._obs_calibration_grid
-        logger.info("OBS calibration grid: %s",
-                     "ON" if self._obs_calibration_grid else "OFF")
-
     def _on_auto_zone(self) -> None:
         """Handle Auto Zone button — toggle calibration mode."""
         if self._calibrating:
@@ -459,97 +435,15 @@ class PuttingApp:
                 self._window.set_auto_zone_state(True)
             logger.info("Auto-calibration started (direction=%s)", direction)
 
-    def _on_angle_cal(self) -> None:
-        """Handle Angle Cal button — toggle angle calibration mode.
-
-        Captures a background frame (without the projected line) so that
-        background subtraction can isolate the line from carpet/ambient light.
-        """
-        if self._angle_cal_active:
-            self._angle_cal_active = False
-            self._angle_cal_samples.clear()
-            self._angle_cal_bg = None
-            if self._window:
-                self._window.set_angle_cal_state(False)
-            logger.info("Angle calibration cancelled")
-        else:
-            # Capture current frame as background (line should NOT be projected yet).
-            # Use read_latest() — a one-shot capture must not spuriously get
-            # None just because the processing thread already consumed the
-            # most-recent frame; freshness is irrelevant for a background grab.
-            frame = self._camera.read_latest()
-            if frame is not None:
-                bg = resize_with_aspect_ratio(frame, width=640)
-                self._angle_cal_bg = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
-                logger.info("Angle cal: background frame captured")
-            else:
-                self._angle_cal_bg = None
-
-            self._angle_cal_active = True
-            self._angle_cal_samples.clear()
-            self._tracker.reset()
-            if self._window:
-                self._window.set_angle_cal_state(True)
-                with contextlib.suppress(RuntimeError):
-                    self._window.after(
-                        0, self._window.update_camera_status,
-                        "Now project a straight line...", "watching",
-                    )
-            logger.info(
-                "Angle calibration started — now project a straight white line "
-                "from putting position through the gateway"
-            )
-
-    def _on_dist_cal(self) -> None:
-        """Toggle distance calibration mode.
-
-        Guides the user through putting at approximate distances (~5ft, ~10ft).
-        After each putt, a dialog asks for the actual distance. This lets
-        the user putt naturally without needing to hit exact marks.
-        """
-        if self._dist_cal_active:
-            # Cancel
-            self._dist_cal_active = False
-            self._dist_cal_phase = 0
-            self._dist_cal_samples = []
-            self._dist_cal_pending_speed = 0.0
-            if self._window:
-                self._window.set_dist_cal_state(False)
-                with contextlib.suppress(RuntimeError):
-                    self._window.after(
-                        0, self._window.update_camera_status,
-                        "Calibration cancelled", "idle",
-                    )
-            logger.info("Distance calibration cancelled")
-            return
-
-        # Guard: don't start if another calibration is active
-        if self._angle_cal_active or getattr(self, "_calibrating", False):
-            logger.warning("Cannot start distance cal while another calibration is active")
-            return
-
-        self._dist_cal_active = True
-        self._dist_cal_phase = 0
-        self._dist_cal_samples = []
-        self._dist_cal_pending_speed = 0.0
-        self._tracker.reset()
-        if self._window:
-            self._window.set_dist_cal_state(True)
-            self._show_dist_cal_phase_prompt()
-        logger.info("Distance calibration started — putt %s", self._dist_cal_phase_labels[0])
-
     def _on_auto_cal(self) -> None:
         """Compute pixels_per_foot from the detected ball radius.
 
-        Unlike the roll-based Dist Cal wizard (which depends on the user
-        correctly estimating each putt's roll distance AND is biased by
-        the constant pixel distance at which shots complete), this reads
-        the in-frame ball radius and uses the known 21.335mm golf ball
-        radius as a physical reference. One click, no putting required.
+        Reads the in-frame ball radius and uses the known 21.335mm golf
+        ball radius as a physical reference. One click, no putting required.
 
         Requires the ball to be detected and resting in the start zone.
         """
-        if self._angle_cal_active or self._dist_cal_active:
+        if self._calibrating:
             logger.warning("Cannot run Auto Cal while another calibration is active")
             if self._window:
                 with contextlib.suppress(RuntimeError):
@@ -621,7 +515,7 @@ class PuttingApp:
         from birdman_putting.detection import resize_with_aspect_ratio
         from birdman_putting.ppf_calibration import detect_calibration_markers
 
-        if self._angle_cal_active or self._dist_cal_active:
+        if self._calibrating:
             self._notify_cam_status("Auto Cal: cancel other cal first", "error")
             return
 
@@ -788,112 +682,6 @@ class PuttingApp:
             "ok",
         )
 
-    def _on_cork_cal(self) -> None:
-        """Calibrate pixels_per_foot from physical bright markers
-        (corks, white tape, anything bright) placed at 1-ft intervals
-        along the putt line.  Works without a projector — useful when
-        the projector doesn't cover the camera's full FOV.
-
-        Workflow:
-          1. User places 6-8 white/bright markers at exactly 1 ft
-             intervals along the putt path
-          2. User clicks Cork Cal
-          3. Birdman captures a frame, detects bright spots in the
-             detection-zone Y band (white-luma threshold, no hue filter)
-          4. Saves marker X-positions to config for per-x ppf interp
-        """
-        from birdman_putting.detection import resize_with_aspect_ratio
-        from birdman_putting.ppf_calibration import detect_calibration_markers
-
-        if self._angle_cal_active or self._dist_cal_active:
-            self._notify_cam_status("Cork Cal: cancel other cal first", "error")
-            return
-        if not self._running or self._camera is None:
-            self._notify_cam_status("Cork Cal: start the camera first", "error")
-            return
-
-        # One-shot capture: read_latest() returns the most-recent frame
-        # regardless of freshness, so we don't spuriously get None just
-        # because the processing thread already consumed the latest frame.
-        frame = self._camera.read_latest()
-        if frame is None:
-            self._notify_cam_status("Cork Cal: no frame from camera", "error")
-            return
-        display = resize_with_aspect_ratio(frame, width=640)
-        display = self._camera.apply_rotation(display)
-
-        zone = self.config.detection_zone
-        band_y_center = (zone.y1 + zone.y2) // 2
-        # No hue filter — accept any bright (white/cork) marker.
-        result = detect_calibration_markers(
-            display,
-            band_y_center=band_y_center,
-            band_half_height=60,
-            luma_threshold=180,
-        )
-        # Drop detections inside the start zone (the ball itself is
-        # there during cal and would be picked up as a marker).
-        filtered = [
-            (cx, cy) for (cx, cy) in result.centers
-            if not (zone.start_x1 <= cx <= zone.start_x2)
-        ]
-        if len(filtered) != len(result.centers):
-            logger.info(
-                "Cork Cal: filtered %d detections inside start zone",
-                len(result.centers) - len(filtered),
-            )
-
-        if len(filtered) < 2:
-            # Save debug frame for visual inspection
-            import cv2 as _cv2
-            try:
-                annotated = display.copy()
-                _cv2.rectangle(
-                    annotated,
-                    (0, max(0, band_y_center - 60)),
-                    (annotated.shape[1] - 1,
-                     min(annotated.shape[0] - 1, band_y_center + 60)),
-                    (0, 255, 255), 1,
-                )
-                _cv2.imwrite("cork_cal_debug.png", annotated)
-                logger.info("Cork Cal: saved debug frame to cork_cal_debug.png")
-            except Exception:
-                pass
-            self._notify_cam_status(
-                f"Cork Cal: only {len(filtered)} markers found — "
-                "check corks/lighting",
-                "error",
-            )
-            return
-
-        # Compute spacings, pick median ppf
-        marker_xs = sorted(float(cx) for (cx, _cy) in filtered)
-        diffs = [marker_xs[i + 1] - marker_xs[i]
-                 for i in range(len(marker_xs) - 1)]
-        # Robust median: drop spacings >2x the smallest plausible one
-        # (handles corks placed at non-uniform spacing or stray detections)
-        sorted_diffs = sorted(diffs)
-        p25 = sorted_diffs[len(sorted_diffs) // 4] if sorted_diffs else 0
-        kept = [d for d in diffs if d <= p25 * 1.5] if p25 > 0 else diffs
-        median_d = float(np.median(kept)) if kept else float(np.median(diffs))
-
-        self.config.shot.pixels_per_foot = round(median_d, 2)
-        self.config.shot.speed_calibration_factor = 1.0
-        self.config.shot.calibration_markers = [round(x, 2) for x in marker_xs]
-        save_config(self.config)
-
-        diffs_str = ", ".join(f"{d:.0f}" for d in diffs)
-        logger.info(
-            "Cork Cal: %d markers, spacings=[%s], median=%.2f -> "
-            "pixels_per_foot=%.2f, calibration_markers=%s",
-            len(filtered), diffs_str, median_d, median_d,
-            [round(x, 1) for x in marker_xs],
-        )
-        self._notify_cam_status(
-            f"Cork Cal: ppf={median_d:.1f} ({len(filtered)} markers, full-FOV cal)",
-            "ok",
-        )
-
     def _notify_cam_status(self, status: str, state: str) -> None:
         """Push a status update to the camera-status strip if the GUI exists."""
         if self._window is None:
@@ -902,267 +690,6 @@ class PuttingApp:
             self._window.after(
                 0, self._window.update_camera_status, status, state,
             )
-
-    def _show_dist_cal_phase_prompt(self) -> None:
-        """Update all UI elements to show the current calibration phase."""
-        if not self._window:
-            return
-        phase = self._dist_cal_phase
-        label = self._dist_cal_phase_labels[phase]
-        phase_start = phase * self._dist_cal_putts_per_phase
-        phase_n = len(self._dist_cal_samples) - phase_start
-        total_phases = len(self._dist_cal_phase_labels)
-
-        with contextlib.suppress(RuntimeError):
-            self._window.after(
-                0, self._window.show_cal_phase,
-                f"STEP {phase + 1} of {total_phases}",
-                f"Putt {label} ({phase_n}/{self._dist_cal_putts_per_phase})",
-            )
-            self._window.after(
-                0, self._window.update_camera_status,
-                f"CALIBRATING: Putt {label} — {phase_n}/{self._dist_cal_putts_per_phase} done",
-                "watching",
-            )
-
-    def _process_dist_cal_shot(self, pixel_distance: float) -> None:
-        """Record a calibration putt and prompt user for actual distance."""
-        if pixel_distance < 5:
-            return  # Too small to be a real putt
-
-        self._dist_cal_pending_px = pixel_distance
-        phase_label = self._dist_cal_phase_labels[self._dist_cal_phase]
-
-        logger.info("Dist cal: putt traveled %.0f pixels — prompting for distance", pixel_distance)
-
-        if self._window:
-            with contextlib.suppress(RuntimeError):
-                self._window.after(0, self._show_dist_cal_dialog, phase_label)
-
-    def _show_dist_cal_dialog(self, phase_label: str) -> None:
-        """Show a dialog asking the user for the actual putt distance."""
-        import customtkinter as ctk
-
-        phase = self._dist_cal_phase + 1
-        total = len(self._dist_cal_phase_labels)
-
-        dialog = ctk.CTkInputDialog(
-            text=(
-                f"Step {phase}/{total}: How many feet did that putt roll?\n"
-                f"(aiming for {phase_label})"
-            ),
-            title=f"Distance Cal — Step {phase}/{total}",
-        )
-        result = dialog.get_input()
-
-        if result is None or not self._dist_cal_active:
-            return
-
-        try:
-            actual_ft = float(result)
-        except ValueError:
-            logger.warning("Dist cal: invalid input '%s', skipping putt", result)
-            return
-
-        if actual_ft <= 0:
-            logger.warning("Dist cal: distance must be positive, skipping")
-            return
-
-        self._dist_cal_samples.append((self._dist_cal_pending_px, actual_ft))
-        self._dist_cal_pending_px = 0.0
-
-        # Count putts in current phase
-        phase_start = self._dist_cal_phase * self._dist_cal_putts_per_phase
-        phase_n = len(self._dist_cal_samples) - phase_start
-
-        logger.info(
-            "Dist cal: recorded %.1f ft at %.0f px — step %d putt %d/%d",
-            actual_ft, self._dist_cal_samples[-1][0],
-            self._dist_cal_phase + 1, phase_n, self._dist_cal_putts_per_phase,
-        )
-
-        if phase_n < self._dist_cal_putts_per_phase:
-            self._show_dist_cal_phase_prompt()
-        elif self._dist_cal_phase + 1 < len(self._dist_cal_phase_labels):
-            self._dist_cal_phase += 1
-            self._tracker.reset()
-            self._show_dist_cal_phase_prompt()
-            logger.info("Dist cal: advancing to step %d — %s",
-                        self._dist_cal_phase + 1,
-                        self._dist_cal_phase_labels[self._dist_cal_phase])
-        else:
-            self._apply_dist_cal()
-
-    def _apply_dist_cal(self) -> None:
-        """Compute pixels_per_foot from collected samples and save."""
-        ratios: list[float] = []
-        for pixel_dist, actual_ft in self._dist_cal_samples:
-            if pixel_dist > 5 and actual_ft > 0:
-                ratios.append(pixel_dist / actual_ft)
-
-        if not ratios:
-            logger.error("Dist cal: no valid samples — aborting")
-            self._dist_cal_active = False
-            return
-
-        avg_ppf = sum(ratios) / len(ratios)
-
-        self.config.shot.pixels_per_foot = round(avg_ppf, 2)
-        # Reset speed_calibration_factor since pixels_per_foot replaces it
-        self.config.shot.speed_calibration_factor = 1.0
-        save_config(self.config)
-
-        self._dist_cal_active = False
-        self._dist_cal_phase = 0
-        self._dist_cal_samples = []
-
-        if self._window:
-            self._window.set_dist_cal_state(False)
-            with contextlib.suppress(RuntimeError):
-                self._window.after(
-                    0, self._window.update_camera_status,
-                    f"Cal done: {avg_ppf:.1f} px/ft", "ok",
-                )
-
-        logger.info(
-            "Distance calibration complete: pixels_per_foot=%.2f (from %d samples)",
-            avg_ppf, len(ratios),
-        )
-
-    @staticmethod
-    def _detect_line_angle(
-        frame: np.ndarray,
-        bg_gray: np.ndarray | None = None,
-    ) -> float | None:
-        """Detect the dominant straight line in the frame and return its angle.
-
-        When bg_gray is provided, uses background subtraction to isolate the
-        projected line from carpet, ambient light, and other bright surfaces.
-        Falls back to absolute brightness thresholding when no background
-        frame is available.
-
-        Returns the angle in degrees of the longest detected line, or None.
-        """
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        if bg_gray is not None and bg_gray.shape == gray.shape:
-            # Background subtraction: only pixels brighter than the background
-            diff = cv2.subtract(gray, bg_gray)
-            # Threshold the difference — the projected line adds ~50+ brightness
-            _, mask = cv2.threshold(diff, 40, 255, cv2.THRESH_BINARY)
-        else:
-            # Fallback: absolute brightness threshold
-            _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-
-        # Clean up noise
-        kernel = np.ones((3, 3), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
-
-        # Detect edges
-        edges = cv2.Canny(mask, 50, 150)
-
-        # Hough line detection
-        lines = cv2.HoughLinesP(
-            edges, rho=1, theta=np.pi / 180, threshold=50,
-            minLineLength=80, maxLineGap=20,
-        )
-
-        if lines is None or len(lines) == 0:
-            return None
-
-        # Find the longest line
-        best_len = 0.0
-        best_angle = 0.0
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-            if length > best_len:
-                best_len = length
-                # atan2(-dy, dx) with inverted Y for screen coords
-                best_angle = math.degrees(math.atan2(-(y2 - y1), x2 - x1))
-
-        logger.debug(
-            "Line detected: angle=%.2f°, length=%.0fpx", best_angle, best_len,
-        )
-        return best_angle
-
-    def _process_angle_cal_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Process a frame during angle calibration — detect line, draw overlay.
-
-        Accumulates angle samples over multiple frames and auto-applies
-        when enough consistent readings are collected.
-        """
-        display = frame.copy()
-        angle = self._detect_line_angle(frame, bg_gray=self._angle_cal_bg)
-
-        h, w = display.shape[:2]
-        if angle is not None:
-            self._angle_cal_samples.append(angle)
-
-            # Draw the detected line direction on the frame
-            cx, cy = w // 2, h // 2
-            length = min(w, h) // 3
-            rad = math.radians(angle)
-            x2 = int(cx + length * math.cos(rad))
-            y2 = int(cy - length * math.sin(rad))  # invert Y
-            cv2.line(display, (cx, cy), (x2, y2), (0, 255, 0), 2, cv2.LINE_AA)
-
-            n = len(self._angle_cal_samples)
-            avg = sum(self._angle_cal_samples) / n
-            status = f"ANGLE CAL: {angle:+.1f}° (avg {avg:+.1f}°, {n} samples)"
-            cv2.putText(
-                display, status, (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1, cv2.LINE_AA,
-            )
-
-            # Apply after 30 consistent frames (~0.5s at 60fps)
-            if n >= 30:
-                self._apply_angle_cal()
-        else:
-            cv2.putText(
-                display, "ANGLE CAL: No line detected — project a white line",
-                (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1,
-                cv2.LINE_AA,
-            )
-            # Clear stale samples if line is lost
-            self._angle_cal_samples.clear()
-
-        # Green border to indicate calibration mode
-        cv2.rectangle(display, (0, 0), (w - 1, h - 1), (0, 255, 0), 2)
-        return display
-
-    def _apply_angle_cal(self) -> None:
-        """Apply angle calibration: adjust camera rotation to zero out line angle."""
-        if not self._angle_cal_samples:
-            return
-
-        avg_angle = sum(self._angle_cal_samples) / len(self._angle_cal_samples)
-        # A perfectly horizontal line should be 0°. The deviation IS the
-        # camera rotation error.
-        old_rotation = self.config.camera.rotation
-        new_rotation = old_rotation - avg_angle
-        new_rotation = max(-45.0, min(45.0, new_rotation))
-
-        self.config.camera.rotation = new_rotation
-        self._angle_cal_active = False
-        self._angle_cal_samples.clear()
-        self._angle_cal_bg = None
-
-        save_config(self.config)
-        logger.info(
-            "Angle calibration applied: rotation %.1f° → %.1f° "
-            "(line angle was %.2f°)",
-            old_rotation, new_rotation, avg_angle,
-        )
-
-        if self._window:
-            with contextlib.suppress(RuntimeError):
-                self._window.set_angle_cal_state(False)
-                self._window.after(
-                    0, self._window.update_camera_status,
-                    f"Cal done: rot={new_rotation:.1f}°", "ok",
-                )
 
     def _processing_loop(self) -> None:
         """Background thread: capture → detect → track → annotate → queue."""
@@ -1282,18 +809,6 @@ class PuttingApp:
                         frame, width=self.config.camera.process_width
                     )
                     display_frame = self._camera.apply_rotation(display_frame)
-
-                    # --- Angle calibration mode (line detection) ---
-                    if self._angle_cal_active:
-                        display_frame = self._process_angle_cal_frame(display_frame)
-                        try:
-                            self._frame_queue.put_nowait(display_frame)
-                        except queue.Full:
-                            with contextlib.suppress(queue.Empty):
-                                self._frame_queue.get_nowait()
-                            with contextlib.suppress(queue.Full):
-                                self._frame_queue.put_nowait(display_frame)
-                        continue
 
                     # --- Calibration mode ---
                     if self._calibrating and self._calibrator:
@@ -1609,7 +1124,6 @@ class PuttingApp:
                         active_trail=active_trail,
                         last_shot_trail=self._tracker.last_shot_positions,
                         obs_show_zones=self.config.overlay.obs_show_zones,
-                        obs_calibration_grid=self._obs_calibration_grid,
                         trail_color_name=self.config.overlay.trail_color,
                         active_trail_color_name=self.config.overlay.active_trail_color,
                         trail_brightness=trail_brightness,
@@ -1857,75 +1371,7 @@ class PuttingApp:
                     with self._mevo_last_lock:
                         self._mevo_last = None
 
-        # Distance calibration: record pixel distance and skip GSPro send
-        if self._dist_cal_active:
-            dx = shot_result.end_position[0] - shot_result.start_position[0]
-            dy = shot_result.end_position[1] - shot_result.start_position[1]
-            pixel_dist = math.sqrt(dx * dx + dy * dy)
-
-            # Reject saturated samples.  The tracker has TWO completion
-            # paths and they yield different start_position values:
-            #
-            #   1. ENTERED → exit:  start_position = gateway entry pos.
-            #      Exit triggers when travel_from_entry >= min_exit_distance_px,
-            #      so end_x ≈ entry_x + min_exit. Saturated.
-            #
-            #   2. past_gateway:    start_position = ball-rest pos.
-            #      Triggers when ball jumps past gateway in one frame.
-            #      Saturated unless ball ROLLED to a stop in-frame
-            #      (which would have completed via ENTERED-timeout, not
-            #      via exit trigger — those have actual end positions).
-            #
-            # The robust check: any shot that completed via an exit
-            # trigger (vs. timeout / ball-stop detection) is saturated
-            # for calibration purposes, because end_x is pinned at the
-            # threshold not at the ball's rest. We detect this by
-            # checking whether end_x is approximately at (entry_x + min_exit)
-            # OR (start_x_rest + (gateway_x - start_x_rest) + min_exit) —
-            # both reduce to "end_x is near a fixed offset from gateway".
-            min_exit = float(self.config.shot.min_exit_distance_px)
-            z = self.config.detection_zone
-            if z.direction == "left_to_right":
-                gateway_x = z.start_x2 + z.gateway_width
-                # Saturation band: end_x within ~15% of (gateway_x + min_exit)
-                expected_satur_end_x = gateway_x + min_exit
-                end_x_distance_from_satur = abs(
-                    shot_result.end_position[0] - expected_satur_end_x,
-                )
-            else:
-                gateway_x = z.start_x1 - z.gateway_width
-                expected_satur_end_x = gateway_x - min_exit
-                end_x_distance_from_satur = abs(
-                    shot_result.end_position[0] - expected_satur_end_x,
-                )
-            saturation_margin = min_exit * 0.30  # ±15 px for min_exit=50
-            travel = abs(shot_result.end_position[0] - shot_result.start_position[0])
-            if end_x_distance_from_satur <= saturation_margin:
-                logger.warning(
-                    "Dist Cal: rejecting saturated sample "
-                    "(end_x=%d ≈ saturation band %d±%d, travel=%dpx). "
-                    "Shot completed at the exit trigger — end position is "
-                    "fixed at (gateway+%dpx), so this sample tells us nothing "
-                    "about the real putt distance. Use Auto Cal for "
-                    "ball-radius-based calibration, OR putt softer so the "
-                    "ball stops inside the frame.",
-                    int(shot_result.end_position[0]),
-                    int(expected_satur_end_x), int(saturation_margin),
-                    int(travel), int(min_exit),
-                )
-                if self._window:
-                    with contextlib.suppress(RuntimeError):
-                        self._window.after(
-                            0, self._window.update_camera_status,
-                            "Sample rejected (saturated) — putt softer or use Auto Cal",
-                            "error",
-                        )
-                return
-
-            self._process_dist_cal_shot(pixel_dist)
-            return
-
-        # Apply speed calibration factor (from Dist Cal wizard)
+        # Apply speed calibration factor
         if self.config.shot.speed_calibration_factor != 1.0:
             shot_data = ShotData(
                 speed_mph=round(shot_data.speed_mph * self.config.shot.speed_calibration_factor, 2),
@@ -2306,7 +1752,6 @@ class PuttingApp:
                         active_trail=active_trail,
                         last_shot_trail=self._tracker.last_shot_positions,
                         obs_show_zones=self.config.overlay.obs_show_zones,
-                        obs_calibration_grid=self._obs_calibration_grid,
                         trail_color_name=self.config.overlay.trail_color,
                         active_trail_color_name=self.config.overlay.active_trail_color,
                         headless=True,
