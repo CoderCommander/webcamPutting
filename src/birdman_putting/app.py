@@ -665,7 +665,13 @@ class PuttingApp:
                 )
                 self._obs.switch_to_scene(prior_scene or self.config.obs.idle_scene)
                 return
-            display = resize_with_aspect_ratio(frame, width=640)
+            # Use the SAME resize width as the processing loop — the detection
+            # zone coordinates (band_y_center below) are in process_width space,
+            # so resizing to a different width (was hard-coded 640) puts the
+            # marker-detection band at the wrong height and finds 0 markers.
+            display = resize_with_aspect_ratio(
+                frame, width=self.config.camera.process_width
+            )
             display = self._camera.apply_rotation(display)
 
             zone = self.config.detection_zone
