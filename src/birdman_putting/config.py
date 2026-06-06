@@ -48,7 +48,8 @@ class CameraSettings:
     fps_override: int = 0
     width: int = 0
     height: int = 0
-    flip_image: bool = False
+    flip_image: bool = False  # Horizontal flip (left-handed players)
+    flip_vertical: bool = False  # Vertical flip; with flip_image == 180° rotation
     flip_view: bool = False
     rotation: float = 0.0  # Degrees (-45 to +45), clockwise-positive
     darkness: int = 0
@@ -357,6 +358,7 @@ def migrate_from_ini(ini_path: Path, config: AppConfig | None = None) -> AppConf
 
     # Camera
     cfg.camera.flip_image = bool(get_int("flip", 0))
+    cfg.camera.flip_vertical = bool(get_int("flipvert", 0))
     cfg.camera.flip_view = bool(get_int("flipview", 0))
     cfg.camera.darkness = get_int("darkness", 0)
     cfg.camera.mjpeg = bool(get_int("mjpeg", 1))

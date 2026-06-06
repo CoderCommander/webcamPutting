@@ -341,6 +341,11 @@ class MainWindow(ctk.CTk):
             lambda v: setattr(self._config.camera, "flip_image", v),
         )
 
+        self._flip_vertical_var = self._add_live_checkbox(
+            scroll, "Flip Vertical (Upside-down)", c.flip_vertical,
+            lambda v: setattr(self._config.camera, "flip_vertical", v),
+        )
+
         self._rotation_entry = self._add_entry(
             scroll, "Rotation:", str(c.rotation), width=60,
         )
@@ -349,6 +354,29 @@ class MainWindow(ctk.CTk):
             font=theme.font(10), text_color=theme.TEXT_MUTED,
         ).pack(side="left", padx=2)
         self._bind_entry_apply(self._rotation_entry, self._apply_rotation)
+
+        # PS3 Eye live exposure/gain — applied on the camera read thread, so
+        # they take effect immediately (type a value + Enter, watch the preview).
+        self._pseye_exposure_entry = self._add_entry(
+            scroll, "PS3 Eye Exposure:", str(c.pseye_exposure), width=60,
+        )
+        ctk.CTkLabel(
+            self._pseye_exposure_entry.master,
+            text="(0-255, lower if washed out)",
+            font=theme.font(10), text_color=theme.TEXT_MUTED,
+        ).pack(side="left", padx=2)
+        self._bind_entry_apply(
+            self._pseye_exposure_entry, self._apply_pseye_exposure,
+        )
+
+        self._pseye_gain_entry = self._add_entry(
+            scroll, "PS3 Eye Gain:", str(c.pseye_gain), width=60,
+        )
+        ctk.CTkLabel(
+            self._pseye_gain_entry.master, text="(0-63)",
+            font=theme.font(10), text_color=theme.TEXT_MUTED,
+        ).pack(side="left", padx=2)
+        self._bind_entry_apply(self._pseye_gain_entry, self._apply_pseye_gain)
 
         self._autofocus_var = self._add_live_checkbox(
             scroll, "Autofocus", bool(c.autofocus),
@@ -1152,6 +1180,28 @@ class MainWindow(ctk.CTk):
 
         entry.bind("<Return>", apply)
         entry.bind("<FocusOut>", apply)
+
+    def _apply_pseye_exposure(self, value: str) -> None:
+        """Apply PS3 Eye exposure from entry (int 0-255, live on read thread)."""
+        try:
+            v = int(float(value))
+        except ValueError:
+            return
+        v = max(0, min(255, v))
+        self._config.camera.pseye_exposure = v
+        self._pseye_exposure_entry.delete(0, "end")
+        self._pseye_exposure_entry.insert(0, str(v))
+
+    def _apply_pseye_gain(self, value: str) -> None:
+        """Apply PS3 Eye gain from entry (int 0-63, live on read thread)."""
+        try:
+            v = int(float(value))
+        except ValueError:
+            return
+        v = max(0, min(63, v))
+        self._config.camera.pseye_gain = v
+        self._pseye_gain_entry.delete(0, "end")
+        self._pseye_gain_entry.insert(0, str(v))
 
     # ---- Settings Callbacks ----
 

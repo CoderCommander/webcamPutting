@@ -178,11 +178,44 @@ class PuttingApp:
             return
         try:
             import ctypes
+            import ctypes.wintypes as wt
+            import os as _os
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            # Declare handle types so the 64-bit current-process pseudo-handle
+            # isn't truncated to 32 bits — that truncation silently dropped the
+            # priority on this build (process stayed at NORMAL despite the call).
+            kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+            kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, wt.DWORD]
+            kernel32.SetProcessAffinityMask.argtypes = [
+                ctypes.c_void_p, ctypes.c_size_t,
+            ]
             HIGH_PRIORITY_CLASS = 0x00000080
             handle = kernel32.GetCurrentProcess()
-            kernel32.SetPriorityClass(handle, HIGH_PRIORITY_CLASS)
-            logger.info("Process priority set to HIGH")
+            if kernel32.SetPriorityClass(handle, HIGH_PRIORITY_CLASS):
+                logger.info("Process priority set to HIGH")
+            else:
+                logger.warning("SetPriorityClass(HIGH) failed")
+
+            # Reserve the top CPU cores for birdman so a GPU/CPU-heavy foreground
+            # app (GSPro, OBS) can't crowd the camera pipeline off every core.
+            # Pinning to a dedicated subset + HIGH priority lets birdman's threads
+            # preempt others there.  Adaptive: reserve up to 3 cores (or ~1/4 on
+            # smaller machines).  NOTE: for FULL isolation, GSPro/OBS should also
+            # be kept OFF these cores (see CLAUDE.md / launch notes).
+            try:
+                ncpu = _os.cpu_count() or 1
+                reserve = min(3, max(1, ncpu // 4))
+                if ncpu > reserve:
+                    mask = ((1 << reserve) - 1) << (ncpu - reserve)
+                    if kernel32.SetProcessAffinityMask(handle, mask):
+                        logger.info(
+                            "CPU affinity: reserved top %d of %d cores "
+                            "(mask 0x%X)", reserve, ncpu, mask,
+                        )
+                    else:
+                        logger.debug("SetProcessAffinityMask failed")
+            except Exception:
+                logger.debug("CPU affinity set failed", exc_info=True)
 
             # Disable Windows 11 EcoQoS / power throttling for this process
             try:

@@ -69,6 +69,12 @@ class Camera:
         # Typed Any because pseyepy ships no type stubs.
         self._pseye: Any = None
         self._is_pseye: bool = False
+        # Last exposure/gain pushed to the PS3 Eye hardware.  The read thread
+        # re-applies whenever the (shared) settings values change, so the UI can
+        # tune exposure/gain live without reopening the camera.  -1 forces the
+        # first apply.
+        self._applied_exposure: int = -1
+        self._applied_gain: int = -1
         self._video_file: bool = False
         self._fps: float = 0.0
         self._frame_width: int = 0
@@ -791,6 +797,28 @@ class Camera:
         if self._pseye is None:
             return None
 
+        # Apply any live exposure/gain changes requested via the UI.  The UI
+        # writes pseye_exposure/pseye_gain on the shared settings object; we push
+        # them to the OV534 here so ALL camera access stays on this one thread
+        # (concurrent libusb control + bulk transfers from two threads risk a
+        # native crash).  Cheap int compares when nothing changed.
+        if self._settings.pseye_exposure != self._applied_exposure:
+            try:
+                self._pseye.exposure = int(self._settings.pseye_exposure)
+                self._applied_exposure = int(self._settings.pseye_exposure)
+                logger.info("PS3 Eye exposure -> %d", self._applied_exposure)
+            except Exception:
+                logger.exception("Failed to set PS3 Eye exposure")
+                self._applied_exposure = int(self._settings.pseye_exposure)
+        if self._settings.pseye_gain != self._applied_gain:
+            try:
+                self._pseye.gain = int(self._settings.pseye_gain)
+                self._applied_gain = int(self._settings.pseye_gain)
+                logger.info("PS3 Eye gain -> %d", self._applied_gain)
+            except Exception:
+                logger.exception("Failed to set PS3 Eye gain")
+                self._applied_gain = int(self._settings.pseye_gain)
+
         frame = None
         for _ in range(3):  # tolerate a transient hiccup without stopping the app
             try:
@@ -939,9 +967,14 @@ class Camera:
             d = self._settings.darkness
             cv2.normalize(frame, frame, 0 - d, 255 - d, norm_type=cv2.NORM_MINMAX)
 
-        # Flip if configured
-        if self._settings.flip_image and not self._video_file:
-            frame = cv2.flip(frame, 1)
+        # Flip if configured. flip_image = horizontal (code 1), flip_vertical =
+        # vertical (code 0); both together == a 180° rotation (use when the
+        # camera is mounted inverted, e.g. on a different port/orientation).
+        if not self._video_file:
+            if self._settings.flip_image:
+                frame = cv2.flip(frame, 1)
+            if self._settings.flip_vertical:
+                frame = cv2.flip(frame, 0)
 
         return frame
 
@@ -1004,7 +1037,17 @@ class Camera:
         with self._capture_lock:
             if self._cap is None:  # released while waiting for the lock
                 return
+            # Auto-exposure MODE must be applied BEFORE the exposure VALUE.  On
+            # most UVC/DirectShow cameras, setting CAP_PROP_EXPOSURE while still
+            # in auto mode is silently ignored — and _CAMERA_PROPS happens to
+            # list "exposure" before "auto_exposure".  Apply the mode first.
+            ae = getattr(self._settings, "auto_exposure", 0.0)
+            if ae != 0.0:
+                self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, ae)
+                logger.debug("Set camera auto_exposure = %s (before exposure)", ae)
             for field_name, prop_id in _CAMERA_PROPS.items():
+                if field_name == "auto_exposure":
+                    continue  # already applied above, before exposure
                 value = getattr(self._settings, field_name, 0.0)
                 if value != 0.0:
                     self._cap.set(prop_id, value)
