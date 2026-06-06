@@ -39,7 +39,7 @@ class MainWindow(ctk.CTk):
     │      (640x360)            │  (tab content)    │
     │                           │                   │
     ├───────────────────────────┴───────────────────┤
-    │  [Color ▼]  [Start/Stop]  [Edit Zone]         │
+    │  [Color ▼]  [Edit Zone]  [Settings]           │
     └───────────────────────────────────────────────┘
     """
 
@@ -91,7 +91,6 @@ class MainWindow(ctk.CTk):
         self._on_auto_cal = on_auto_cal
         self._on_obs_auto_cal = on_obs_auto_cal
         self._on_cork_cal = on_cork_cal
-        self._is_running = False
         self._edit_zone_active = False
         self._auto_zone_active = False
         self._angle_cal_active = False
@@ -530,11 +529,6 @@ class MainWindow(ctk.CTk):
         # --- CAMERA (ADVANCED) ---
         self._section_label(scroll, "CAMERA (ADVANCED)")
 
-        self._flip_view_var = self._add_live_checkbox(
-            scroll, "Flip View", c.flip_view,
-            lambda v: setattr(self._config.camera, "flip_view", v),
-        )
-
         self._add_live_slider(
             scroll, "Darkness", 0, 200, c.darkness,
             lambda v: setattr(self._config.camera, "darkness", v),
@@ -624,9 +618,6 @@ class MainWindow(ctk.CTk):
             self._http_url_entry,
             lambda v: setattr(self._config.connection, "http_url", v.strip()),
         )
-
-        # Connection mode (simplified — HTTP middleware removed)
-        self._mode_var = ctk.StringVar(value=conn.mode)
 
         # --- MEVO ---
         self._section_label(scroll, "MEVO (LAUNCH MONITOR)")
@@ -1223,13 +1214,6 @@ class MainWindow(ctk.CTk):
         else:
             self._exposure_slider.configure(state="normal")
 
-    def _on_mode_changed(self) -> None:
-        """Handle connection mode radio change."""
-        self._config.connection.mode = self._mode_var.get()
-        mode_text = self._mode_var.get().replace("_", " ").title()
-        self._mode_label.configure(text=mode_text)
-        self._schedule_save()
-
     def _apply_webcam_index(self, value: str) -> None:
         """Parse and apply webcam index from entry."""
         with contextlib.suppress(ValueError):
@@ -1415,17 +1399,6 @@ class MainWindow(ctk.CTk):
                 True, self._config.detection_zone,
                 on_zone_changed=self._on_setting_changed,
             )
-
-    def _toggle_running(self) -> None:
-        """Toggle start/stop (auto-started, kept for programmatic use)."""
-        if self._is_running:
-            self._is_running = False
-            if self._on_stop:
-                self._on_stop()
-        else:
-            self._is_running = True
-            if self._on_start:
-                self._on_start()
 
     def _on_color_selected(self, label: str) -> None:
         """Handle ball color dropdown change."""
