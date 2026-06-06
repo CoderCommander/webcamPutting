@@ -50,7 +50,6 @@ class CameraSettings:
     height: int = 0
     flip_image: bool = False  # Horizontal flip (left-handed players)
     flip_vertical: bool = False  # Vertical flip; with flip_image == 180° rotation
-    flip_view: bool = False
     rotation: float = 0.0  # Degrees (-45 to +45), clockwise-positive
     darkness: int = 0
     ps4: bool = False
@@ -106,7 +105,6 @@ class ShotSettings:
     max_speed_mph: float = 25.0
     min_time_seconds: float = 0.5
     max_hla_degrees: float = 40.0
-    hla_consistency_threshold: float = 30.0
     min_exit_distance_px: int = 50  # Minimum pixel distance beyond gateway to count as exit
     extended_tracking: bool = False  # Track ball across full frame after start
     stimpmeter: float = 10.0  # Green speed rating for putt distance estimation
@@ -132,18 +130,6 @@ class ConnectionSettings:
     gspro_port: int = 921
     http_url: str = "http://127.0.0.1:8888/putting"
     device_id: str = "BirdmanPutting"
-    heartbeat_interval: float = 5.0  # seconds
-
-
-@dataclass
-class ReplaySettings:
-    """Replay camera configuration."""
-
-    enabled: bool = False
-    show_replay: bool = True
-    camera_index: int = 0
-    ps4: bool = False
-    duration_seconds: float = 3.0
 
 
 @dataclass
@@ -242,7 +228,6 @@ class AppConfig:
     ball: BallSettings = field(default_factory=BallSettings)
     shot: ShotSettings = field(default_factory=ShotSettings)
     connection: ConnectionSettings = field(default_factory=ConnectionSettings)
-    replay: ReplaySettings = field(default_factory=ReplaySettings)
     mevo: MevoSettings = field(default_factory=MevoSettings)
     obs: OBSSettings = field(default_factory=OBSSettings)
     overlay: OverlaySettings = field(default_factory=OverlaySettings)
@@ -359,7 +344,6 @@ def migrate_from_ini(ini_path: Path, config: AppConfig | None = None) -> AppConf
     # Camera
     cfg.camera.flip_image = bool(get_int("flip", 0))
     cfg.camera.flip_vertical = bool(get_int("flipvert", 0))
-    cfg.camera.flip_view = bool(get_int("flipview", 0))
     cfg.camera.darkness = get_int("darkness", 0)
     cfg.camera.mjpeg = bool(get_int("mjpeg", 1))
     cfg.camera.ps4 = bool(get_int("ps4", 0))
@@ -394,12 +378,6 @@ def migrate_from_ini(ini_path: Path, config: AppConfig | None = None) -> AppConf
             cfg.ball.custom_hsv = ast.literal_eval(parser.get("putting", "customhsv"))
         except (ValueError, SyntaxError):
             logger.warning("Could not parse customhsv from INI file")
-
-    # Replay
-    cfg.replay.show_replay = bool(get_int("showreplay", 0))
-    cfg.replay.enabled = bool(get_int("replaycam", 0))
-    cfg.replay.camera_index = get_int("replaycamindex", 0)
-    cfg.replay.ps4 = bool(get_int("replaycamps4", 0))
 
     logger.info("Migrated config from %s", ini_path)
     return cfg
