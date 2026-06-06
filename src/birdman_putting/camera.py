@@ -51,9 +51,9 @@ _GRAB_FAILURE_THRESHOLD = 30     # consecutive failures before flagging unhealth
 class Camera:
     """Manages video capture from webcam or video file.
 
-    Handles MJPEG codec, FPS override, resolution, PS4 Eye decoding,
-    and camera property management. Automatically falls back from
-    MJPEG/DirectShow to the default backend if frames fail to arrive.
+    Handles MJPEG codec, FPS override, resolution, and camera property
+    management. Automatically falls back from MJPEG/DirectShow to the
+    default backend if frames fail to arrive.
     """
 
     # Exposed as class attributes so callers/tests can read the tuning without
@@ -442,18 +442,10 @@ class Camera:
     def _read_properties(self) -> None:
         """Read actual camera properties (FPS, resolution) after open.
 
-        Handles PS4 Eye special settings and FPS=0 fallback.
+        Handles FPS=0 fallback.
         """
         if self._cap is None:
             return
-
-        s = self._settings
-
-        # PS4 Eye special settings
-        if s.ps4:
-            self._cap.set(cv2.CAP_PROP_FPS, 120)
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1724)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 404)
 
         self._fps = self._cap.get(cv2.CAP_PROP_FPS)
         self._frame_width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -946,10 +938,6 @@ class Camera:
             if not ret or frame is None:
                 return None
 
-        # PS4 Eye frame decoding
-        if self._settings.ps4 and not self._video_file:
-            frame = self._decode_ps4(frame)
-
         return self._post_process(frame)
 
     def _post_process(self, frame: np.ndarray) -> np.ndarray:
@@ -1052,12 +1040,3 @@ class Camera:
                 if value != 0.0:
                     self._cap.set(prop_id, value)
                     logger.debug("Set camera %s = %s", field_name, value)
-
-    @staticmethod
-    def _decode_ps4(frame: np.ndarray) -> np.ndarray:
-        """Decode PS4 Eye camera frame (extract left stereo image)."""
-        left = np.zeros((400, 632, 3), np.uint8)
-        for i in range(min(400, frame.shape[0])):
-            if frame.shape[1] >= 640 + 24:
-                left[i] = frame[i, 32:640 + 24]
-        return left

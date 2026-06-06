@@ -52,7 +52,6 @@ class CameraSettings:
     flip_vertical: bool = False  # Vertical flip; with flip_image == 180° rotation
     rotation: float = 0.0  # Degrees (-45 to +45), clockwise-positive
     darkness: int = 0
-    ps4: bool = False
 
     # Camera source selection and Sony PS3 Eye (pseyepy) settings.
     camera_type: str = "webcam"  # "webcam" or "pseye"
@@ -346,7 +345,6 @@ def migrate_from_ini(ini_path: Path, config: AppConfig | None = None) -> AppConf
     cfg.camera.flip_vertical = bool(get_int("flipvert", 0))
     cfg.camera.darkness = get_int("darkness", 0)
     cfg.camera.mjpeg = bool(get_int("mjpeg", 1))
-    cfg.camera.ps4 = bool(get_int("ps4", 0))
     cfg.camera.fps_override = get_int("fps", 0)
     cfg.camera.height = get_int("height", 0)
     cfg.camera.width = get_int("width", 0)
