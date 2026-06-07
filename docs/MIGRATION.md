@@ -26,6 +26,48 @@ account on the new laptop and it syncs down automatically).
 
 ---
 
+## 0.5 Two-machine topology (READ FIRST)
+
+Birdman and GSPro are now **split across two machines** (they used to share one PC over
+`127.0.0.1`):
+
+| Machine | Hostname / IP | Runs |
+| --- | --- | --- |
+| **Primary desktop** | `GolfSim` — **`192.168.68.85`** (set as a static DHCP reservation in the router) | **GSPro** |
+| **New laptop** | this machine | **Birdman + OBS + projector** |
+
+This means the localhost wiring must become real network addresses:
+
+1. **GSPro host** — in the restored `config.toml`, `[connection] gspro_host` must be
+   **`192.168.68.85`** (not `127.0.0.1`), port `921`. See step 4.
+2. **Firewall on GolfSim** — GolfSim must allow inbound TCP 921 from the LAN. Run this in an
+   **Administrator PowerShell on GolfSim** (already attempted; rerun there if not present):
+   ```powershell
+   New-NetFirewallRule -DisplayName "GSPro Open API 921 (Birdman)" -Direction Inbound `
+     -Protocol TCP -LocalPort 921 -Action Allow -RemoteAddress LocalSubnet -Profile Private
+   ```
+3. **Static IP** — `192.168.68.85` is reserved for GolfSim via the router, so Birdman can rely
+   on it. If it ever changes, update `gspro_host` to match.
+
+### OBS & the projector
+OBS runs **on this laptop** alongside Birdman, so Birdman → OBS stays `localhost:4455`
+(no change to `[obs] host`). The projector plugs into **this laptop**. Two cases:
+
+- **Projector shows only Birdman's output** (putt tracer + Mevo/shot data + camera scenes):
+  OBS here is fully self-contained — the *only* cross-machine link is Birdman → GSPro:921.
+- **You want GSPro gameplay inside an OBS scene:** GSPro renders on GolfSim, so pipe its
+  window over the LAN with **NDI** — install an NDI sender on GolfSim (OBS + the DistroAV
+  / obs-ndi plugin, or the standalone **NDI Tools → Screen Capture**) and add it as an **NDI
+  source** in this laptop's OBS. (Confirm with Greg which case applies before relying on it.)
+
+### Remote-controlling this laptop from GolfSim
+Use **RustDesk in direct-LAN mode** (installed in step 1) — it mirrors the real console
+session, so Birdman's MSMF/D3D11 camera pipeline and the projector output keep running while
+you view/control from GolfSim. **Do not use plain Windows RDP** here: it creates a virtual
+display, disconnects the console, and can break the GPU camera capture and projector output.
+
+---
+
 ## 1. Install prerequisites
 
 | Software | Purpose | Notes |
@@ -38,6 +80,8 @@ account on the new laptop and it syncs down automatically).
 | **Tesseract OCR** | Mevo OCR engine | UB Mannheim build; install to default `C:\Program Files\Tesseract-OCR\` |
 | **OBS Studio** (v28+) | scene switching / projector | WebSocket built in |
 | **Razer Synapse** | Kiyo Pro firmware | **turn HDR OFF** (required for 60fps); log into Razer account to pull the saved profile |
+| **RustDesk** | remote control from GolfSim | rustdesk.com — used in direct-LAN mode (see §0.5) |
+| **NDI Tools / DistroAV** | *only if* OBS needs GSPro gameplay | see §0.5 — install the sender on GolfSim |
 
 Verify Tesseract after install: `tesseract --version`
 
@@ -87,6 +131,17 @@ Copy-Item "$env:OneDrive\birdman-migration\config.toml" "$dst\config.toml" -Forc
 This restores: detection zone, camera rotation/exposure/HSV (`orange3` preset),
 `pixels_per_foot`, the 18 Mevo OCR ROIs, the GSPro-watcher club ROI, and the OBS
 scenes + WebSocket password.
+
+**Then make the split-machine edit (see §0.5):** GSPro is on GolfSim now, not localhost.
+
+```powershell
+$cfg = "$dst\config.toml"
+(Get-Content $cfg) -replace 'gspro_host = "127\.0\.0\.1"', 'gspro_host = "192.168.68.85"' |
+  Set-Content $cfg
+Select-String -Path $cfg -Pattern 'gspro_host'   # verify it now reads 192.168.68.85
+```
+
+Leave `[obs] host = "localhost"` as-is — OBS runs on this laptop.
 
 > **Secret note:** `config.toml` contains the OBS WebSocket password in plaintext. It is
 > intentionally kept out of git. Only move it through OneDrive / USB, never commit it.
@@ -154,7 +209,10 @@ is unfinished WIP, not a working feature.
 python -m birdman_putting -c orange3 -w 1 --mevo --obs
 ```
 
-**Launch order:** OBS → GSPro (Open API "Ready" on port 921) → FS Golf PC + Mevo → Birdman.
+**Launch order (two machines):**
+1. On **GolfSim**: start GSPro, confirm Open API shows "Ready" on port 921.
+2. On **this laptop**: start OBS → FS Golf PC + Mevo → Birdman.
+3. Confirm Birdman connects to GSPro across the LAN (log: `Connected to GSPro at 192.168.68.85:921`).
 
 Verify end-to-end:
 - [ ] Camera feed at ~60fps, ball detected
