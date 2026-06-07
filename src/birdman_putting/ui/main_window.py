@@ -649,10 +649,13 @@ class MainWindow(ctk.CTk):
         self._section_label(scroll, "OVERLAY (OBS)")
 
         ov = self._config.overlay
-        self._obs_overlay_var = self._add_live_checkbox(
+        # Bind to the SAME var as the control-bar "OBS" switch so the two stay
+        # in sync (the var is created in _build_control_bar, which runs first).
+        self._add_live_checkbox(
             scroll, "OBS Overlay Mode (black bg, tracer only)",
             ov.obs_overlay_mode,
             lambda v: setattr(self._config.overlay, "obs_overlay_mode", v),
+            variable=self._obs_overlay_var,
         )
 
         self._obs_show_zones_var = self._add_live_checkbox(
@@ -919,6 +922,22 @@ class MainWindow(ctk.CTk):
         )
         self._obs_cal_button.pack(side="left", padx=(8, 0))
 
+        # OBS Overlay toggle — quick-access switch; shares its variable with the
+        # Settings "OBS Overlay Mode" checkbox so the two always reflect each
+        # other (the var is created here because the control bar is built first).
+        self._obs_overlay_var = ctk.BooleanVar(
+            value=self._config.overlay.obs_overlay_mode
+        )
+        self._obs_toggle = ctk.CTkSwitch(
+            parent, text="OBS", variable=self._obs_overlay_var,
+            command=self._on_obs_toggle,
+            font=theme.font(11),
+            button_color=theme.ACCENT_BLUE,
+            button_hover_color=theme.ACCENT_BLUE_HOVER,
+            progress_color=theme.ACCENT_BLUE,
+        )
+        self._obs_toggle.pack(side="left", padx=(8, 0))
+
         # GSPro Reconnect button
         self._reconnect_btn = ctk.CTkButton(
             parent, text="Reconnect", command=self._on_reconnect_clicked,
@@ -1034,9 +1053,15 @@ class MainWindow(ctk.CTk):
         initial: bool,
         setter: Callable[[bool], None],
         live: bool = True,
+        variable: ctk.BooleanVar | None = None,
     ) -> ctk.BooleanVar:
-        """Add a checkbox that applies changes in real-time."""
-        var = ctk.BooleanVar(value=initial)
+        """Add a checkbox that applies changes in real-time.
+
+        Pass ``variable`` to bind the checkbox to an EXISTING BooleanVar (so it
+        stays in sync with another widget, e.g. the control-bar OBS switch);
+        otherwise a fresh var is created.
+        """
+        var = variable if variable is not None else ctk.BooleanVar(value=initial)
 
         def on_change() -> None:
             setter(var.get())
@@ -1153,6 +1178,16 @@ class MainWindow(ctk.CTk):
         """Apply settings to running systems and schedule a debounced save."""
         if self._on_settings_changed:
             self._on_settings_changed()
+        self._schedule_save()
+
+    def _on_obs_toggle(self) -> None:
+        """Toggle OBS overlay mode from the control-bar switch.
+
+        Shares its variable with the Settings 'OBS Overlay Mode' checkbox, so
+        flipping either keeps both in sync.  The flag is read live by the
+        overlay every frame, so we only need to persist it.
+        """
+        self._config.overlay.obs_overlay_mode = self._obs_overlay_var.get()
         self._schedule_save()
 
     def _schedule_save(self) -> None:
