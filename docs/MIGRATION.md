@@ -60,6 +60,26 @@ OBS runs **on this laptop** alongside Birdman, so Birdman → OBS stays `localho
   / obs-ndi plugin, or the standalone **NDI Tools → Screen Capture**) and add it as an **NDI
   source** in this laptop's OBS. (Confirm with Greg which case applies before relying on it.)
 
+### Keep FS Golf output OFF OneDrive (avoid a 14 GB cloud blowout)
+
+FS Golf writes session captures **and crash dumps** to `Documents\GolfAppDotNetOutput`. If
+`Documents` is OneDrive-backed (Known Folder Move), every multi-hundred-MB `.dmp` crash dump
+and 16 MB debug log uploads to the cloud — on the old rig this silently grew to **14 GB**.
+On the new laptop, redirect it to a local-only folder before running FS Golf much:
+
+```powershell
+# After FS Golf has created the folder once (and with FS Golf closed):
+$src = "$env:USERPROFILE\OneDrive\Documents\GolfAppDotNetOutput"   # adjust if Documents isn't KFM'd
+$dst = "C:\GolfAppData\GolfAppDotNetOutput"
+New-Item -ItemType Directory -Force -Path "C:\GolfAppData" | Out-Null
+robocopy $src $dst /E /MOVE /R:1 /W:1            # if it already has data; else just make $dst
+[System.IO.Directory]::Delete($src, $false)      # remove the now-empty original
+New-Item -ItemType Junction -Path $src -Target $dst   # FS Golf keeps its path; OneDrive skips junctions
+```
+
+(Birdman OCRs the FS Golf *window*, so it never reads these files — moving them is safe.)
+OneDrive shows a benign "can't sync this item" note on the junction; that's expected.
+
 ### Remote-controlling this laptop from GolfSim
 Use **RustDesk in direct-LAN mode** (installed in step 1) — it mirrors the real console
 session, so Birdman's MSMF/D3D11 camera pipeline and the projector output keep running while
