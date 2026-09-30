@@ -117,6 +117,10 @@ class PuttingApp:
         # Calibration
         self._calibrator: AutoCalibrator | None = None
         self._calibrating: bool = False
+        # Rate limiter for the "camera unhealthy" warning in the frame loop,
+        # and a flag so recovery can clear the warning status exactly once.
+        self._last_cam_health_warn: float = 0.0
+        self._cam_health_was_bad: bool = False
 
         # Mevo thread
         self._mevo_detector: MevoDetector | None = None
@@ -327,7 +331,8 @@ class PuttingApp:
                 return
             if self._window:
                 self._window.update_camera_status(
-                    self._camera.status_message, "ok"
+                    self._camera.status_message,
+                                "error" if "BLACK" in self._camera.status_message else "ok"
                 )
 
         # Start threaded camera capture (decoupled from tkinter event loop)
@@ -540,8 +545,12 @@ class PuttingApp:
             )
             return
 
-        # Settle: give projector + camera + auto-exposure a moment
-        time.sleep(0.6)
+        # Settle: give OBS -> projector -> camera the full round trip.
+        # 0.6s was not enough: a projector has its own input lag/frame buffer
+        # on top of OBS's render, and the camera grab thread hands back the
+        # most-recent frame, which can still predate the scene change. A
+        # too-short settle silently calibrates against the PREVIOUS scene.
+        time.sleep(1.8)
 
         # Capture a frame from the live grab thread (avoid touching the
         # capture device directly) and run the tracker's normal preprocess.
@@ -570,12 +579,23 @@ class PuttingApp:
             # Cyan hue-range filter: the projector renders calibration
             # markers in cyan, so we ignore the orange ball + any orange
             # OBS overlays (shot trails, etc.) that might be in frame.
+            # Marker appearance is whatever the user's Calibration scene
+            # projects.  Greg's scene uses white bars (whiteBox.jpg), so a
+            # cyan-only hue filter (hue 75-105 AND saturation >= 80) matched
+            # ZERO pixels — white is desaturated by definition, so OBS Cal
+            # always reported "0 markers found".  Accept any bright marker
+            # instead, and reject the BALL by SHAPE rather than by colour:
+            # a projected bar is tall and narrow (Greg's are ~1in x 12.5in,
+            # aspect ~0.09) while the ball is round (aspect ~1.0).
             result = detect_calibration_markers(
                 display,
                 band_y_center=band_y_center,
                 band_half_height=60,
-                hue_range=(75, 105),
-                min_saturation=80,
+                hue_range=None,      # accept white/any-colour bars
+                min_saturation=0,    # unused in hue-agnostic mode
+                aspect_min=0.02,     # tall thin bar (was 0.1 — rejected them)
+                aspect_max=0.60,     # < 1.0 so the round ball never qualifies
+                max_area=4000.0,     # a full-height bar is ~6x110px (was 400)
             )
             # Drop any detections that fall inside the start zone X range
             # (extra safety — the ball lives there during calibration).
@@ -737,12 +757,45 @@ class PuttingApp:
                 frame = self._camera.read()
                 if frame is None:
                     if self._camera.is_grab_running:
-                        # Threaded grab: no fresh frame yet, wait briefly and retry.
+                        # Threaded grab: no fresh frame yet — but surface a
+                        # DEAD camera instead of sleeping silently forever
+                        # with a frozen panel: is_healthy flips false after
+                        # ~30 consecutive failed reads (unplug/wedge).
+                        if not self._camera.is_healthy:
+                            now_mono = time.monotonic()
+                            if now_mono - self._last_cam_health_warn > 5.0:
+                                self._last_cam_health_warn = now_mono
+                                self._cam_health_was_bad = True
+                                logger.warning(
+                                    "Camera unhealthy: %d consecutive failed "
+                                    "reads — check USB connection",
+                                    self._camera.consecutive_failures,
+                                )
+                                if self._window:
+                                    with contextlib.suppress(RuntimeError):
+                                        self._window.after(
+                                            0, self._window.update_camera_status,
+                                            "Camera not responding — check USB",
+                                            "error",
+                                        )
                         time.sleep(0.001)
                         continue
                     logger.warning("No frame received, stopping")
                     self._running = False
                     break
+                # Camera recovered after an unhealthy spell: clear the red
+                # "check USB" status (is_healthy self-heals, the UI did not).
+                if self._cam_health_was_bad:
+                    self._cam_health_was_bad = False
+                    self._last_cam_health_warn = 0.0
+                    logger.info("Camera recovered — frames flowing again")
+                    if self._window:
+                        with contextlib.suppress(RuntimeError):
+                            self._window.after(
+                                0, self._window.update_camera_status,
+                                self._camera.status_message,
+                                "error" if "BLACK" in self._camera.status_message else "ok",
+                            )
                 saved_circ = None
                 try:
 
@@ -822,6 +875,11 @@ class PuttingApp:
                         if cal_result is not None:
                             # Calibration complete — apply zone
                             self.config.detection_zone = cal_result.zone
+                            # Rebind the loop-local alias too: it was bound
+                            # ONCE before the loop, so without this the
+                            # detector kept searching the OLD zone until
+                            # restart while the overlay drew the new one.
+                            zone = cal_result.zone
                             self._tracker.zone = cal_result.zone
                             self._tracker.reset()
                             self._calibrating = False
@@ -1813,8 +1871,13 @@ class PuttingApp:
 
         self._obs = OBSController(self.config.obs, on_idle=self._on_obs_idle)
         if not self._obs.connect():
-            logger.warning("OBS connection failed — overlay disabled")
-            self._obs = None
+            # KEEP the controller: _ensure_client() lazily reconnects (at
+            # most every 5s) on the next scene call, so OBS coming up later
+            # heals automatically.  Nulling it here made the self-heal
+            # unreachable in the one scenario it exists for.
+            logger.warning(
+                "OBS connection failed — will keep retrying in background",
+            )
 
     # LW is always Chipping regardless of distance
     _ALWAYS_CHIPPING_CLUBS = {"LW"}
@@ -1868,6 +1931,11 @@ class PuttingApp:
                 self._mevo_paused = True
                 logger.info("Mevo OCR paused (putter selected)")
             elif not want_pause and self._mevo_paused:
+                # Re-baseline BEFORE unpausing: the loop did not capture while
+                # paused, so the stored crops are stale.  Without this the next
+                # poll burns a full confirming cycle on the OLD display and can
+                # even emit a stale shot to GSPro.
+                self._mevo_detector.reset_baseline()
                 self._mevo_paused = False
                 reason = "putt_fallback on" if is_putter else f"{club} selected"
                 logger.info("Mevo OCR resumed (%s)", reason)
@@ -1975,7 +2043,11 @@ class PuttingApp:
                         )
 
         tessdata = self.config.mevo.tessdata_dir or None
-        ocr = MevoOCR(rois=rois, tessdata_dir=tessdata)
+        ocr = MevoOCR(
+            rois=rois,
+            tessdata_dir=tessdata,
+            backend=getattr(self.config.mevo, "ocr_backend", "batch"),
+        )
         self._mevo_detector = MevoDetector(self.config.mevo, ocr, capture)
         self._mevo_capture = capture  # Keep reference for cleanup
 
@@ -2003,10 +2075,17 @@ class PuttingApp:
             start = time.perf_counter()
             confirming = False
             if self._mevo_detector:
-                shot = self._mevo_detector.poll()
-                if shot is not None:
-                    self._handle_mevo_shot(shot)
-                confirming = self._mevo_detector.is_confirming
+                # NEVER let an exception escape this loop: an unguarded raise
+                # kills the mevo thread, and full-swing detection is then
+                # silently dead for the rest of the session while the UI still
+                # reads "Watching...". Log it and keep polling instead.
+                try:
+                    shot = self._mevo_detector.poll()
+                    if shot is not None:
+                        self._handle_mevo_shot(shot)
+                    confirming = self._mevo_detector.is_confirming
+                except Exception:
+                    logger.exception("Mevo poll failed — continuing")
             # While a shot's display values are still settling, poll fast so the
             # stability gate adds minimal latency between the shot landing and
             # reaching GSPro; otherwise poll at the normal (low-CPU) cadence.

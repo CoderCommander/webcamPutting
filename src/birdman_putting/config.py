@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+import shutil
 import sys
+import tempfile
+import threading
+import time
 from configparser import ConfigParser
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -19,6 +25,12 @@ else:
 from platformdirs import user_config_dir
 
 logger = logging.getLogger(__name__)
+
+# Serializes save_config: the UI autosave (Tk thread) and processing-thread
+# saves (e.g. Auto Zone completion) are REAL concurrency in this app, and
+# concurrent temp+os.replace on Windows raised PermissionError in 17.5% of
+# hammered saves.  A short retry covers external openers (AV scans, editors).
+_SAVE_LOCK = threading.Lock()
 
 APP_NAME = "birdman-putting"
 CONFIG_DIR = Path(user_config_dir(APP_NAME))
@@ -148,6 +160,21 @@ class MevoSettings:
     putt_fallback: bool = False
     # Max age (seconds) of a stashed Mevo reading for fallback use.
     putt_fallback_max_age_s: float = 3.0
+    # OCR backend:
+    #   "batch"      — ONE tesseract.exe invocation for all ROIs via an image
+    #                  list file (~335 ms for 20 ROIs).  Default.
+    #   "subprocess" — legacy: one tesseract.exe per ROI in a thread pool
+    #                  (~2153 ms for 20 ROIs).  Kept as a one-word revert.
+    # 96% of the legacy cost was CreateProcess + tessdata init, not recognition.
+    ocr_backend: str = "batch"
+    # Minimum WALL-CLOCK seconds from the FIRST display change before a shot
+    # may be emitted. This is the real misread protection. FS Golf paints the
+    # shot panel TWICE; committing before the final paint sends preliminary
+    # values. Measured on this rig over 6 shots: final paint 0.864-1.198s
+    # after the first, so 1.55 = worst case + 0.35 margin. Deliberately
+    # independent of poll rate, so a faster OCR backend cannot shrink the
+    # evidence window. RE-MEASURE after an FS Golf update before lowering.
+    min_settle_s: float = 1.55
 
 
 @dataclass
@@ -266,19 +293,40 @@ def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
 
 
 def load_config(path: Path | None = None) -> AppConfig:
-    """Load config from TOML file, falling back to defaults for missing values."""
+    """Load config from TOML file, falling back to defaults for missing values.
+
+    A corrupt config (e.g. truncated by a crash mid-save) is renamed aside to
+    ``config.toml.corrupt-<ts>`` — NEVER silently replaced by defaults in
+    place, because the UI autosave would then persist those defaults and
+    permanently wipe every calibration value.  If a ``.bak`` from a previous
+    successful save parses, it is restored instead.
+    """
     config_path = path or CONFIG_FILE
 
     if not config_path.exists():
-        logger.info("No config file found at %s, using defaults", config_path)
-        return AppConfig()
+        return _load_backup_or_defaults(config_path, reason="no config file")
 
     try:
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
     except Exception:
-        logger.warning("Failed to read config file %s, using defaults", config_path, exc_info=True)
-        return AppConfig()
+        # Rename the corrupt file aside so it (a) can be inspected and
+        # (b) cannot be interpreted as "defaults" and then re-saved over.
+        aside = config_path.with_name(
+            f"{config_path.name}.corrupt-{int(time.time())}",
+        )
+        try:
+            os.replace(config_path, aside)
+            logger.error(
+                "Config file %s is unreadable — moved aside to %s",
+                config_path, aside, exc_info=True,
+            )
+        except OSError:
+            logger.error(
+                "Config file %s is unreadable (and could not be moved aside)",
+                config_path, exc_info=True,
+            )
+        return _load_backup_or_defaults(config_path, reason="corrupt config")
 
     config = AppConfig()
     for section_field in fields(AppConfig):
@@ -298,15 +346,82 @@ def load_config(path: Path | None = None) -> AppConfig:
     return config
 
 
+def _load_backup_or_defaults(config_path: Path, reason: str) -> AppConfig:
+    """Return the parsed ``.bak`` config if one exists and parses, else defaults.
+
+    The backup is written by :func:`save_config` on every successful save, so
+    after a crash-corrupted main file this restores the last good calibration
+    instead of silently wiping it.
+    """
+    bak = config_path.with_suffix(config_path.suffix + ".bak")
+    if bak.exists():
+        try:
+            with open(bak, "rb") as f:
+                tomllib.load(f)  # parse check only
+            logger.warning(
+                "%s — RESTORING last good config from backup %s", reason, bak,
+            )
+            return load_config(bak)
+        except Exception:
+            logger.warning("Backup config %s also unreadable", bak, exc_info=True)
+    logger.info("%s at %s, using defaults", reason, config_path)
+    return AppConfig()
+
+
 def save_config(config: AppConfig, path: Path | None = None) -> None:
-    """Save config to TOML file."""
+    """Save config to TOML file — atomically, with a rolling backup.
+
+    The old ``open(path, "wb")`` truncated in place: a crash mid-save left a
+    stump that loaded as defaults, which the UI autosave then persisted,
+    permanently wiping ppf/zone/markers/ROIs.  Now the new content is written
+    to a UNIQUE temp file (a fixed name races concurrent savers on Windows),
+    fsynced, and swapped in with ``os.replace`` (atomic on NTFS); the previous
+    file is kept as ``config.toml.bak`` first.
+    """
     config_path = path or CONFIG_FILE
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     data = _dataclass_to_dict(config)
 
-    with open(config_path, "wb") as f:
-        tomli_w.dump(data, f)
+    with _SAVE_LOCK:
+        # Roll the current file to .bak — but only if it PARSES.  Rolling an
+        # unparseable main file would clobber the one good backup that the
+        # corrupt-recovery path depends on.
+        if config_path.exists():
+            bak = config_path.with_suffix(config_path.suffix + ".bak")
+            try:
+                with open(config_path, "rb") as f:
+                    tomllib.load(f)
+                shutil.copyfile(config_path, bak)
+            except OSError:
+                logger.warning("Could not update config backup %s", bak, exc_info=True)
+            except Exception:
+                logger.warning(
+                    "Existing config unparseable — keeping previous backup",
+                )
+
+        fd, tmp_name = tempfile.mkstemp(
+            dir=config_path.parent, prefix=config_path.name + ".", suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "wb") as f:
+                tomli_w.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            # Windows can transiently refuse the replace while another opener
+            # (AV scan, editor preview) holds the destination — retry briefly.
+            for attempt in range(3):
+                try:
+                    os.replace(tmp_name, config_path)
+                    break
+                except PermissionError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.05)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+            raise
 
     logger.info("Config saved to %s", config_path)
 

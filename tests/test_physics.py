@@ -450,7 +450,6 @@ class TestSpeedFromTrajectoryFit:
         n_rest_frames: int = 3,
     ) -> list[tuple[int, int, float]]:
         """Synthesize a track of a ball decelerating at the configured stimp."""
-        import math as _math
 
         a = (6.08 ** 2) / (2 * self.STIMP)  # ft/s² decel
         launch_fps = launch_mph * 5280 / 3600
@@ -617,7 +616,6 @@ class TestTrajectoryFitWithMarkers:
     ) -> tuple[list[tuple[int, int, float]], list[float]]:
         """Build a synthetic putt where pixel-per-foot varies linearly
         across the frame (simulating fisheye).  Returns (positions, markers)."""
-        import math as _math
 
         # Define non-uniform ppf via markers at each foot — this is what
         # OBS Cal would store.

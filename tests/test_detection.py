@@ -370,3 +370,45 @@ class TestResizeWithAspectRatio:
         img = np.zeros((480, 640, 3), dtype=np.uint8)
         result = resize_with_aspect_ratio(img)
         assert result.shape == img.shape
+
+
+class TestZoneOutsideFrame:
+    """A zone outside the processed frame must fail safe: None result, one
+    warning per distinct zone key even across the STARTED state's two
+    alternating passes (regression: last-key storage re-warned at frame rate),
+    and get_mask must not assert either."""
+
+    def _detector(self):
+        from birdman_putting.color_presets import PRESETS
+
+        return BallDetector(PRESETS["orange2"], min_radius=5)
+
+    def test_returns_none_and_warns_once_across_two_pass_keys(self, caplog):
+        import logging as _logging
+
+        det = self._detector()
+        frame = np.zeros((480, 640, 3), np.uint8)
+        with caplog.at_level(_logging.WARNING):
+            for _ in range(50):
+                # Alternating x-ranges mimic the STARTED two-pass search.
+                assert det.detect(frame, 98, 183, 700, 748, 0.0) is None
+                assert det.detect(frame, 98, 640, 700, 748, 0.0) is None
+        warnings = [r for r in caplog.records if "outside" in r.message]
+        assert len(warnings) == 2  # one per DISTINCT zone key, not per frame
+
+    def test_rearms_on_zone_change(self, caplog):
+        import logging as _logging
+
+        det = self._detector()
+        frame = np.zeros((480, 640, 3), np.uint8)
+        with caplog.at_level(_logging.WARNING):
+            det.detect(frame, 98, 183, 700, 748, 0.0)
+            det.detect(frame, 98, 183, 800, 848, 0.0)  # different zone
+        warnings = [r for r in caplog.records if "outside" in r.message]
+        assert len(warnings) == 2
+
+    def test_get_mask_zero_area_does_not_assert(self):
+        det = self._detector()
+        frame = np.zeros((480, 640, 3), np.uint8)
+        mask = det.get_mask(frame, 98, 183, 700, 748)
+        assert mask is not None and mask.size >= 1

@@ -117,3 +117,90 @@ class TestINIMigration:
         """Missing INI file should return defaults."""
         config = migrate_from_ini(tmp_path / "missing.ini")
         assert config.detection_zone.start_x1 == 10
+
+
+class TestCrashSafeConfig:
+    """The config save path must survive a crash mid-save.
+
+    Regression: save_config used open(path, "wb"), truncating in place.  A
+    crash mid-save left a stump that load_config silently interpreted as
+    FULL DEFAULTS -- which the UI autosave then persisted, permanently
+    wiping ppf/zone/markers/ROIs.
+    """
+
+    @staticmethod
+    def _custom_config() -> AppConfig:
+        config = AppConfig()
+        config.shot.pixels_per_foot = 73.0
+        config.detection_zone.start_x1 = 98
+        config.camera.exposure = -7.0
+        return config
+
+    def test_save_writes_backup(self, tmp_path: Path):
+        path = tmp_path / "config.toml"
+        save_config(self._custom_config(), path)
+        # Second save rolls the first file to .bak
+        save_config(self._custom_config(), path)
+        assert (tmp_path / "config.toml.bak").exists()
+
+    def test_truncated_config_is_moved_aside_not_defaulted(self, tmp_path: Path):
+        path = tmp_path / "config.toml"
+        save_config(self._custom_config(), path)
+        save_config(self._custom_config(), path)  # ensure .bak exists
+
+        # Simulate a crash mid-save: truncate mid-key to an UNPARSEABLE stump.
+        # (A stump cut exactly at a line boundary parses as valid partial TOML
+        # and is out of scope: the atomic os.replace save makes torn writes of
+        # the main file impossible going forward.)
+        path.write_bytes(b"[shot]\npixels_per_foot = ")
+
+        loaded = load_config(path)
+
+        # The corrupt file must be moved aside, never left in place where the
+        # autosave would overwrite it...
+        assert not path.exists()
+        corrupts = list(tmp_path.glob("config.toml.corrupt-*"))
+        assert corrupts, "corrupt file was not preserved aside"
+        # ...and the last good calibration must be RESTORED from the backup,
+        # not silently replaced with defaults.
+        assert loaded.shot.pixels_per_foot == 73.0
+        assert loaded.detection_zone.start_x1 == 98
+
+    def test_truncated_config_without_backup_uses_defaults(self, tmp_path: Path):
+        path = tmp_path / "config.toml"
+        path.write_bytes(b"\x00\x01garbage")
+        loaded = load_config(path)
+        assert loaded.shot.pixels_per_foot == AppConfig().shot.pixels_per_foot
+        assert list(tmp_path.glob("config.toml.corrupt-*"))
+
+    def test_no_temp_files_left_behind(self, tmp_path: Path):
+        path = tmp_path / "config.toml"
+        save_config(self._custom_config(), path)
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_concurrent_saves_do_not_corrupt_or_raise(self, tmp_path: Path):
+        """Two real threads hammering save_config on one path (the UI autosave
+        vs processing-thread scenario). Regression: 17.5% PermissionError rate
+        at os.replace before the module-level save lock + retry."""
+        import threading
+
+        path = tmp_path / "config.toml"
+        errors: list[BaseException] = []
+
+        def hammer() -> None:
+            cfg = self._custom_config()
+            for _ in range(60):
+                try:
+                    save_config(cfg, path)
+                except BaseException as e:  # noqa: BLE001
+                    errors.append(e)
+
+        threads = [threading.Thread(target=hammer) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, errors[:3]
+        assert load_config(path).shot.pixels_per_foot == 73.0
+        assert not list(tmp_path.glob("*.tmp"))

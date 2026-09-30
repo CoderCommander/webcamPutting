@@ -131,7 +131,36 @@ class Camera:
         self._apply_camera_properties()
 
     def open_webcam(self) -> bool:
-        """Open the webcam with configured settings and frame validation.
+        """Open the webcam, retrying once if the first attempt fails.
+
+        A transient device-busy or post-crash wedge often clears after a
+        release + short pause; retrying here (on the OPENING thread — never
+        the grab thread) turns "Birdman failed to connect, restart it and
+        wait another minute" into a self-healing 5s hiccup.
+
+        Returns:
+            True if camera opened successfully and producing frames.
+        """
+        attempts = 2
+        for attempt in range(1, attempts + 1):
+            t0 = time.perf_counter()
+            if self._open_webcam_once():
+                logger.info(
+                    "Camera open succeeded in %.1fs (attempt %d)",
+                    time.perf_counter() - t0, attempt,
+                )
+                return True
+            logger.warning(
+                "Camera open attempt %d/%d failed after %.1fs",
+                attempt, attempts, time.perf_counter() - t0,
+            )
+            self._release_cap()
+            if attempt < attempts:
+                time.sleep(4.0)
+        return False
+
+    def _open_webcam_once(self) -> bool:
+        """One full open attempt with configured settings and frame validation.
 
         Strategy: open with MSMF first to validate frames and configure
         camera properties (MSMF preserves Kiyo Pro firmware state).  Then
@@ -153,7 +182,7 @@ class Camera:
 
         # Try MJPEG/DirectShow first if configured
         if s.mjpeg and self._try_open_mjpeg():
-                if self._validate_frames():
+                if self._validate_frames() == "ok":
                     self._read_properties()
                     self._apply_camera_properties()
                     self._status_message = (
@@ -175,12 +204,23 @@ class Camera:
             logger.error(self._status_message)
             return False
 
-        if not self._validate_frames():
+        verdict = self._validate_frames()
+        if verdict == "none":
             logger.error("Default backend opened but no frames arrived")
             self._release_cap()
             self._status_message = "Failed to open camera"
             logger.error(self._status_message)
             return False
+        if verdict == "black":
+            # Frames flow but the image is black: with MSMF-only capture this
+            # is a dark room / covered lens, not a camera fault.  Failing
+            # here produced the misleading "Failed to open camera" (and a
+            # full retry cycle) whenever the lights were off -- start up
+            # instead and tell the user what to actually fix.
+            logger.warning(
+                "Camera streaming but frames are BLACK -- check room "
+                "lighting / lens cap (starting anyway)",
+            )
 
         self._read_properties()
         self._apply_camera_properties()
@@ -193,10 +233,16 @@ class Camera:
         # (e.g., the laptop's integrated webcam at the same MSMF slot).
         # Keep MSMF only.  If DirectShow upgrade ever becomes useful for
         # a non-Kiyo camera, add a config flag to re-enable it.
-        self._status_message = (
-            f"Connected (MSMF {self._frame_width}x{self._frame_height}"
-            f" @ {self._fps:.0f}fps)"
-        )
+        if verdict == "black":
+            self._status_message = (
+                f"Connected (MSMF {self._frame_width}x{self._frame_height}"
+                f" @ {self._fps:.0f}fps) -- image BLACK, check lighting"
+            )
+        else:
+            self._status_message = (
+                f"Connected (MSMF {self._frame_width}x{self._frame_height}"
+                f" @ {self._fps:.0f}fps)"
+            )
 
         logger.info("Camera ready: %s", self._status_message)
         return True
@@ -297,15 +343,41 @@ class Camera:
 
         res_w = s.width if s.width > 0 else 1280
         res_h = s.height if s.height > 0 else 720
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
-
         target_fps = s.fps_override if s.fps_override > 0 else 60
-        self._cap.set(cv2.CAP_PROP_FPS, target_fps)
+
+        # ORDERING — properties BEFORE the first read.  MSMF negotiates its
+        # media type on the first read; changing FPS after the stream has
+        # started fails with "initStream Failed to select stream 0" and kills
+        # the stream (measured on this rig — a read-first warm-up variant
+        # broke the open entirely).  Production has always set-then-read.
+        #
+        # CONDITIONAL sets — only what differs.  Each set on a freshly
+        # opened MSMF device costs a full media-type renegotiation; the
+        # historical width+height+fps trio measured 45-72s.  The Kiyo opens
+        # natively at 640x480, so with the config at 640x480 the two
+        # resolution sets are pure no-ops and skipping them removes most of
+        # that cost; the FPS set (30 -> 60) is the one that must remain.
+        cur_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        cur_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cur_fps = self._cap.get(cv2.CAP_PROP_FPS)
+        t_sets = time.perf_counter()
+        n_sets = 0
+        if (cur_w, cur_h) != (res_w, res_h):
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_w)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_h)
+            n_sets += 2
+            # A resolution change renegotiates the media type — the FPS we
+            # sampled before it is stale; re-read before deciding to set.
+            cur_fps = self._cap.get(cv2.CAP_PROP_FPS)
+        if abs(cur_fps - target_fps) >= 1.0:
+            self._cap.set(cv2.CAP_PROP_FPS, target_fps)
+            n_sets += 1
 
         logger.info(
-            "Default backend camera (CPU-only): %dx%d @ %d fps requested",
-            res_w, res_h, target_fps,
+            "Default backend camera (CPU-only): %dx%d @ %d fps requested "
+            "(was %dx%d @ %.0f; %d property sets took %.1fs)",
+            res_w, res_h, target_fps, cur_w, cur_h, cur_fps,
+            n_sets, time.perf_counter() - t_sets,
         )
         return True
 
@@ -376,35 +448,64 @@ class Camera:
         """Check if a frame is effectively black (all/nearly-all zero pixels)."""
         return float(np.mean(frame)) < _BLACK_FRAME_THRESHOLD
 
-    def _validate_frames(self) -> bool:
+    def _validate_frames(self) -> str:
         """Read test frames to confirm the camera is producing usable data.
 
         Phase 1: Discard warmup frames (auto-exposure settling).
         Phase 2: Validate that at least one frame is non-black.
 
         Returns:
-            True if at least one non-black frame was successfully read.
+            "ok"    — at least one non-black frame arrived.
+            "black" — frames ARE arriving but all of them are black.  With
+                      the MSMF-only path this almost always means a dark
+                      room or covered lens, NOT a camera fault — the caller
+                      should proceed with a warning instead of failing.
+                      (The black-frame check exists for the DirectShow
+                      firmware-reset fault, which the mjpeg=false path no
+                      longer exercises.)
+            "none"  — no frames at all (real capture fault).
         """
         if self._cap is None:
-            return False
+            return "none"
 
         # Phase 1: Warmup — read and discard frames for auto-exposure
         for i in range(1, _WARMUP_FRAMES + 1):
+            t_read = time.perf_counter()
             ret, frame = self._cap.read()
             if not ret or frame is None:
                 logger.debug("Warmup frame %d: no frame", i)
+                # A single multi-second read timeout is the WEDGE signature
+                # ("can't grab frame, Error -2147483638"): a healthy camera
+                # delivers in well under a second.  Bail immediately instead
+                # of burning 8 reads x ~10s (~110s measured) per attempt.
+                if time.perf_counter() - t_read > 5.0:
+                    logger.warning(
+                        "Camera read timed out (%.1fs) — device is wedged, "
+                        "aborting validation early",
+                        time.perf_counter() - t_read,
+                    )
+                    return "none"
             time.sleep(_WARMUP_DELAY)
 
+        saw_frame = False
         # Phase 2: Validate — require at least one non-black frame
         for attempt in range(1, _FRAME_VALIDATE_ATTEMPTS + 1):
+            t_read = time.perf_counter()
             ret, frame = self._cap.read()
+            if (
+                (not ret or frame is None)
+                and time.perf_counter() - t_read > 5.0
+            ):
+                logger.warning("Camera read timed out — aborting validation early")
+                return "none"
             if ret and frame is not None:
+                saw_frame = True
                 if not self._is_black_frame(frame):
                     logger.debug(
                         "Frame validation passed on attempt %d (mean=%.1f)",
                         attempt, float(np.mean(frame)),
                     )
-                    return True
+                    return "ok"
                 logger.debug(
                     "Frame validation attempt %d: black frame (mean=%.1f)",
                     attempt, float(np.mean(frame)),
@@ -413,7 +514,7 @@ class Camera:
                 logger.debug("Frame validation attempt %d: no frame", attempt)
             time.sleep(_FRAME_VALIDATE_DELAY)
 
-        return False
+        return "black" if saw_frame else "none"
 
     def _read_properties(self) -> None:
         """Read actual camera properties (FPS, resolution) after open.
@@ -427,11 +528,13 @@ class Camera:
         self._frame_width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self._frame_height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Handle FPS detection failure
+        # Handle FPS detection failure.  Log-only: _read_properties runs
+        # AFTER frames have been read, and a post-read CAP_PROP_FPS set is
+        # exactly the MSMF stream-killer ordering documented in
+        # _try_open_default ("initStream Failed to select stream 0").
         if self._fps == 0.0:
-            self._cap.set(cv2.CAP_PROP_FPS, 60)
             self._fps = 60.0
-            logger.warning("FPS detection returned 0, defaulting to 60")
+            logger.warning("FPS detection returned 0, assuming 60 (not set)")
 
         logger.info(
             "Camera properties: %dx%d @ %.1f fps",
@@ -549,7 +652,17 @@ class Camera:
         grab_count = 0
         grab_start = time.perf_counter()
         while self._grab_running and self._cap is not None:
-            if self._grab_once():
+            # A novel raise from OpenCV must not silently kill this thread —
+            # the processing loop would then sleep forever on a frozen panel.
+            # Normal failure (unplug) returns ret=False and is handled inside
+            # _grab_once; this guard is for the exceptional path only.
+            try:
+                grabbed = self._grab_once()
+            except Exception:
+                logger.exception("Grab thread: unexpected error — flagging unhealthy")
+                self._record_grab_failure()
+                continue
+            if grabbed:
                 grab_count += 1
                 now = time.perf_counter()
                 if now - grab_start >= 30.0:

@@ -9,7 +9,6 @@ import logging
 import select
 import socket
 import threading
-import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -84,7 +83,7 @@ class GSProClient:
     def __init__(
         self,
         settings: ConnectionSettings,
-        on_club_change: Callable[[str], None] | None = None,
+        on_club_change: Callable[[str, float], None] | None = None,
     ):
         self._settings = settings
         self._socket: socket.socket | None = None
@@ -97,6 +96,15 @@ class GSProClient:
         self._teardown_lock = threading.Lock()
         self._listener_thread: threading.Thread | None = None
         self._running = False
+        # Wakes the listener out of its reconnect backoff sleep immediately on
+        # disconnect().  The old time.sleep(30) was uninterruptible: a
+        # Reconnect click while the listener slept spawned a SECOND listener
+        # (two threads recv'ing into one unlocked buffer), and window close
+        # hung for exactly the join timeout.
+        self._wake = threading.Event()
+        # Generation token: bumped by disconnect(); a listener whose captured
+        # generation is stale exits instead of racing a newly-spawned one.
+        self._listener_gen = 0
         self._ball_detected = False  # Set True when ball is ready for shot
         self._on_club_change = on_club_change  # Called with club name on GSPro code 201
         # Persistent receive buffer for streaming JSON framing across recv()s.
@@ -155,7 +163,9 @@ class GSProClient:
         clean disconnect instead of a "not a socket" error.
         """
         self._running = False
+        self._listener_gen += 1  # any current listener is now stale and exits
         self._connected.clear()
+        self._wake.set()  # break the listener out of a backoff wait instantly
         # Wake the listener and release the socket. Serialized so we never race
         # the listener's own reconnect teardown.
         self._teardown_socket(log_msg="Disconnected from GSPro")
@@ -163,7 +173,13 @@ class GSProClient:
         thread = self._listener_thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=10)
-            self._listener_thread = None
+            if thread.is_alive():
+                # Keep the reference: nulling it here let connect() spawn a
+                # SECOND listener while this one still ran.  With the wake
+                # event + <=2s socket waits this path should not occur.
+                logger.warning("GSPro listener did not exit within 10s")
+            else:
+                self._listener_thread = None
 
     def _teardown_socket(self, log_msg: str | None = None) -> None:
         """Shut down and close the current socket, if any (idempotent).
@@ -225,8 +241,17 @@ class GSProClient:
         Returns:
             GSProResponse indicating success or failure.
         """
-        if not self._connected.is_set() and not self._connect_socket():
-            return GSProResponse(success=False, message="Not connected to GSPro")
+        if not self._connected.is_set():
+            # Do NOT reconnect from the send path: the listener owns
+            # reconnection, and a concurrent _connect_socket here raced its
+            # _open_socket (leaked established sockets — reproduced).  Only
+            # bootstrap when no listener exists at all (standalone use).
+            t = self._listener_thread
+            if (t is not None and t.is_alive()) or not self._connect_socket():
+                return GSProResponse(
+                    success=False,
+                    message="Not connected to GSPro (reconnecting in background)",
+                )
 
         self._shot_number += 1
         message = self._build_full_shot_message(
@@ -261,6 +286,18 @@ class GSProClient:
             sock.connect((host, port))
             sock.settimeout(2.0)  # Match MLM2PRO connector timeout
 
+            # TCP keepalive: on localhost a dead GSPro RSTs instantly, but
+            # over the LAN (two-machine split) a slept/power-lost GSPro box
+            # otherwise leaves is_connected=True forever -- and the first
+            # putt logs "Shot sent to GSPro" for a shot that never arrives.
+            # 10s idle, 3s interval => dead peer detected in ~20s.
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            with contextlib.suppress(AttributeError, OSError):
+                # non-Windows / unsupported: plain SO_KEEPALIVE stands
+                sock.ioctl(  # type: ignore[attr-defined]
+                    socket.SIO_KEEPALIVE_VALS, (1, 10000, 3000),
+                )
+
             with self._lock:
                 self._socket = sock
 
@@ -289,11 +326,39 @@ class GSProClient:
         # Mark running before opening so the "do we still want a socket?"
         # invariant (_running True ⇒ keep the socket) holds during connect.
         self._running = True
-        if not self._open_socket():
-            self._running = False
-            return False
+        self._wake.clear()
+        opened = self._open_socket()
+        if opened:
+            self._send_ready_signal()
+        else:
+            # Do NOT give up: start the listener anyway so its backoff loop
+            # keeps retrying in the background.  Previously a failed FIRST
+            # connect set _running=False and never started the listener --
+            # the "will retry in background" log in watch-only mode was
+            # false, and with 921 down at launch the client was dead until
+            # an app restart.
+            logger.warning(
+                "GSPro not reachable at startup -- listener will keep "
+                "retrying in the background",
+            )
 
-        # Send initial ready signal so GSPro shows "Ready" in OpenAPI
+        # Start a listener thread for incoming GSPro messages (club selection etc.)
+        if self._listener_thread is None or not self._listener_thread.is_alive():
+            self._listener_thread = threading.Thread(
+                target=self._message_listener, daemon=True,
+            )
+            self._listener_thread.start()
+
+        return opened
+
+    def _send_ready_signal(self) -> None:
+        """Send the LaunchMonitorIsReady handshake on a fresh socket.
+
+        Extracted so RECONNECTS send it too: reconnects go through
+        _open_socket(), which never sent it, so after a GSPro restart the
+        client showed connected but GSPro never re-armed the LM (reproduced:
+        0 bytes received post-reconnect).
+        """
         ready_msg = {
             "DeviceID": self._settings.device_id,
             "Units": "Yards",
@@ -320,19 +385,19 @@ class GSProClient:
         self._send_json(ready_msg)
         logger.info("Sent ready signal to GSPro")
 
-        # Start a listener thread for incoming GSPro messages (club selection etc.)
-        if self._listener_thread is None or not self._listener_thread.is_alive():
-            self._listener_thread = threading.Thread(
-                target=self._message_listener, daemon=True,
-            )
-            self._listener_thread.start()
-
-        return True
-
     def _send_socket(self, speed_mph: float, hla_degrees: float) -> GSProResponse:
         """Send shot via TCP socket."""
-        if not self._connected.is_set() and not self._connect_socket():
-            return GSProResponse(success=False, message="Not connected to GSPro")
+        if not self._connected.is_set():
+            # Do NOT reconnect from the send path: the listener owns
+            # reconnection, and a concurrent _connect_socket here raced its
+            # _open_socket (leaked established sockets — reproduced).  Only
+            # bootstrap when no listener exists at all (standalone use).
+            t = self._listener_thread
+            if (t is not None and t.is_alive()) or not self._connect_socket():
+                return GSProResponse(
+                    success=False,
+                    message="Not connected to GSPro (reconnecting in background)",
+                )
 
         self._shot_number += 1
         message = self._build_shot_message(speed_mph, hla_degrees)
@@ -460,10 +525,36 @@ class GSProClient:
         code = msg.get("Code", -1)
         if code == 201:
             player = msg.get("Player", {})
-            club = player.get("Club", "") if isinstance(player, dict) else ""
-            logger.info("GSPro club selected: %s", club)
+            if isinstance(player, dict):
+                club = player.get("Club", "")
+                raw_distance = player.get("DistanceToTarget", 0)
+            else:
+                club, raw_distance = "", 0
+            # DistanceToTarget drives the FS Golf chipping/full-swing decision
+            # for the distance-gated wedges (see app._on_club_change). It was
+            # previously never read, so distance always defaulted to 0.0 and
+            # "0 < distance <= 30" was ALWAYS False — i.e. those clubs could
+            # never select Chipping regardless of how close the pin was.
+            try:
+                distance = float(raw_distance)
+            except (TypeError, ValueError):
+                distance = 0.0
+            # GSPro reports DistanceToTarget in YARDS off the green and in
+            # FEET once on it, and the message carries no units field — so log
+            # the whole Player object to make the active unit inspectable.
+            logger.info(
+                "GSPro club selected: %s (%.1f to target) raw_player=%s",
+                club, distance, player,
+            )
             if self._on_club_change and club:
-                self._on_club_change(club)
+                # NEVER let a callback exception escape: this runs on the
+                # socket listener thread, and an uncaught raise kills it
+                # permanently — no further club updates, no OBS switching and
+                # no reconnect, while is_connected still reports True.
+                try:
+                    self._on_club_change(club, distance)
+                except Exception:
+                    logger.exception("on_club_change callback raised")
         else:
             logger.debug("GSPro message (code %s): %s", code, msg)
 
@@ -489,9 +580,19 @@ class GSProClient:
         # character positions; re-encode the remainder to keep the buffer bytes.
         try:
             text = self._recv_buffer.decode("utf-8")
-        except UnicodeDecodeError:
-            # A multi-byte character was split across recvs — wait for the rest.
-            return 0
+        except UnicodeDecodeError as e:
+            if e.start >= len(self._recv_buffer) - 4:
+                # A multi-byte character split across recvs — wait for the rest.
+                return 0
+            # Invalid bytes MID-buffer never become decodable: strict decode
+            # would fail forever and every later valid message would be lost
+            # until reconnect.  Decode leniently; the resync below skips the
+            # replacement garbage.
+            logger.warning(
+                "GSPro framing: invalid UTF-8 at byte %d — decoding leniently",
+                e.start,
+            )
+            text = self._recv_buffer.decode("utf-8", errors="replace")
 
         decoder = json.JSONDecoder()
         idx = 0
@@ -505,11 +606,41 @@ class GSProClient:
                 break
             try:
                 msg, end = decoder.raw_decode(text, idx)
-            except json.JSONDecodeError:
-                # Incomplete (or genuinely malformed) trailing object. Keep the
-                # remainder buffered; the next recv should complete it. If it is
-                # truly malformed it will be retried, but that is rare and the
-                # connection is usually torn down first.
+            except json.JSONDecodeError as e:
+                if text[idx] != "{":
+                    # Garbage prefix: it can never become a valid object, and
+                    # keeping it poisoned the framing PERMANENTLY (reproduced:
+                    # 17 stray bytes → every later club message dropped).
+                    # Resync to the next possible object start.
+                    nxt = text.find("{", idx)
+                    if nxt == -1:
+                        logger.warning(
+                            "GSPro framing: discarded %d unparseable chars",
+                            n - idx,
+                        )
+                        idx = n
+                    else:
+                        logger.warning(
+                            "GSPro framing: skipped %d garbage chars", nxt - idx,
+                        )
+                        idx = nxt
+                    continue
+                # Starts with '{': usually an INCOMPLETE object (error at or
+                # near the buffer end) — wait for more data.  But a malformed
+                # COMPLETE object (e.g. lenient-decode replacement chars mid-
+                # object) errors far from the end and would otherwise be kept
+                # forever, swallowing every later message until the size cap
+                # (~1,870 club messages measured).  GSPro objects are a few
+                # hundred bytes and recv chunks are 2048, so an error more
+                # than one chunk from the end cannot be simple truncation.
+                if e.pos < n - 2048:
+                    nxt = text.find("{", idx + 1)
+                    logger.warning(
+                        "GSPro framing: malformed object at %d (err at %d) — "
+                        "resyncing", idx, e.pos,
+                    )
+                    idx = nxt if nxt != -1 else n
+                    continue
                 break
             idx = end
             if isinstance(msg, dict):
@@ -518,8 +649,16 @@ class GSProClient:
             else:
                 logger.debug("Ignoring non-object GSPro message: %r", msg)
 
-        # Persist whatever we could not fully parse.
-        self._recv_buffer = text[idx:].encode("utf-8")
+        # Persist whatever we could not fully parse — with a hard cap so a
+        # malformed-but-'{'-prefixed stream cannot grow the buffer unbounded.
+        remainder = text[idx:]
+        if len(remainder) > 65536:
+            logger.warning(
+                "GSPro framing: dropping %d-char unparseable buffer",
+                len(remainder),
+            )
+            remainder = ""
+        self._recv_buffer = remainder.encode("utf-8")
         return dispatched
 
     def _listen_once(self, sock: socket.socket) -> bool:
@@ -561,7 +700,10 @@ class GSProClient:
             self._connected.clear()
             return False
 
-        self._process_recv_data(data)
+        try:
+            self._process_recv_data(data)
+        except Exception:  # noqa: BLE001 — a dispatch bug must not kill the listener
+            logger.exception("GSPro message dispatch failed — continuing")
         return True
 
     def _message_listener(self) -> None:
@@ -574,14 +716,21 @@ class GSProClient:
         ``disconnect()`` only signals intent and shuts the socket down to wake
         this loop.
         """
+        gen = self._listener_gen
         backoff = 1.0
-        while self._running:
+        while self._running and gen == self._listener_gen:
             if not self._connected.is_set():
                 logger.info("Attempting reconnect (backoff=%.1fs)", backoff)
                 if self._open_socket():
                     backoff = 1.0
+                    # Re-arm GSPro: a reconnect that skips the ready signal
+                    # leaves GSPro not listening to this LM (reproduced).
+                    self._send_ready_signal()
                 else:
-                    time.sleep(backoff)
+                    # Event-based wait: disconnect() sets _wake so shutdown
+                    # never sits out a 30s sleep, and no second listener can
+                    # be spawned while this one is unkillable mid-backoff.
+                    self._wake.wait(timeout=backoff)
                     backoff = min(backoff * 2, 30.0)
                 continue
 

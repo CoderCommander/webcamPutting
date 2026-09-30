@@ -19,7 +19,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
-import time
 from dataclasses import replace
 
 from birdman_putting.config import AppConfig
@@ -51,8 +50,16 @@ class _WatchOnlyApp:
 
     # ---- GSPro club-change handler ----
 
-    def _on_club_change(self, club: str) -> None:
-        """Drive OBS scene switching on GSPro club selection."""
+    def _on_club_change(self, club: str, distance_to_target: float = 0.0) -> None:
+        """Drive OBS scene switching on GSPro club selection.
+
+        ``distance_to_target`` is supplied by GSProClient (code 201) and
+        defaulted so the 1-arg call in gspro_watcher.py stays valid. Watch-only
+        mode does not drive FS Golf swing modes, so it is unused here — but the
+        parameter MUST exist: GSProClient calls this with two arguments from
+        its listener thread, and a TypeError there kills the listener (and with
+        it OBS switching and reconnection) for the rest of the session.
+        """
         club_upper = (club or "").upper()
         if club_upper == self._last_club:
             return  # Debounce duplicate events

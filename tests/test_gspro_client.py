@@ -270,13 +270,53 @@ class TestListenerFraming:
 
     def test_club_change_callback_invoked_via_handle_message(self):
         """Code 201 with a Club drives the on_club_change callback."""
-        clubs = []
+        calls = []
         settings = ConnectionSettings(mode="gspro_direct")
-        client = GSProClient(settings, on_club_change=clubs.append)
+        client = GSProClient(
+            settings, on_club_change=lambda c, d: calls.append((c, d)),
+        )
 
         blob = json.dumps({"Code": 201, "Player": {"Club": "DR"}}).encode("utf-8")
         client._process_recv_data(blob)
-        assert clubs == ["DR"]
+        assert calls == [("DR", 0.0)]
+
+    def test_club_change_forwards_distance_to_target(self):
+        """DistanceToTarget must reach the callback.
+
+        Regression: it was never parsed, so app._on_club_change always saw
+        distance=0.0 and its "0 < distance <= 30" chipping rule could never
+        be true — the distance-gated wedges were stuck in Full Swing mode
+        no matter how close the pin was.
+        """
+        calls = []
+        settings = ConnectionSettings(mode="gspro_direct")
+        client = GSProClient(
+            settings, on_club_change=lambda c, d: calls.append((c, d)),
+        )
+
+        blob = json.dumps({
+            "Code": 201,
+            "Player": {"Handed": "RH", "Club": "SW", "DistanceToTarget": 7.0},
+        }).encode("utf-8")
+        client._process_recv_data(blob)
+        assert calls == [("SW", 7.0)]
+
+    def test_club_change_distance_tolerates_string_and_missing(self):
+        """A string distance parses; a missing/garbage one degrades to 0.0."""
+        calls = []
+        settings = ConnectionSettings(mode="gspro_direct")
+        client = GSProClient(
+            settings, on_club_change=lambda c, d: calls.append((c, d)),
+        )
+
+        for player in (
+            {"Club": "PW", "DistanceToTarget": "12.5"},
+            {"Club": "GW"},
+            {"Club": "AW", "DistanceToTarget": None},
+        ):
+            client._handle_message({"Code": 201, "Player": player})
+
+        assert calls == [("PW", 12.5), ("GW", 0.0), ("AW", 0.0)]
 
 
 class TestListenerCleanDisconnect:
@@ -430,3 +470,70 @@ class TestPublicApiPreserved:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+class TestFramingResync:
+    """Garbage on the socket must not poison message framing permanently.
+
+    Regression (reproduced in review): 17 stray bytes -- or a single 0xFF --
+    kept an unparseable prefix buffered forever, so every subsequent valid
+    club message dispatched zero callbacks until reconnect.
+    """
+
+    @staticmethod
+    def _client_with_callback():
+        calls = []
+        settings = ConnectionSettings(mode="gspro_direct")
+        client = GSProClient(
+            settings, on_club_change=lambda c, d: calls.append((c, d)),
+        )
+        return client, calls
+
+    def test_garbage_prefix_resyncs_to_next_object(self):
+        client, calls = self._client_with_callback()
+        blob = b"NOISE-NOT-JSON" + json.dumps(
+            {"Code": 201, "Player": {"Club": "PT", "DistanceToTarget": 6.0}},
+        ).encode("utf-8")
+        n = client._process_recv_data(blob)
+        assert n == 1
+        assert calls == [("PT", 6.0)]
+
+    def test_invalid_utf8_mid_buffer_does_not_poison(self):
+        client, calls = self._client_with_callback()
+        blob = b"\xff\xfe" + json.dumps(
+            {"Code": 201, "Player": {"Club": "DR", "DistanceToTarget": 300.0}},
+        ).encode("utf-8")
+        n = client._process_recv_data(blob)
+        assert n == 1
+        assert calls == [("DR", 300.0)]
+
+    def test_split_multibyte_at_end_still_waits(self):
+        client, calls = self._client_with_callback()
+        # A split multi-byte char at the END is legitimate partial data: the
+        # whole buffer is deferred until the rest arrives (no lenient decode,
+        # which would corrupt the char), and NOTHING is lost.
+        eacute = "é".encode()
+        first = json.dumps({"Code": 1}).encode("utf-8") + eacute[:1]
+        n1 = client._process_recv_data(first)
+        assert n1 == 0  # deferred, not lost
+        n2 = client._process_recv_data(eacute[1:])
+        assert n2 == 1  # object dispatched once the char completes
+
+    def test_oversize_unparseable_buffer_is_dropped(self):
+        client, _ = self._client_with_callback()
+        # '{'-prefixed but never completing: must not grow unbounded.
+        client._process_recv_data(b"{" + b'"x": "' + b"A" * 70000)
+        assert len(client._recv_buffer) < 70000
+
+    def test_dispatch_exception_does_not_kill_processing(self):
+        """S8: a raising callback must not propagate out of _listen_once."""
+        settings = ConnectionSettings(mode="gspro_direct")
+
+        def boom(club: str, dist: float) -> None:
+            raise RuntimeError("callback bug")
+
+        client = GSProClient(settings, on_club_change=boom)
+        blob = json.dumps({"Code": 201, "Player": {"Club": "DR"}}).encode("utf-8")
+        # on_club_change raising is caught inside _handle_message's guard;
+        # _process_recv_data must complete without raising either way.
+        client._process_recv_data(blob)

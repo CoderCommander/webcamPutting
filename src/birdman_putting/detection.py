@@ -54,6 +54,11 @@ class BallDetector:
         # Pre-allocate reusable objects (avoid per-frame allocation)
         self._morph_kernel = np.ones((3, 3), np.uint8)
         self._update_hsv_bounds(hsv_range)
+        # One-shot warning keys for out-of-frame detection zones (see detect).
+        # A SET, not a single key: the STARTED state runs TWO passes per frame
+        # with different x-ranges, so last-key storage alternated between two
+        # keys and re-warned at frame rate.
+        self._warned_empty_zones: set[tuple[int, ...]] = set()
 
     def _update_hsv_bounds(self, hsv_range: HSVRange) -> None:
         """Pre-compute cached HSV bound arrays."""
@@ -132,6 +137,16 @@ class BallDetector:
         crop_y2 = min(h, zone_y2 + margin)
         crop_x1 = max(0, zone_x1 - margin)
         crop_x2 = min(w, zone_x2_limit + margin)
+
+        # A zone that lies entirely outside the processed frame (e.g. stale
+        # coordinates after a resolution change) yields a zero-area ROI;
+        # GaussianBlur then asserts, and at 43-60fps that is a full stack
+        # trace PER FRAME (~150MB/h of log) with zero detection.  Bail out
+        # once per zone instead.
+        if crop_y1 >= crop_y2 or crop_x1 >= crop_x2:
+            self._warn_empty_zone(zone_x1, zone_y1, zone_x2_limit, zone_y2, w, h)
+            return None
+
         roi = frame[crop_y1:crop_y2, crop_x1:crop_x2]
 
         # Blur and convert to HSV for color-based detection.
@@ -315,6 +330,20 @@ class BallDetector:
             expected_pos=expected_pos,
         )
 
+    def _warn_empty_zone(
+        self, zx1: int, zy1: int, zx2: int, zy2: int, w: int, h: int,
+    ) -> None:
+        """Warn ONCE per distinct (zone, frame-size) about an unusable zone."""
+        zone_key = (zx1, zy1, zx2, zy2, w, h)
+        if zone_key not in self._warned_empty_zones:
+            self._warned_empty_zones.add(zone_key)
+            logger.warning(
+                "Detection zone (%d,%d)-(%d,%d) lies outside the %dx%d "
+                "processed frame — no detection possible; re-run zone "
+                "calibration",
+                zx1, zy1, zx2, zy2, w, h,
+            )
+
     def get_mask(
         self,
         frame: np.ndarray,
@@ -330,6 +359,11 @@ class BallDetector:
         cy2 = min(h, zone_y2 + margin)
         cx1 = max(0, zone_x1 - margin)
         cx2 = min(w, zone_x2_limit + margin)
+        # Same zero-area bail-out as detect(): without it, headless debug
+        # mode ('d') hit the GaussianBlur assertion at frame rate.
+        if cy1 >= cy2 or cx1 >= cx2:
+            self._warn_empty_zone(zone_x1, zone_y1, zone_x2_limit, zone_y2, w, h)
+            return np.zeros((1, 1), np.uint8)
         roi = frame[cy1:cy2, cx1:cx2]
         blurred = cv2.GaussianBlur(roi, self.blur_kernel, 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
@@ -434,5 +468,11 @@ def resize_with_aspect_ratio(
     else:
         ratio = width / float(w)
         dim = (width, int(h * ratio))
+
+    # No-op resize: at 640-wide capture with process_width=640 this is EVERY
+    # frame — skip the copy (0.07ms + a 0.9MB allocation per frame).  All
+    # callers own their input frame, so returning it unchanged is safe.
+    if dim == (w, h):
+        return image
 
     return cv2.resize(image, dim, interpolation=inter)

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from birdman_putting.config import MevoSettings
+from birdman_putting.mevo import detector as detector_mod
 from birdman_putting.mevo.detector import (
     STABILITY_K,
     MevoDetector,
@@ -130,7 +131,12 @@ class TestMevoDetector:
         mse_threshold: float = 100.0,
         roi_names: tuple[str, ...] = ("ball_speed", "launch_angle", "launch_direction"),
     ) -> tuple[MevoDetector, MagicMock, MagicMock]:
-        settings = MevoSettings(enabled=True, mse_threshold=mse_threshold)
+        # min_settle_s=0.0: these tests exercise the POLL-COUNT (K agreeing
+        # reads) half of the gate. The wall-clock floor is covered separately
+        # by TestWallClockSettleFloor.
+        settings = MevoSettings(
+            enabled=True, mse_threshold=mse_threshold, min_settle_s=0.0,
+        )
         mock_ocr = MagicMock()
         # The detector iterates ocr._rois for MSE / configured-field checks,
         # so the mock must expose a realistic ROI list.
@@ -518,7 +524,9 @@ def _detector_with_rois(
     roi_names: tuple[str, ...] = ("ball_speed", "launch_angle", "launch_direction"),
 ) -> tuple[MevoDetector, MagicMock, MagicMock]:
     """Build a detector whose mock OCR exposes a realistic ROI list."""
-    settings = MevoSettings(enabled=True, mse_threshold=mse_threshold)
+    settings = MevoSettings(
+        enabled=True, mse_threshold=mse_threshold, min_settle_s=0.0,
+    )
     ocr = MagicMock()
     ocr._rois = [ROI(name=n, x=0, y=0, width=10, height=10) for n in roi_names]
     capture = MagicMock()
@@ -537,3 +545,236 @@ class TestPuttFallbackConfig:
         settings = MevoSettings(putt_fallback=True, putt_fallback_max_age_s=5.0)
         assert settings.putt_fallback is True
         assert settings.putt_fallback_max_age_s == 5.0
+
+
+class TestWallClockSettleFloor:
+    """The settle gate must be floored in WALL CLOCK, not just poll count.
+
+    The K-agreeing-reads gate historically got its real protection from each
+    poll costing ~2.2s of OCR — longer than the time FS Golf takes to finish
+    painting the panel. Once OCR got ~5x faster, K reads could span <1s and
+    land entirely inside that window, which is the documented misread failure
+    mode. The floor is measured from the FIRST display change of a confirming
+    window (FS Golf paints twice; the hazard is a second paint still to come),
+    so speeding up OCR can never shrink the evidence window again.
+    """
+
+    @staticmethod
+    def _detector(min_settle_s: float) -> tuple[MevoDetector, MagicMock, MagicMock]:
+        settings = MevoSettings(
+            enabled=True, mse_threshold=0.0, min_settle_s=min_settle_s,
+        )
+        ocr = MagicMock()
+        ocr._rois = [
+            ROI(name=n, x=0, y=0, width=4, height=4)
+            for n in ("ball_speed", "launch_angle", "launch_direction")
+        ]
+        capture = MagicMock()
+        det = MevoDetector(settings, ocr, capture)
+        det._baseline_captured = True
+        return det, ocr, capture
+
+    @staticmethod
+    def _run(det, ocr, capture, metrics, polls, clock_step, monkeypatch):
+        """Poll `polls` times with a fake clock advancing clock_step per call."""
+        state = {"t": 0.0}
+
+        def fake_clock() -> float:
+            state["t"] += clock_step
+            return state["t"]
+
+        monkeypatch.setattr(detector_mod.time, "perf_counter", fake_clock)
+        ocr.read_metrics.return_value = dict(metrics)
+        emitted = []
+        for i in range(polls):
+            capture.capture.return_value = np.full((8, 8, 3), i + 1, np.uint8)
+            r = det.poll()
+            if r is not None:
+                emitted.append(r)
+        return emitted
+
+    def test_fast_polls_inside_animation_do_not_emit(self, monkeypatch) -> None:
+        """K agreeing reads spanning far less than the floor must NOT emit."""
+        det, ocr, capture = self._detector(min_settle_s=2.0)
+        metrics = {
+            "ball_speed": 100.0, "launch_angle": 15.0, "launch_direction": 1.0,
+        }
+        # 0.05s per perf_counter call — K reads span well under 2.0s.
+        emitted = self._run(det, ocr, capture, metrics, 8, 0.05, monkeypatch)
+        assert emitted == [], "emitted while still inside the settle floor"
+
+    def test_same_reads_spanning_the_floor_do_emit(self, monkeypatch) -> None:
+        """The identical read sequence, spread over time, MUST emit."""
+        det, ocr, capture = self._detector(min_settle_s=2.0)
+        metrics = {
+            "ball_speed": 100.0, "launch_angle": 15.0, "launch_direction": 1.0,
+        }
+        emitted = self._run(det, ocr, capture, metrics, 8, 1.0, monkeypatch)
+        assert emitted, "did not emit even after the settle floor elapsed"
+        assert emitted[0].ball_speed == 100.0
+
+    def test_floor_is_configurable(self) -> None:
+        settings = MevoSettings(min_settle_s=0.0)
+        assert settings.min_settle_s == 0.0
+        # Default is measurement-derived: worst observed first->final paint
+        # gap on this rig was 1.198s, plus 0.35s margin.
+        assert MevoSettings().min_settle_s == 1.55
+
+    def test_second_paint_before_floor_commits_final_values(
+        self, monkeypatch,
+    ) -> None:
+        """FS Golf's real behaviour: preliminary paint, then final paint.
+
+        The detector must emit the FINAL values and must never have committed
+        the preliminary ones on the way there. The preliminary figures here
+        mirror the documented incident (VLA 26.5).
+        """
+        det, ocr, capture = self._detector(min_settle_s=1.55)
+        prelim = {
+            "ball_speed": 26.5, "launch_angle": 5.0, "launch_direction": 1.0,
+        }
+        final = {
+            "ball_speed": 108.0, "launch_angle": 17.0, "launch_direction": -2.0,
+        }
+        state = {"t": 0.0}
+
+        def clock() -> float:
+            state["t"] += 0.15
+            return state["t"]
+
+        monkeypatch.setattr(detector_mod.time, "perf_counter", clock)
+
+        emitted = []
+        for i in range(30):
+            capture.capture.return_value = np.full((8, 8, 3), i + 1, np.uint8)
+            # Preliminary paint for ~1.1s, then the final paint.
+            ocr.read_metrics.return_value = dict(
+                prelim if state["t"] < 1.1 else final,
+            )
+            r = det.poll()
+            if r is not None:
+                emitted.append(r)
+
+        assert emitted, "never emitted a shot"
+        assert all(s.ball_speed == 108.0 for s in emitted), (
+            f"emitted preliminary values: {[s.ball_speed for s in emitted]}"
+        )
+
+
+class TestSmashFactorCrossCheck:
+    """Smash factor is OCR'd independently of ball/club speed, so it is real
+    external evidence against a mid-animation misread of any of the three."""
+
+    @staticmethod
+    def _metrics(**over):
+        base = {
+            "ball_speed": 100.0, "launch_angle": 15.0, "launch_direction": 1.0,
+            "spin_rate": 5000.0, "club_speed": 70.0, "smash_factor": 1.43,
+        }
+        base.update(over)
+        return base
+
+    def test_consistent_triple_accepted(self) -> None:
+        assert _validate_metrics(self._metrics()) is True
+
+    def test_inconsistent_triple_rejected(self) -> None:
+        # 100/70 = 1.43, but the display claims 1.05
+        assert _validate_metrics(self._metrics(smash_factor=1.05)) is False
+
+    def test_missing_club_speed_skips_check(self) -> None:
+        m = self._metrics()
+        m.pop("club_speed")
+        assert _validate_metrics(m) is True
+
+
+class TestBatchPageSplit:
+    """The batch OCR backend must map pages to ROIs positionally, and must not
+    destroy a legitimately-blank LAST page.
+
+    Regression: tesseract emits \f as a SEPARATOR (N images -> N-1 form
+    feeds), so split() already yields exactly N pages. Unconditionally popping
+    an empty trailing page therefore fired whenever the LAST ROI was blank —
+    and the last configured ROI is vertical_impact, which legitimately renders
+    "-". That nulled all 20 fields and silently lost the whole stroke.
+    """
+
+    @staticmethod
+    def _ocr(names):
+        from birdman_putting.mevo.ocr import ROI, MevoOCR
+        rois = [ROI(name=n, x=0, y=0, width=8, height=8) for n in names]
+        return MevoOCR(rois=rois, backend="batch"), rois
+
+    def _run(self, names, pages_text, monkeypatch):
+        import birdman_putting.mevo.ocr as ocrmod
+        ocr, rois = self._ocr(names)
+
+        class P:
+            returncode = 0
+            stderr = b""
+            stdout = pages_text.encode()
+
+        monkeypatch.setattr(ocrmod.subprocess, "run", lambda *a, **k: P())
+        monkeypatch.setattr(ocrmod.cv2, "imwrite", lambda *a, **k: True)
+        frame = np.zeros((40, 40, 3), np.uint8)
+        return ocr._read_metrics_batch(frame)
+
+    def test_blank_last_page_does_not_null_everything(self, monkeypatch) -> None:
+        names = ["ball_speed", "launch_angle", "vertical_impact"]
+        # 3 images -> 2 separators; last page blank (the "-" tile)
+        res = self._run(names, "92.6\f21.4\f   \n", monkeypatch)
+        assert res is not None
+        assert res["ball_speed"] == 92.6, res
+        assert res["launch_angle"] == 21.4, res
+        assert res["vertical_impact"] is None      # blank, but non-blocking
+        # The critical assertion: the OTHER fields survived.
+        assert sum(1 for v in res.values() if v is None) == 1, res
+
+    def test_genuinely_extra_trailing_page_is_dropped(self, monkeypatch) -> None:
+        names = ["ball_speed", "launch_angle"]
+        # A build that TERMINATES with \f -> 3 elements for 2 ROIs
+        res = self._run(names, "92.6\f21.4\f", monkeypatch)
+        assert res is not None
+        assert res["ball_speed"] == 92.6
+        assert res["launch_angle"] == 21.4
+
+    def test_short_page_list_holds_shot_rather_than_shifting(self, monkeypatch) -> None:
+        names = ["ball_speed", "launch_angle", "spin_rate"]
+        res = self._run(names, "92.6\f21.4", monkeypatch)   # 2 pages, 3 ROIs
+        assert res is not None
+        # Never zip a short list — that would put launch_angle's text into
+        # spin_rate. All-None holds the shot instead.
+        assert all(v is None for v in res.values()), res
+
+
+class TestRebaselineIsThreadSafe:
+    """reset_baseline() is called from the GSPro listener thread; it must only
+    set a flag, never mutate state a mid-flight poll() is reading."""
+
+    def test_reset_baseline_only_sets_flag(self) -> None:
+        det, ocr, capture = TestWallClockSettleFloor._detector(min_settle_s=0.0)
+        det._prev_crops = {"ball_speed": np.zeros((4, 4), np.int16)}
+        det._baseline_captured = True
+
+        det.reset_baseline()
+
+        # Nothing mutated yet — a concurrent poll() cannot trip over a None.
+        assert det._prev_crops is not None
+        assert det._baseline_captured is True
+        assert det._needs_rebaseline is True
+
+    def test_poll_consumes_flag_and_rebaselines(self) -> None:
+        det, ocr, capture = TestWallClockSettleFloor._detector(min_settle_s=0.0)
+        det._baseline_captured = True
+        ocr.read_metrics.return_value = {
+            "ball_speed": 100.0, "launch_angle": 15.0, "launch_direction": 1.0,
+        }
+        capture.capture.return_value = np.full((8, 8, 3), 7, np.uint8)
+
+        det.reset_baseline()
+        result = det.poll()
+
+        # First poll after a resume re-baselines and emits nothing, so a shot
+        # displayed during the pause cannot leak to GSPro.
+        assert result is None
+        assert det._needs_rebaseline is False
+        assert det._baseline_captured is True

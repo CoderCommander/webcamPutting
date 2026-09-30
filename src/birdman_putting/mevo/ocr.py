@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass
 
 import cv2
@@ -217,6 +221,15 @@ def parse_field(name: str, text: str) -> float | None:
     body = cleaned[:-1] if (cleaned and cleaned[-1] in "RL") else cleaned
     # Strip any other stray letters and surrounding dots/dashes.
     body = re.sub(r"[A-Za-z]", "", body).strip()
+    # Strip a stray TRAILING dot left by OCR (the degree glyph on "11.0 L"
+    # reads as "11.0.L").  Without this the trailing dot makes float() raise
+    # and the whole shot is held by _read_is_candidate().
+    #
+    # rstrip, NOT strip: a LEADING dot is a dropped leading zero, and removing
+    # it silently rescales the value — ".926" would become 92.6 (a plausible
+    # ball speed that passes the range gate) instead of being rejected.  We
+    # never guess a magnitude.  Interior duplicate dots are still rejected.
+    body = body.rstrip(".")
 
     # Determine sign from a leading dash too (rare on this display).
     if body.startswith("-"):
@@ -288,6 +301,7 @@ class MevoOCR:
         self,
         rois: list[ROI],
         tessdata_dir: str | None = None,
+        backend: str = "batch",
     ) -> None:
         from concurrent.futures import ThreadPoolExecutor
 
@@ -296,6 +310,7 @@ class MevoOCR:
         self._pytesseract = pytesseract
         self._rois = rois
         self._tessdata_dir = tessdata_dir
+        self._backend = backend
 
         # Build Tesseract config string (include R/L for direction suffixes)
         parts = ["--psm 7", "-c tessedit_char_whitelist=0123456789.-RL"]
@@ -308,6 +323,121 @@ class MevoOCR:
 
         # Pre-allocate reusable kernel for dilation
         self._dilate_kernel = np.ones((2, 2), np.uint8)
+
+        # --- batch backend scratch space ---------------------------------
+        # Per-instance dir so a concurrent calibration run cannot collide
+        # with the live mevo poll thread.
+        self._scratch_dir = os.path.join(
+            tempfile.gettempdir(), f"birdman_ocr_{os.getpid()}_{id(self):x}",
+        )
+        with contextlib.suppress(OSError):
+            os.makedirs(self._scratch_dir, exist_ok=True)
+        self._list_path = os.path.join(self._scratch_dir, "roi_list.txt")
+
+    def _tess_args(self) -> list[str]:
+        """Tesseract CLI args as a LIST.
+
+        Deliberately not ``self._tess_config.split()`` — a tessdata dir
+        containing spaces would be shredded into bogus argv entries.
+        """
+        args = [
+            "--psm", "7",
+            "-c", "tessedit_char_whitelist=0123456789.-RL",
+        ]
+        if self._tessdata_dir:
+            args += ["--tessdata-dir", self._tessdata_dir]
+        return args
+
+    def _read_metrics_batch(
+        self, frame: np.ndarray,
+    ) -> dict[str, float | None] | None:
+        """OCR every ROI in ONE tesseract invocation.
+
+        Tesseract accepts a text file listing image paths and emits one
+        form-feed (``\\x0c``) separated page per image, in order.  That turns
+        N process spawns (~300 ms each, 96% of which is CreateProcess +
+        tessdata init) into a single ~335 ms call.
+
+        Returns None if the batch could not be run/trusted, so the caller can
+        fall back to the per-ROI path.  Returns an all-None dict if the output
+        could not be positionally trusted — never a misaligned mapping.
+        """
+        paths: list[str] = []
+        for idx, roi in enumerate(self._rois):
+            path = os.path.join(self._scratch_dir, f"roi_{idx:02d}.png")
+            crop = self._crop_roi(frame, roi)
+            if crop is None or crop.size == 0:
+                # Placeholder keeps this slot occupied so page N still maps to
+                # ROI N.  An all-white image OCRs to an empty page.
+                img = np.full((32, 64), 255, np.uint8)
+            else:
+                img = self._preprocess(crop)
+            if not cv2.imwrite(path, img):
+                logger.warning("Batch OCR: failed to write %s", path)
+                return None
+            paths.append(path)
+
+        try:
+            with open(self._list_path, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(paths))
+        except OSError:
+            logger.warning("Batch OCR: could not write image list", exc_info=True)
+            return None
+
+        cmd = [
+            str(self._pytesseract.pytesseract.tesseract_cmd),
+            self._list_path,
+            "stdout",
+            *self._tess_args(),
+        ]
+        try:
+            proc = subprocess.run(  # noqa: S603
+                cmd,
+                capture_output=True,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.warning("Batch OCR invocation failed: %r", exc)
+            return None
+
+        if proc.returncode != 0:
+            logger.warning(
+                "Batch OCR exited %d: %s",
+                proc.returncode, proc.stderr.decode("utf-8", "replace")[:200],
+            )
+            return dict.fromkeys(r.name for r in self._rois)
+
+        text = proc.stdout.decode("utf-8", "replace")
+        # Tesseract emits \f as a SEPARATOR, not a terminator: N images produce
+        # N-1 form feeds, so split() already yields exactly N pages.  Only drop
+        # a genuinely EXTRA trailing page (in case a future build terminates
+        # with \f).  Popping an empty LAST page unconditionally would destroy a
+        # legitimate blank read — and the last configured ROI is
+        # vertical_impact, whose tile renders "-" on many shots, so that bug
+        # nulled all 20 fields and silently lost the whole stroke.
+        pages = text.split("\f")
+        if len(pages) == len(self._rois) + 1 and not pages[-1].strip():
+            pages.pop()
+
+        if len(pages) != len(self._rois):
+            # NEVER zip a short page list: a one-page shift would silently put
+            # spin_rate's text into spin_axis.  Hold the shot instead.
+            logger.warning(
+                "Batch OCR page/ROI mismatch (%d pages, %d ROIs) — discarding read",
+                len(pages), len(self._rois),
+            )
+            return dict.fromkeys(r.name for r in self._rois)
+
+        results: dict[str, float | None] = {}
+        for roi, page in zip(self._rois, pages, strict=True):
+            value = parse_field(roi.name, page)
+            results[roi.name] = value
+            # Preserve per-ROI attribution so detector.py's "Configured field
+            # '%s' failed OCR" message still names the real culprit.
+            logger.debug("ROI '%s': raw='%s' → %s", roi.name, page.strip(), value)
+        return results
 
     def _read_single_roi(
         self, frame: np.ndarray, roi: ROI,
@@ -341,6 +471,14 @@ class MevoOCR:
         Returns:
             Dict mapping ROI name to parsed float (or None if unreadable).
         """
+        if self._backend == "batch":
+            batched = self._read_metrics_batch(frame)
+            if batched is not None:
+                return batched
+            # Batch could not run (not: could not read) — fall back to the
+            # per-ROI path rather than dropping the shot.
+            logger.warning("Batch OCR unavailable — falling back to per-ROI OCR")
+
         futures = [
             self._pool.submit(self._read_single_roi, frame, roi)
             for roi in self._rois

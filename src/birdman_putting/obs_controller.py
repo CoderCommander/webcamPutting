@@ -32,6 +32,17 @@ class OBSController:
         self._idle_timer: threading.Timer | None = None
         self._created_sources: set[str] = set()  # Track auto-created text sources
         self._on_idle = on_idle  # Called when transitioning back to idle scene
+        # Reconnect machinery: obsws calls run on several threads (GSPro
+        # listener, mevo poll, idle Timer, UI) -- serialize client swaps and
+        # rate-limit reconnect attempts so an OBS restart mid-session heals
+        # itself instead of silently killing scene switching forever.
+        self._client_lock = threading.Lock()
+        self._last_connect_attempt: float = 0.0
+        self._closed = False  # set by disconnect(); blocks auto-reconnect
+        # Scene that failed to apply while OBS was down: replayed once on the
+        # next successful (re)connect so the projector is not stuck on the
+        # wrong view for a whole putting spell.
+        self._pending_scene: str | None = None
 
     def connect(self) -> bool:
         """Connect to OBS WebSocket server.
@@ -42,11 +53,24 @@ class OBSController:
         try:
             import obsws_python as obs
 
+            # timeout=3 is essential: obsws-python defaults to timeout=None,
+            # and a hung-but-alive OBS then blocks the CALLING thread forever
+            # -- measured blocking the GSPro listener thread (club gating,
+            # Mevo pause/resume, FS Golf key sends all stall behind it).
             self._client = obs.ReqClient(
                 host=self._settings.host,
                 port=self._settings.port,
                 password=self._settings.password or None,
+                timeout=3,
             )
+            self._closed = False
+            pending, self._pending_scene = self._pending_scene, None
+            if pending:
+                try:
+                    self._client.set_current_program_scene(pending)
+                    logger.info("OBS: applied pending scene '%s'", pending)
+                except Exception:
+                    logger.warning("OBS: pending scene '%s' failed", pending)
             logger.info(
                 "Connected to OBS at %s:%d",
                 self._settings.host, self._settings.port,
@@ -81,7 +105,8 @@ class OBSController:
             return False
 
     def disconnect(self) -> None:
-        """Disconnect from OBS."""
+        """Disconnect from OBS (and stop auto-reconnecting)."""
+        self._closed = True
         self._cancel_idle_timer()
         if self._client is not None:
             with contextlib.suppress(Exception):
@@ -89,9 +114,49 @@ class OBSController:
             self._client = None
             logger.info("Disconnected from OBS")
 
+    def _mark_disconnected(self) -> None:
+        """Drop the client after a failed request so the next call reconnects.
+
+        Without this, a dead client object lived forever: after an OBS
+        restart every scene switch failed silently for the rest of the
+        session, with Stop/Start (and a 50-90s camera reopen) the only cure.
+        """
+        with self._client_lock:
+            if self._client is not None:
+                with contextlib.suppress(Exception):
+                    self._client.base_client.ws.close()  # type: ignore[attr-defined]
+                self._client = None
+        logger.warning("OBS request failed -- connection dropped, will retry")
+
+    def _ensure_client(self) -> bool:
+        """Return True if a client exists, lazily reconnecting at most every 5s.
+
+        Non-blocking for concurrent callers: if another thread is already
+        reconnecting, return False immediately rather than queueing a second
+        3s connect behind it.
+        """
+        if self._client is not None:
+            return True
+        if self._closed:
+            return False
+        import time as _time
+        if not self._client_lock.acquire(blocking=False):
+            return False
+        try:
+            if self._client is not None:
+                return True
+            now = _time.monotonic()
+            if now - self._last_connect_attempt < 5.0:
+                return False
+            self._last_connect_attempt = now
+        finally:
+            self._client_lock.release()
+        # connect() runs outside the lock: it blocks up to ~3s.
+        return self.connect()
+
     def show_mevo_shot(self, shot: MevoShotData) -> None:
         """Switch to Mevo scene and populate text sources with shot data."""
-        if self._client is None:
+        if not self._ensure_client():
             return
 
         self._cancel_idle_timer()
@@ -134,6 +199,7 @@ class OBSController:
             logger.info("OBS: Mevo shot data displayed")
         except Exception as e:
             logger.error("OBS: Failed to show Mevo shot: %s", e)
+            self._mark_disconnected()
 
         self._schedule_idle()
 
@@ -143,7 +209,7 @@ class OBSController:
         When auto_scene_switch is on, the scene is already switched by the
         club change callback — skip text updates and idle timer entirely.
         """
-        if self._client is None:
+        if not self._ensure_client():
             return
 
         if self._settings.auto_scene_switch:
@@ -165,12 +231,13 @@ class OBSController:
             logger.info("OBS: Putt data displayed")
         except Exception as e:
             logger.error("OBS: Failed to show putt: %s", e)
+            self._mark_disconnected()
 
         self._schedule_idle()
 
     def show_idle(self) -> None:
         """Switch back to idle/default scene and clear trail."""
-        if self._client is None:
+        if not self._ensure_client():
             return
 
         try:
@@ -181,6 +248,7 @@ class OBSController:
             logger.info("OBS: Switched to idle scene")
         except Exception as e:
             logger.error("OBS: Failed to switch to idle scene: %s", e)
+            self._mark_disconnected()
 
         if self._on_idle:
             self._on_idle()
@@ -202,11 +270,12 @@ class OBSController:
                 resp, "scene_name", None,
             )
         except Exception:
+            self._mark_disconnected()
             return None
 
     def switch_to_scene(self, scene_name: str) -> bool:
         """Switch OBS to the named scene. Returns True on success."""
-        if self._client is None or not scene_name:
+        if not scene_name or not self._ensure_client():
             return False
         try:
             import obsws_python as obs  # noqa: F811
@@ -217,11 +286,13 @@ class OBSController:
             return True
         except Exception as e:
             logger.error("OBS: Failed to switch to scene '%s': %s", scene_name, e)
+            self._mark_disconnected()
             return False
 
     def switch_to_putt(self) -> None:
         """Switch to putt scene (no idle timer — stays until club changes)."""
-        if self._client is None:
+        if not self._ensure_client():
+            self._pending_scene = self._settings.putt_scene
             return
 
         self._cancel_idle_timer()
@@ -234,10 +305,13 @@ class OBSController:
             logger.info("OBS: Switched to putt scene (putter selected)")
         except Exception as e:
             logger.error("OBS: Failed to switch to putt scene: %s", e)
+            self._pending_scene = self._settings.putt_scene
+            self._mark_disconnected()
 
     def switch_to_main(self) -> None:
         """Switch to main/idle scene (non-putter club selected)."""
-        if self._client is None:
+        if not self._ensure_client():
+            self._pending_scene = self._settings.idle_scene
             return
 
         self._cancel_idle_timer()
@@ -250,6 +324,8 @@ class OBSController:
             logger.info("OBS: Switched to main scene (non-putter selected)")
         except Exception as e:
             logger.error("OBS: Failed to switch to main scene: %s", e)
+            self._pending_scene = self._settings.idle_scene
+            self._mark_disconnected()
 
         if self._on_idle:
             self._on_idle()

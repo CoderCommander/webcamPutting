@@ -215,15 +215,18 @@ class VideoPanel(ctk.CTkLabel):
                 self._display_height = avail_h
                 self._display_width = max(1, int(avail_h * frame_aspect))
 
-        # BGR -> RGB
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(rgb)
-
-        # Resize to display dimensions
-        pil_image = pil_image.resize(
+        # Resize FIRST (in BGR, with cv2), then convert.  The old path did
+        # PIL LANCZOS at 13.8ms/frame ON THE TKINTER MAIN THREAD — sharing
+        # the 3 pinned cores with capture and detection; cv2 INTER_AREA is
+        # ~3.0ms (measured), visually equivalent for live video, and resizing
+        # before cvtColor converts fewer pixels when downscaling.
+        resized = cv2.resize(
+            frame,
             (self._display_width, self._display_height),
-            Image.LANCZOS,  # type: ignore[attr-defined]
+            interpolation=cv2.INTER_AREA,
         )
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(rgb)
 
         # Update the CTkImage
         self._ctk_image = ctk.CTkImage(

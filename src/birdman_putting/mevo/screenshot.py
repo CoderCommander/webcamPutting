@@ -149,7 +149,13 @@ else:
             # Get window dimensions
             rect = wt.RECT()
             if not user32.GetClientRect(self._hwnd, ctypes.byref(rect)):
-                logger.debug("GetClientRect failed")
+                # The cached handle is STALE (window closed/recreated, e.g.
+                # after an FS Golf or GSPro restart).  Without resetting it,
+                # this failed forever — capture was permanently dead for the
+                # rest of the session.  Drop the handle so the next capture
+                # re-finds the (possibly new) window.
+                logger.debug("GetClientRect failed — dropping stale window handle")
+                self._hwnd = 0
                 return None
 
             width = rect.right - rect.left

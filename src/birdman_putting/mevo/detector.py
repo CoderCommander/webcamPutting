@@ -15,6 +15,17 @@ from birdman_putting.mevo.screenshot import WindowCapture
 
 logger = logging.getLogger(__name__)
 
+# Fields that may LEGITIMATELY be absent on an individual shot. The Mevo does
+# not compute face-impact location for every strike — those tiles render as
+# "-" — so a missing value here must NOT hold the shot. They are sent to GSPro
+# as 0.0 (same as when they are not calibrated at all). Every OTHER configured
+# ROI still blocks on failure: a field that is normally present but suddenly
+# unreadable means the read is untrustworthy (see _read_is_candidate).
+NON_BLOCKING_FIELDS: frozenset[str] = frozenset({
+    "lateral_impact",
+    "vertical_impact",
+})
+
 # Number of consecutive agreeing OCR reads required before a shot is emitted.
 # The Mevo display animates the digits into place when a shot lands; the first
 # changed frame catches it mid-animation. Requiring K stable reads ensures we
@@ -22,10 +33,34 @@ logger = logging.getLogger(__name__)
 # / tests can reference it.
 STABILITY_K: int = 3
 
+# --- Wall-clock settle floor -------------------------------------------
+# CRITICAL: the K-read gate is counted in POLLS, but its real protection has
+# always come from the poll PERIOD (OCR-bound, ~2.2s) exceeding FS Golf's
+# ~1-2s digit animation — which guaranteed at least one post-animation sample.
+# Once OCR got ~5x faster (batch backend), K=3 agreeing reads can span <1s,
+# i.e. entirely INSIDE the animation, and _reads_agree is tolerance-based
+# (spin_rate +/-75 rpm) so consecutive mid-animation reads are MORE likely to
+# agree at a faster poll rate. That is exactly the documented failure mode
+# above. So the settle window is now floored in WALL CLOCK, decoupling safety
+# from poll speed: faster OCR now buys latency AND denser sampling, not risk.
+# Measured on this rig over 6 shots: FS Golf paints the panel TWICE, with the
+# final paint 0.864-1.198s after the first (mean 1.041s), then never changes.
+# Capture noise floor is 0 changed px, so those transitions are unambiguous.
+# 1.55 = worst observed 1.198 + 0.35 margin.  Re-measure after an FS Golf
+# update; scripts in the session scratchpad (measure_multi.py).
+MIN_SETTLE_S: float = 1.55  # min seconds from FIRST display change to commit
+# The agreeing-read streak must ALSO span the worst first->final paint gap
+# (1.198s measured), so a confirming window that was already open cannot let a
+# preliminary paint commit on window-age alone. Independent of poll rate.
+MIN_STREAK_SPAN_S: float = 1.25
+SETTLE_MAX_S: float = 8.0   # wall-clock budget before abandoning a candidate
+
 # Max polls to spend confirming a single display change before giving up. If
 # the display never settles to K agreeing reads within this many polls, we
 # abandon the candidate (return None, reset) rather than latch garbage.
-SETTLE_MAX_POLLS: int = 12
+# Raised from 12: polls are ~5x faster now, so 12 polls is a far shorter
+# wall-clock window than it used to be. SETTLE_MAX_S is the real budget.
+SETTLE_MAX_POLLS: int = 24
 
 # Per-field tolerance for "agrees with previous read" during stability gating.
 # Generous enough to absorb +/-1 OCR jitter on the last digit, tight enough
@@ -311,6 +346,20 @@ def _validate_metrics(
                 logger.debug("Metric '%s' = %.2f out of range", key, value)
                 return False
 
+    # Smash factor must equal ball_speed / club_speed. All three are OCR'd
+    # INDEPENDENTLY, so this is real external evidence against a mid-animation
+    # misread of any one of them — something _reads_agree cannot provide
+    # (it only proves two reads matched each other, not that they are right).
+    cs = metrics.get("club_speed")
+    bs = metrics.get("ball_speed")
+    sf = metrics.get("smash_factor")
+    if cs and bs and sf and cs > 0 and abs(sf - bs / cs) > 0.15:
+        logger.warning(
+            "Smash inconsistency: OCR'd %.2f vs ball/club %.1f/%.1f=%.2f "
+            "— rejecting shot", sf, bs, cs, bs / cs,
+        )
+        return False
+
     # Cross-field coherence (club-agnostic) — rejects tonight's signature.
     if not _coherence_ok(metrics):
         logger.warning(
@@ -345,6 +394,9 @@ class MevoDetector:
         self._prev_crops: dict[str, np.ndarray] | None = None
         self._prev_metrics: dict[str, float | None] = {}
         self._baseline_captured: bool = False
+        # Set by reset_baseline() (any thread), consumed at the top of poll()
+        # on the mevo thread.  See reset_baseline() for why this is a flag.
+        self._needs_rebaseline: bool = False
 
         # --- Stability gating state ---
         # Once a display change is detected we enter a "confirming" window and
@@ -354,6 +406,31 @@ class MevoDetector:
         self._settle_polls: int = 0
         # Buffer of recent agreeing reads (the candidate shot, growing toward K).
         self._stable_buffer: list[dict[str, float | None]] = []
+        # perf_counter when the CURRENT agreeing streak began — the streak must
+        # span >= _min_settle_s of wall clock before it can be committed.
+        self._stable_buffer_t0: float = 0.0
+        # Configurable so it can be lowered once FS Golf's animation time is
+        # actually measured, and set to 0.0 in tests that exercise the
+        # poll-count semantics directly.
+        self._min_settle_s: float = float(
+            getattr(settings, "min_settle_s", MIN_SETTLE_S),
+        )
+        # Guard against a config value that can never be satisfied: if the
+        # floor exceeds the abandon budget, EVERY shot is discarded with a
+        # "display never settled" warning that misblames FS Golf. Raising the
+        # floor "to be safe" is a very plausible edit, so widen the budget to
+        # match rather than silently losing shots. 0.0 stays valid — it is the
+        # documented test escape hatch.
+        if self._min_settle_s < 0.0:
+            self._min_settle_s = MIN_SETTLE_S
+        self._settle_max_s: float = max(SETTLE_MAX_S, self._min_settle_s * 2.0)
+        # min_settle_s == 0.0 is the documented escape hatch that disables
+        # wall-clock gating (tests exercising the poll-count half of the gate),
+        # so it must disable the streak floor too — otherwise those callers
+        # silently keep a 1.25s requirement they explicitly opted out of.
+        self._min_streak_span_s: float = (
+            MIN_STREAK_SPAN_S if self._min_settle_s > 0.0 else 0.0
+        )
         # perf_counter when the current confirming window opened — for the
         # "confirmed in X.XXs" latency log so the gate's cost is measurable.
         self._confirm_start_time: float = 0.0
@@ -372,6 +449,27 @@ class MevoDetector:
         minimal latency between the shot landing and being sent to GSPro.
         """
         return self._confirming
+
+    def reset_baseline(self) -> None:
+        """Request a re-baseline on the next poll.
+
+        Call this when resuming from a pause.  The poll loop does not capture
+        while paused, so ``_prev_crops`` is stale on resume: the next poll sees
+        a huge MSE, opens a confirming window, and burns a full OCR cycle
+        re-confirming the OLD display.  Worse, if FS Golf registered anything
+        while we were paused, ``_values_changed`` is True and that stale shot
+        would be EMITTED to GSPro.  Re-baselining forces the baseline path,
+        which returns None.
+
+        THREADING: this is called from the GSPro listener thread on a club
+        change, while ``poll()`` may be mid-flight on the mevo thread.  It must
+        therefore only set a flag — mutating ``_prev_crops`` here raced with
+        ``_compute_roi_mse`` and crashed the mevo thread with
+        ``AttributeError: 'NoneType' object has no attribute 'get'``, killing
+        full-swing detection for the rest of the session while the UI still
+        showed "Watching...".  ``poll()`` consumes the flag on its own thread.
+        """
+        self._needs_rebaseline = True
 
     def set_expected_club(self, club: str | None) -> None:
         """Set the GSPro club code used by the plausibility gate.
@@ -405,6 +503,8 @@ class MevoDetector:
             if metrics.get(key) is None:
                 return False
         for name in self._configured_names:
+            if name in NON_BLOCKING_FIELDS:
+                continue  # legitimately absent on some shots — sent as 0.0
             if metrics.get(name) is None:
                 logger.debug(
                     "Configured field '%s' failed OCR — holding shot "
@@ -435,6 +535,7 @@ class MevoDetector:
         self._confirming = False
         self._settle_polls = 0
         self._stable_buffer = []
+        self._stable_buffer_t0 = 0.0
 
     def _compute_roi_mse(self, frame: np.ndarray) -> float:
         """Compute MSE over ROI regions only (faster than full-frame)."""
@@ -488,6 +589,15 @@ class MevoDetector:
         club = expected_club if expected_club is not None else self._expected_club
         use_loft = loft if loft is not None else self._expected_loft
 
+        # Consume a pending re-baseline request on THIS thread (see
+        # reset_baseline) so no other thread mutates state mid-poll.
+        if self._needs_rebaseline:
+            self._needs_rebaseline = False
+            self._prev_crops = None
+            self._prev_frame = None
+            self._baseline_captured = False
+            self._reset_confirm()
+
         frame = self._capture.capture()
         if frame is None:
             return None
@@ -536,7 +646,13 @@ class MevoDetector:
         # candidate — reset the streak (no fabricated zeros, no partial shot).
         if not self._read_is_candidate(metrics):
             self._stable_buffer = []
-            if self._settle_polls >= SETTLE_MAX_POLLS:
+            # Enforce the WALL-CLOCK budget here too, not just the poll count.
+            # With a fast OCR backend 24 polls is ~12s of sustained capture+OCR
+            # on the 3 cores that also carry the 60fps grab thread, and a
+            # permanently-unreadable panel would hold the window open far past
+            # the advertised SETTLE_MAX_S.
+            elapsed = time.perf_counter() - self._confirm_start_time
+            if self._settle_polls >= SETTLE_MAX_POLLS or elapsed >= self._settle_max_s:
                 self._reset_confirm()
             return None
 
@@ -545,12 +661,43 @@ class MevoDetector:
             self._stable_buffer.append(metrics)
         else:
             self._stable_buffer = [metrics]
+            self._stable_buffer_t0 = time.perf_counter()
 
-        if len(self._stable_buffer) < STABILITY_K:
-            if self._settle_polls >= SETTLE_MAX_POLLS:
+        # Commit requires BOTH:
+        #   (a) K agreeing reads          — value-level stability, and
+        #   (b) >= _min_settle_s since the display FIRST changed this window
+        #                                 — proof FS Golf finished painting.
+        #
+        # (b) is anchored to the START of the confirming window, not to the
+        # last value change, because FS Golf does not animate: it PAINTS THE
+        # PANEL TWICE (measured over 6 shots — final paint at 0.864-1.198s
+        # after the first, nothing afterwards).  The hazard is therefore "is
+        # another paint still coming?", which is a function of time since the
+        # FIRST paint — not of how long the current values have held.  Anchoring
+        # to the buffer reset made the wait gap+floor (~2.6s) for no extra
+        # safety.  _min_settle_s must stay comfortably above the worst observed
+        # first->final paint gap; re-measure if FS Golf is updated.
+        now = time.perf_counter()
+        span = now - self._confirm_start_time
+        # The agreeing streak ITSELF must also span the worst first->final
+        # paint gap.  Without this, a window that was already open when paint 1
+        # landed (e.g. the panel was briefly unreadable) satisfies `span` on
+        # age alone, and K=3 fast reads all fit inside the 1.198s gap — so the
+        # PRELIMINARY paint commits, and the final paint then emits as a
+        # SECOND, phantom shot.  `span` is kept as well: it is anchored to the
+        # exact quantity that was measured.
+        streak_span = now - self._stable_buffer_t0
+        if (
+            len(self._stable_buffer) < STABILITY_K
+            or span < self._min_settle_s
+            or streak_span < self._min_streak_span_s
+        ):
+            elapsed = now - self._confirm_start_time
+            if self._settle_polls >= SETTLE_MAX_POLLS or elapsed >= self._settle_max_s:
                 logger.warning(
-                    "Mevo display never settled within %d polls — discarding "
-                    "candidate (last read: %s)", SETTLE_MAX_POLLS, metrics,
+                    "Mevo display never settled within %d polls / %.1fs — "
+                    "discarding candidate (last read: %s)",
+                    self._settle_polls, elapsed, metrics,
                 )
                 self._reset_confirm()
             return None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 
 from birdman_putting.camera import Camera
@@ -54,7 +55,7 @@ class TestValidateFrames:
         mock_cap.read.return_value = (True, good_frame)
         camera._cap = mock_cap
 
-        assert camera._validate_frames() is True
+        assert camera._validate_frames() == "ok"
 
     @patch("birdman_putting.camera.time.sleep")
     def test_black_frames_fail(self, mock_sleep: MagicMock) -> None:
@@ -64,7 +65,7 @@ class TestValidateFrames:
         mock_cap.read.return_value = (True, black_frame)
         camera._cap = mock_cap
 
-        assert camera._validate_frames() is False
+        assert camera._validate_frames() == "black"
 
     @patch("birdman_putting.camera.time.sleep")
     def test_warmup_then_good_frame_passes(self, mock_sleep: MagicMock) -> None:
@@ -79,7 +80,7 @@ class TestValidateFrames:
         mock_cap.read.side_effect = frames
         camera._cap = mock_cap
 
-        assert camera._validate_frames() is True
+        assert camera._validate_frames() == "ok"
 
     @patch("birdman_putting.camera.time.sleep")
     def test_no_frames_fail(self, mock_sleep: MagicMock) -> None:
@@ -88,13 +89,13 @@ class TestValidateFrames:
         mock_cap.read.return_value = (False, None)
         camera._cap = mock_cap
 
-        assert camera._validate_frames() is False
+        assert camera._validate_frames() == "none"
 
     @patch("birdman_putting.camera.time.sleep")
     def test_no_cap_fails(self, mock_sleep: MagicMock) -> None:
         camera = self._make_camera()
         camera._cap = None
-        assert camera._validate_frames() is False
+        assert camera._validate_frames() == "none"
 
 
 def _make_camera(**kwargs: object) -> Camera:
@@ -342,3 +343,74 @@ class TestHealthDefaults:
         assert camera.consecutive_failures == 0
         assert camera._read_failed is False
         assert camera.is_healthy is True
+
+
+class TestPropertySetOrdering:
+    """MSMF property sets must be conditional and precede the first read.
+
+    Pins two measured landmines: (a) redundant width/height sets cost tens of
+    seconds of media-type renegotiation; (b) any get/set AFTER the first
+    read() breaks FPS renegotiation ("initStream Failed to select stream 0").
+    Protected until now by nothing but a comment.
+    """
+
+    @staticmethod
+    def _camera_with_mock(native_fps: float):
+        from unittest.mock import MagicMock
+
+        from birdman_putting.config import CameraSettings
+
+        cam = Camera(CameraSettings(webcam_index=0, width=640, height=480))
+        cap = MagicMock()
+        cap.isOpened.return_value = True
+        calls: list[tuple[str, object]] = []
+        props = {
+            cv2.CAP_PROP_FRAME_WIDTH: 640.0,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480.0,
+            cv2.CAP_PROP_FPS: native_fps,
+        }
+
+        def fake_get(prop):
+            calls.append(("get", prop))
+            return props.get(prop, 0.0)
+
+        def fake_set(prop, value):
+            calls.append(("set", prop))
+            props[prop] = float(value)
+            return True
+
+        def fake_read():
+            calls.append(("read", None))
+            return True, np.full((480, 640, 3), 128, np.uint8)
+
+        cap.get.side_effect = fake_get
+        cap.set.side_effect = fake_set
+        cap.read.side_effect = fake_read
+        return cam, cap, calls
+
+    def _run_open_default(self, native_fps: float, validate: bool = False):
+        from unittest.mock import patch
+
+        cam, cap, calls = self._camera_with_mock(native_fps)
+        with patch("cv2.VideoCapture", return_value=cap):
+            assert cam._try_open_default() is True
+            if validate:
+                # reads happen in _validate_frames, after the sets
+                assert cam._validate_frames() == "ok"
+        return calls
+
+    def test_no_sets_when_native_matches(self):
+        calls = self._run_open_default(native_fps=60.0)
+        sets = [c for c in calls if c[0] == "set" and c[1] != cv2.CAP_PROP_HW_ACCELERATION]
+        assert sets == [], f"unexpected sets: {sets}"
+
+    def test_only_fps_set_when_fps_differs(self):
+        calls = self._run_open_default(native_fps=30.0)
+        sets = [c[1] for c in calls if c[0] == "set" and c[1] != cv2.CAP_PROP_HW_ACCELERATION]
+        assert sets == [cv2.CAP_PROP_FPS], sets
+
+    def test_all_property_access_precedes_first_read(self):
+        calls = self._run_open_default(native_fps=30.0, validate=True)
+        first_read = next(i for i, c in enumerate(calls) if c[0] == "read")
+        late = [c for c in calls[first_read:] if c[0] in ("set", "get")]
+        assert late == [], f"get/set after first read: {late}"
